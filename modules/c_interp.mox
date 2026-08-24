@@ -1,0 +1,33 @@
+import "./internal.mox";
+import "./context.mox";
+
+// interoperability layer with C
+
+fn c_strlen(s: *u8): i64 {
+    it := s;
+    while (it.* != 0) {
+        it = byte_offset(it, 1);
+    }
+    return (it.cast(u64) - s.cast(u64)).cast(i64);
+}
+
+fn c_strlen(src: *u8, max_len: i64): i64 {
+    n: i64 = 0;
+    while (n < max_len) {
+        if (ty_offset(src, n).* == 0) { break; }
+        n += 1;
+    }
+    return n;
+}
+
+// useful when you need to pass null terminated C string to C api
+fn #temp_c_string(str: []u8): *u8 {
+    tmp := #temp_buffer(str.len + 1);
+    n := str.len;
+    if (n > 0 && str[n - 1] == 0) {
+        return str.ptr;
+    }
+    mem_copy(tmp.ptr, str.ptr, str.len);
+    tmp[n] = 0;
+    return tmp.ptr;
+}

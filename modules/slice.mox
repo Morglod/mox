@@ -1,0 +1,115 @@
+import "internal.mox";
+
+// struct Slice($T) {
+//     ptr: *$T;
+//     len: i64;
+// }
+
+fn index_of(s: []$T, val: $T, from: i64 = 0): i64 {
+    for (i : it_range(from, s.len)) {
+        if (s[i] == val) { return i; }
+    }
+    return -1;
+}
+
+fn index_of_last(s: []$T, val: $T, before: i64): i64 {
+    for (i : it_range_reverse(0i64, min(before, s.len))) {
+        if (s[i] == val) { return i; }
+    }
+    return -1;
+}
+
+fn index_of_last(s: []$T, val: $T): i64 {
+    return index_of_last(s, val, s.len);
+}
+
+fn count_of(s: []$T, val: $T): i64 {
+    n: i64 = 0;
+    it := s.ptr;
+    end_ptr := ty_offset(s.ptr, s.len);
+    while (it != end_ptr) {
+        if (it.* == val) { n += 1; }
+        it = ty_offset(it, 1);
+    }
+    return n;
+}
+
+fn empty_slice($T: __type_ptr): []$T {
+    out: []$T = #memory_garbage;
+    out.ptr = nullptr($T);
+    out.len = 0;
+    return out;
+}
+
+fn slice(arr: *[$N]$T, from: i64, len: i64): []$T {
+    from = min(from, arr.len);
+    out: []$T = #memory_garbage;
+    out.ptr = ty_offset(arr.ptr, from);
+    out.len = min(len, arr.len - from);
+    return out;
+}
+
+fn slice(arr: *[$N]$T): []$T {
+    out: []$T = #memory_garbage;
+    out.ptr = arr.ptr;
+    out.len = arr.len;
+    return out;
+}
+
+fn slice(s: []$T, from: i64, len: i64): []$T {
+    from = min(from, s.len);
+    out: []$T = #memory_garbage;
+    out.ptr = ty_offset(s.ptr, from);
+    out.len = min(len, s.len - from);
+    return out;
+}
+
+fn slice(ptr: *$T, len: i64 = 1): []$T {
+    out: []$T = #memory_garbage;
+    out.ptr = ptr;
+    out.len = len;
+    return out;
+}
+
+fn replace_inplace(s: []$T, from: $T, to: $T): i64 {
+    n: i64 = 0;
+    it := s.ptr;
+    end_ptr := ty_offset(s.ptr, s.len);
+    while (it != end_ptr) {
+        if (it.* == from) {
+            it.* = to;
+            n += 1;
+        }
+        it = ty_offset(it, 1);
+    }
+    return n;
+}
+
+// set every element to val
+fn fill(s: []$T, val: $T): void {
+    it := s.ptr;
+    end_ptr := ty_offset(s.ptr, s.len);
+    while (it != end_ptr) {
+        it.* = val;
+        it = ty_offset(it, 1);
+    }
+}
+
+fn remove_all_inplace(s: []$T, val: $T): []$T {
+    w := index_of(s, val);
+    if (w < 0) { return s; }
+    for (i : it_range(w + 1, s.len)) {
+        if (s[i] != val) {
+            s[w] = s[i];
+            w += 1;
+        }
+    }
+    return slice(s, 0, w);
+}
+
+fn cast(slice: []$T, $DST_T: __type_ptr): []$DST_T {
+    new_slice : []$DST_T = #memory_garbage;
+    new_slice.ptr = slice.ptr .cast($DST_T);
+    new_slice.len = slice.len;
+    return new_slice;
+}

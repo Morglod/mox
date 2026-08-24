@@ -1,0 +1,205 @@
+import "./internal.mox";
+import "./alloc.mox";
+import "./arena.mox";
+import "./format.mox";
+import "./context.mox";
+import "./slice.mox";
+import "./buffer_builder.mox";
+import "./c_interp.mox";
+
+// ASCII only for now
+
+const NEWLINE         : u8 = char("\n");
+const CARRIAGE_RETURN : u8 = char("\r");
+const TAB             : u8 = char("\t");
+
+fn is_digit_char(b: u8): bool {
+    return (b >= char("0")) && (b <= char("9"));
+}
+
+fn is_letter_char(b: u8): bool {
+    return ((b >= char("a")) && (b <= char("z"))) || ((b >= char("A")) && (b <= char("Z")));
+}
+
+fn is_space_char(b: u8): bool {
+    return (b == char(" ")) || (b == char("\t")) || (b == char("\n")) || (b == char("\r"));
+}
+
+fn to_lower_char(b: u8): u8 {
+    if ((b >= char("A")) && (b <= char("Z"))) { return b + 32; }
+    return b;
+}
+
+fn to_upper_char(b: u8): u8 {
+    if ((b >= char("a")) && (b <= char("z"))) { return b - 32; }
+    return b;
+}
+
+// Case blind for ascii letters.
+fn index_of_ignore_case(hay: []u8, needle: []u8, from: i64 = 0): i64 {
+    if (needle.len > hay.len) { return -1; }
+    for (start : it_range(from, hay.len - needle.len + 1)) {
+        matched := true;
+        for (i : it_range(needle.len)) {
+            if (to_lower_char(hay[start + i]) != to_lower_char(needle[i])) {
+                matched = false;
+                break;
+            }
+        }
+        if (matched) { return start; }
+    }
+    return -1;
+}
+
+const String := #type []u8;
+
+fn make_string(s: *u8, len: i64): String {
+    return slice(s, len);
+}
+
+fn make_string($s: *u8): String {
+    const len := c_strlen(s);
+    return make_string(s, len);
+}
+
+// TODO: trim_left / trim_right / trim
+
+struct StringBuilder {
+    total_size: i64;
+    bb: BufferBuilder(String);
+}
+
+fn init(sb: *StringBuilder, arena: *Alloc = get_context_temp_arena_as_alloc()): void {
+    sb.total_size = 0;
+    init(sb.bb.^, arena);
+}
+
+fn reset(sb: *StringBuilder) {
+    sb.total_size = 0;
+    reset(sb.bb.^);
+}
+
+fn destroy(sb: *StringBuilder): void {
+    sb.total_size = 0;
+    destroy(sb.bb.^);
+}
+
+// builder keeps `s` by reference, it does not copy the bytes
+fn push(sb: *StringBuilder, s: String): void {
+    push(sb.bb.^, s);
+    sb.total_size += s.len;
+}
+
+fn format(sb: *StringBuilder, $fmt_str: []u8, values: $T): void {
+    len := format_len($fmt_str, values);
+    buf := mem_alloc_slice(sb.bb.arena, u8, len, 1);
+    format(buf, 0, $fmt_str, values);
+    push(sb, buf);
+}
+
+fn push_copy(sb: *StringBuilder, s: String, alloc: *Alloc = get_context_temp_arena_as_alloc()): void {
+    if (s.len == 0) {
+        push(sb, empty_slice(u8));
+        return;
+    }
+    copied := mem_alloc_slice(alloc, u8, s.len, 1);
+    mem_copy(copied, s);
+    push(sb, copied);
+}
+
+fn push_byte(sb: *StringBuilder, b: u8): void {
+    ptr := mem_alloc(sb.bb.arena, 1, 1);
+    ptr.* = b;
+    push(sb, make_string(ptr, 1));
+}
+
+// copy s to dst, return the position right after it
+fn _copy_advance(dst: *u8, s: String): *u8 {
+    if (s.len == 0) { return dst; }
+    mem_copy(dst, s.ptr, s.len);
+    return byte_offset(dst, s.len);
+}
+
+fn finalize(sb: *StringBuilder, alloc: *Alloc = get_context_alloc(), do_destroy: bool = true): String {
+    if (sb.total_size == 0) {
+        if (do_destroy) { destroy(sb.bb.^); }
+        return empty_slice(u8);
+    }
+
+    ptr := mem_alloc(alloc, sb.total_size, 1);
+
+    it := ptr;
+    for (s : iterate(sb.bb.^)) {
+        it = _copy_advance(it, s.*);
+    }
+
+    result: String = make_string(ptr, sb.total_size);
+    if (do_destroy) {
+        destroy(sb.bb.^);
+        sb.total_size = 0;
+    }
+    return result;
+}
+
+struct StringJoinParams {
+    pre: String;
+    sep: String;
+    post: String;
+}
+
+fn finalize_join(sb: *StringBuilder, params: StringJoinParams, alloc: *Alloc = get_context_alloc(), do_destroy: bool = true): String {
+    elem_count := sb.bb.total_count;
+    sep_total: i64 = 0;
+    if (elem_count > 1) { sep_total = params.sep.len * (elem_count - 1); }
+    total := params.pre.len + sb.total_size + sep_total + params.post.len;
+
+    if (total == 0) {
+        if (do_destroy) { destroy(sb.bb.^); }
+        return empty_slice(u8);
+    }
+
+    ptr := mem_alloc(alloc, total, 1);
+
+    it := _copy_advance(ptr, params.pre);
+    for (s, i : iterate(sb.bb.^)) {
+        if (i > 0) { it = _copy_advance(it, params.sep); }
+        it = _copy_advance(it, s.*);
+    }
+    it = _copy_advance(it, params.post);
+
+    if (do_destroy) {
+        destroy(sb.bb.^);
+        sb.total_size = 0;
+    }
+    return make_string(ptr, total);
+}
+
+// TODO: refactor this out
+struct FixedBuf { ptr: *u8; cap: u32; len: u32; };
+
+fn fixed_buf(buf: *u8, cap: u32): FixedBuf {
+    fb: FixedBuf = #memory_garbage;
+    fb.ptr = buf;
+    fb.cap = cap;
+    fb.len = 0;
+    return fb;
+}
+
+fn push(fb: *FixedBuf, s: []u8): void {
+    for (b : iterate(s)) {
+        if (fb.len >= fb.cap) { break; }
+        push_byte(fb, b.*);
+    }
+}
+
+fn push_byte(fb: *FixedBuf, b: u8): void {
+    if (fb.len >= fb.cap) { return; }
+    ty_offset(fb.ptr, fb.len.cast(u64)).* = b;
+    fb.len += 1;
+}
+
+fn push_nul(fb: *FixedBuf): void {
+    if (fb.cap == 0) { return; }
+    at := min(fb.len, fb.cap - 1);
+    ty_offset(fb.ptr, at.cast(u64)).* = 0;
+}

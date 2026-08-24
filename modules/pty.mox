@@ -1,0 +1,10 @@
+import "./internal.mox";
+
+#run {
+    import_code : []u8 = "import \"./pty_posix.mox\" #export;";
+    if (mox_platform == MoxPlatform.x86_64_win) {
+        import_code = "import \"./pty_win.mox\" #export;";
+    }
+
+    #land_ast __compiler_parse(import_code);
+}

@@ -1,0 +1,99 @@
+import "./internal.mox";
+
+// writes 1-4 bytes at dst, returns how many were written
+fn utf8_encode(cp: u32, dst: *u8): u32 {
+    if (cp < 128) {
+        dst.* = cp.cast(u8);
+        return 1;
+    }
+    if (cp < 2048) {
+        b0: u32 = 192 + #shr(cp, 6);
+        b1: u32 = 128 + (cp & 63);
+        dst.* = b0.cast(u8);
+        ty_offset(dst, 1).* = b1.cast(u8);
+        return 2;
+    }
+    if (cp < 65536) {
+        b0: u32 = 224 + #shr(cp, 12);
+        b1: u32 = 128 + (#shr(cp, 6) & 63);
+        b2: u32 = 128 + (cp & 63);
+        dst.* = b0.cast(u8);
+        ty_offset(dst, 1).* = b1.cast(u8);
+        ty_offset(dst, 2).* = b2.cast(u8);
+        return 3;
+    }
+    b0: u32 = 240 + #shr(cp, 18);
+    b1: u32 = 128 + (#shr(cp, 12) & 63);
+    b2: u32 = 128 + (#shr(cp, 6) & 63);
+    b3: u32 = 128 + (cp & 63);
+    dst.* = b0.cast(u8);
+    ty_offset(dst, 1).* = b1.cast(u8);
+    ty_offset(dst, 2).* = b2.cast(u8);
+    ty_offset(dst, 3).* = b3.cast(u8);
+    return 4;
+}
+
+// how many bytes utf8_encode writes for this codepoint
+fn utf8_encoded_len(cp: u32): i64 {
+    if (cp < 128) { return 1; }
+    if (cp < 2048) { return 2; }
+    if (cp < 65536) { return 3; }
+    return 4;
+}
+
+// Byte count of the UTF-8 char starting with this lead byte, 1 for a bad lead.
+// 194 is the first valid 2 byte lead: below it a non ascii byte is a stray continuation (128..191) or an overlong lead (192, 193), taken as one raw byte.
+// utf8_decode uses the same lead table.
+fn utf8_seq_len(lead_byte: u8): i64 {
+    if (lead_byte < 194) { return 1; }
+    if (lead_byte < 224) { return 2; }
+    if (lead_byte < 240) { return 3; }
+    return 4;
+}
+
+// Reads one codepoint at byte index i, returns how many bytes it took.
+// Malformed input (stray continuation, overlong lead, missing continuation, sequence cut by the end of the buffer) yields cp = the raw lead byte and a step of 1, so the caller always moves forward.
+fn utf8_decode(ptr: *u8, len: i64, i: i64, cp_out: *u32): i64 {
+    b0 := ty_offset(ptr, i).*;
+    // ascii, and also the fallback value for every malformed case below
+    cp_out.* = b0.cast(u32);
+    // ascii (< 128), stray continuation (128..191), overlong lead (192, 193)
+    if (b0 < 194) { return 1; }
+
+    left := len - i;
+
+    if (b0 < 224) {
+        if (left < 2) { return 1; }
+        c1 := ty_offset(ptr, i + 1).*;
+        if ((c1 & 192) != 128) { return 1; }
+        cp_out.* = #shl((b0 & 31).cast(u32), 6) + (c1 & 63).cast(u32);
+        return 2;
+    }
+
+    if (b0 < 240) {
+        if (left < 3) { return 1; }
+        c1 := ty_offset(ptr, i + 1).*;
+        c2 := ty_offset(ptr, i + 2).*;
+        if (((c1 & 192) != 128) || ((c2 & 192) != 128)) { return 1; }
+        cp_out.* = #shl((b0 & 15).cast(u32), 12) + #shl((c1 & 63).cast(u32), 6) + (c2 & 63).cast(u32);
+        return 3;
+    }
+
+    if (left < 4) { return 1; }
+    c1 := ty_offset(ptr, i + 1).*;
+    c2 := ty_offset(ptr, i + 2).*;
+    c3 := ty_offset(ptr, i + 3).*;
+    if (((c1 & 192) != 128) || ((c2 & 192) != 128) || ((c3 & 192) != 128)) { return 1; }
+    cp_out.* = #shl((b0 & 7).cast(u32), 18) + #shl((c1 & 63).cast(u32), 12) + #shl((c2 & 63).cast(u32), 6) + (c3 & 63).cast(u32);
+    return 4;
+}
+
+// Slice variants of the raw pointer APIs.
+
+fn utf8_decode(text: []u8, i: i64, cp_out: *u32): i64 { return utf8_decode(text.ptr, text.len, i, cp_out); }
+
+// pointer form result widened to i64 for index math
+fn utf8_encode(cp: u32, dst: []u8): i64 {
+    n := utf8_encode(cp, dst.ptr);
+    return n.cast(i64);
+}

@@ -1,0 +1,490 @@
+import "./internal.mox";
+import "./slice.mox";
+import "./vt_input.mox"; // shared Event model + the VT byte parser
+import "./context.mox";
+import "./c_interp.mox";
+
+// Stored as fd+1
+const OsFile := #type u64;
+
+// POSIX (linux / x86_64 sysv) side of the portable OS API. Import "./os.mox", it lands the module matching the build target.
+// Signatures must match the portable section of os_win.mox exactly.
+// Constants are linux/x86_64 values, WSL is the reference target. macOS needs different values for some, not done yet.
+
+// libc declarations
+
+#linkc("getpagesize") fn posix_getpagesize(): i32;
+#linkc("mmap")     fn posix_mmap(addr: *u8, len: u64, prot: i32, flags: i32, fd: i32, off: i64): *u8;
+#linkc("munmap")   fn posix_munmap(addr: *u8, len: u64): i32;
+#linkc("mprotect") fn posix_mprotect(addr: *u8, len: u64, prot: i32): i32;
+#linkc("madvise")  fn posix_madvise(addr: *u8, len: u64, advice: i32): i32;
+
+#linkc("open")   fn posix_open(path: *u8, flags: i32, mode: u32): i32;
+#linkc("close")  fn posix_close(fd: i32): i32;
+#linkc("read")   fn posix_read(fd: i32, buf: *u8, n: u64): i64;
+#linkc("write")  fn posix_write(fd: i32, buf: *u8, n: u64): i64;
+#linkc("lseek")  fn posix_lseek(fd: i32, off: i64, whence: i32): i64;
+#linkc("unlink") fn posix_unlink(path: *u8): i32;
+#linkc("getcwd") fn posix_getcwd(buf: *u8, size: u64): *u8;
+#linkc("fcntl")  fn posix_fcntl(fd: i32, cmd: i32, arg: i32): i32;
+#linkc("ioctl")  fn posix_ioctl(fd: i32, req: u64, arg: *u8): i32;
+
+struct PosixPollFd { fd: i32; events: i16; revents: i16; };
+#linkc("poll") fn posix_poll(fds: *PosixPollFd, nfds: u64, timeout_ms: i32): i32;
+
+// struct termios: 60 bytes on glibc, opaque blob
+#linkc("tcgetattr")  fn posix_tcgetattr(fd: i32, t: *u8): i32;
+#linkc("tcsetattr")  fn posix_tcsetattr(fd: i32, actions: i32, t: *u8): i32;
+#linkc("cfmakeraw")  fn posix_cfmakeraw(t: *u8): void;
+
+// glibc x86_64 dirent64: d_name at offset 19
+struct PosixDirent {
+    d_ino: u64;
+    d_off: i64;
+    d_reclen: u16;
+    d_type: u8;
+    d_name: [256]u8;
+};
+#linkc("opendir")  fn posix_opendir(path: *u8): *u8;
+#linkc("access")   fn posix_access(path: *u8, mode: i32): i32; // mode 0 = F_OK
+#linkc("readdir")  fn posix_readdir(d: *u8): *PosixDirent;
+#linkc("closedir") fn posix_closedir(d: *u8): i32;
+
+#linkc("posix_openpt") fn posix_openpt(flags: i32): i32;
+#linkc("grantpt")  fn posix_grantpt(fd: i32): i32;
+#linkc("unlockpt") fn posix_unlockpt(fd: i32): i32;
+#linkc("ptsname")  fn posix_ptsname(fd: i32): *u8;
+#linkc("fork")     fn posix_fork(): i32;
+#linkc("setsid")   fn posix_setsid(): i32;
+#linkc("dup2")     fn posix_dup2(oldfd: i32, newfd: i32): i32;
+#linkc("execvp")   fn posix_execvp(file: *u8, argv: *u8): i32; // argv: char* const argv[]
+#linkc("_exit")    fn posix_exit_now(code: i32): void;
+#linkc("kill")     fn posix_kill(pid: i32, sig: i32): i32;
+#linkc("waitpid")  fn posix_waitpid(pid: i32, status: *i32, options: i32): i32;
+#linkc("system")   fn posix_system(cmd: *u8): i32; // returns a wait status, not an exit code
+
+// linux/x86_64 constants
+
+const POSIX_PROT_NONE        : i32 = 0;
+const POSIX_PROT_RW          : i32 = 3;    // PROT_READ|PROT_WRITE
+const POSIX_MAP_PRIVATE_ANON : i32 = 34;   // MAP_PRIVATE|MAP_ANONYMOUS
+const POSIX_MADV_DONTNEED    : i32 = 4;
+const POSIX_NO_FD            : i32 = -1;
+
+const POSIX_O_RDONLY  : i32 = 0;
+const POSIX_O_WRONLY_CREAT_TRUNC : i32 = 577; // O_WRONLY|O_CREAT|O_TRUNC
+const POSIX_O_RDWR    : i32 = 2;
+const POSIX_O_NOCTTY  : i32 = 256;
+const POSIX_O_NONBLOCK: i32 = 2048;
+const POSIX_MODE_0644 : u32 = 420;
+
+const POSIX_SEEK_SET : i32 = 0;
+const POSIX_SEEK_CUR : i32 = 1;
+const POSIX_SEEK_END : i32 = 2;
+
+const POSIX_F_SETFL  : i32 = 4;
+
+const POSIX_TCSANOW      : i32 = 0;
+const POSIX_TIOCGWINSZ   : u64 = 21523; // 0x5413
+const POSIX_TIOCSWINSZ   : u64 = 21524; // 0x5414
+const POSIX_TIOCSCTTY    : u64 = 21518; // 0x540E
+const POSIX_POLLIN       : i16 = 1;
+
+const POSIX_WNOHANG : i32 = 1;
+const POSIX_SIGKILL : i32 = 9;
+const POSIX_DT_DIR  : u8 = 4;
+
+const POSIX_MAP_FAILED : u64 = 18446744073709551615; // (void*)-1
+
+struct PosixWinSize { ws_row: u16; ws_col: u16; ws_xpixel: u16; ws_ypixel: u16; };
+
+// ---- portable OS API ----
+
+// virtual memory pages
+
+fn os_get_memory_page_size(): i64 {
+    return posix_getpagesize().cast(i64);
+}
+
+fn os_mem_virtual_reserve(size: i64): *u8 {
+    p := posix_mmap(nullptr(u8), size.cast(u64), POSIX_PROT_NONE, POSIX_MAP_PRIVATE_ANON, POSIX_NO_FD, 0);
+    if (p.cast(u64) == POSIX_MAP_FAILED) { return nullptr(u8); }
+    return p;
+}
+
+fn os_mem_virtual_commit(ptr: *u8, size: i64): bool {
+    return posix_mprotect(ptr, size.cast(u64), POSIX_PROT_RW) == 0;
+}
+
+fn os_mem_virtual_decommit(ptr: *u8, size: i64): bool {
+    posix_madvise(ptr, size.cast(u64), POSIX_MADV_DONTNEED);
+    return posix_mprotect(ptr, size.cast(u64), POSIX_PROT_NONE) == 0;
+}
+
+fn os_mem_virtual_release(ptr: *u8, size: i64): bool {
+    return posix_munmap(ptr, size.cast(u64)) == 0;
+}
+
+// heap
+
+#linkc("posix_memalign")     fn posix_memalign(out_mem: **u8, align: u64, size: u64): i32;
+#linkc("malloc_usable_size") fn posix_malloc_usable_size(mem: *u8): u64;
+#linkc("free")               fn posix_free(mem: *u8): void;
+#linkc("abort")              fn posix_abort(): void;
+
+fn os_heap_alloc(size: i64, align: u32): *u8 {
+    a := align.cast(u64);
+    if (a < 8) { a = 8; }
+    mem: *u8 = nullptr(u8);
+    if (posix_memalign(mem.^, a, size.cast(u64)) != 0) { return nullptr(u8); }
+    return mem;
+}
+
+fn os_heap_realloc(mem: *u8, new_size: i64, align: u32): *u8 {
+    if (mem == nullptr(u8)) { return os_heap_alloc(new_size, align); }
+    nm := os_heap_alloc(new_size, align);
+    if (nm == nullptr(u8)) { return nullptr(u8); }
+    old_size := posix_malloc_usable_size(mem).cast(i64);
+    n := old_size;
+    if (new_size < n) { n = new_size; }
+    mem_copy(nm, mem, n);
+    posix_free(mem);
+    return nm;
+}
+
+fn os_heap_free(mem: *u8): void {
+    posix_free(mem);
+}
+
+fn os_abort(): void {
+    posix_abort();
+}
+
+// thread local storage: one pointer per thread per key, via pthread keys.
+// The destructor runs on thread exit if the slot holds a non-null pointer.
+
+const OsTlsKey  := #type u64;                                  // wraps a pthread_key_t (u32 on linux/glibc)
+const OsTlsDtor : __type_ptr = #type *fn(value: *u8): void;
+
+#linkc("pthread_key_create")  fn posix_pthread_key_create(key_out: *u32, dtor: OsTlsDtor): i32;
+#linkc("pthread_key_delete")  fn posix_pthread_key_delete(key: u32): i32;
+#linkc("pthread_getspecific") fn posix_pthread_getspecific(key: u32): *u8;
+#linkc("pthread_setspecific") fn posix_pthread_setspecific(key: u32, value: *u8): i32;
+
+fn os_tls_key_create(key_out: *OsTlsKey, dtor: OsTlsDtor): bool {
+    k: u32 = 0;
+    if (posix_pthread_key_create(k.^, dtor) != 0) { return false; }
+    key_out.* = k.cast(u64);
+    return true;
+}
+
+fn os_tls_key_create_simple(key_out: *OsTlsKey): bool {
+    return os_tls_key_create(key_out, nullptr(u8).cast(OsTlsDtor));
+}
+
+fn os_tls_get(key: OsTlsKey): *u8 {
+    return posix_pthread_getspecific(key.cast(u32));
+}
+
+fn os_tls_set(key: OsTlsKey, value: *u8): bool {
+    return posix_pthread_setspecific(key.cast(u32), value) == 0;
+}
+
+fn os_tls_key_free(key: OsTlsKey): bool {
+    return posix_pthread_key_delete(key.cast(u32)) == 0;
+}
+
+// console
+
+_os_saved_termios: [64]u8 = #memory_garbage;
+_os_termios_saved: bool = false;
+
+// raw mode on the controlling tty (fd 0); output is plain VT, no setup needed
+fn os_console_setup_raw(): bool {
+    if (posix_tcgetattr(0, _os_saved_termios.ptr) != 0) { return false; }
+    raw: [64]u8 = #memory_garbage;
+    mem_copy(raw.ptr, _os_saved_termios.ptr, 64);
+    posix_cfmakeraw(raw.ptr);
+    if (posix_tcsetattr(0, POSIX_TCSANOW, raw.ptr) != 0) { return false; }
+    _os_termios_saved = true;
+    return true;
+}
+
+fn os_console_restore(): void {
+    if (_os_termios_saved) {
+        posix_tcsetattr(0, POSIX_TCSANOW, _os_saved_termios.ptr);
+    }
+}
+
+fn os_console_size(cols: *u32, rows: *u32): bool {
+    ws: PosixWinSize = 0;
+    if (posix_ioctl(1, POSIX_TIOCGWINSZ, ws.^.cast(*u8)) != 0) { return false; }
+    if ((ws.ws_col == 0) || (ws.ws_row == 0)) { return false; }
+    cols.* = ws.ws_col.cast(u32);
+    rows.* = ws.ws_row.cast(u32);
+    return true;
+}
+
+fn os_stdout_write(buf: *u8, len: i64): void {
+    // write() can return short (EINTR, 2 GiB single-call cap); loop until all bytes are out
+    total: i64 = 0;
+    while (total < len) {
+        p := buf |> byte_offset(total);
+        r := posix_write(1, p, (len - total).cast(u64));
+        if (r <= 0) { break; }
+        total += r;
+    }
+}
+
+fn os_stdin_wait(ms: u32): void {
+    pfd: PosixPollFd = 0;
+    pfd.fd = 0;
+    pfd.events = POSIX_POLLIN;
+    posix_poll(pfd.^, 1, ms.cast(i32));
+}
+
+// clipboard: stubs, a bare tty has no clipboard
+
+fn os_clipboard_set(text: *u8, a: u32, b: u32): void {
+}
+
+fn os_clipboard_get(buf: *u8, cap: u32): u32 {
+    return 0;
+}
+
+// files, handle model: u64, 0 = invalid/failed, fd stored as fd+1
+
+fn os_file_open_read(path: *u8): OsFile {
+    fd := posix_open(path, POSIX_O_RDONLY, 0);
+    if (fd < 0) { return 0; }
+    return (fd + 1).cast(u64);
+}
+
+// create/truncate for writing
+fn os_file_open_write(path: *u8): OsFile {
+    fd := posix_open(path, POSIX_O_WRONLY_CREAT_TRUNC, POSIX_MODE_0644);
+    if (fd < 0) { return 0; }
+    return (fd + 1).cast(u64);
+}
+
+fn os_file_size(h: OsFile): i64 {
+    if (h == 0) { return 0; }
+    fd := (h.cast(i64) - 1).cast(i32);
+    cur := posix_lseek(fd, 0, POSIX_SEEK_CUR);
+    end := posix_lseek(fd, 0, POSIX_SEEK_END);
+    posix_lseek(fd, cur, POSIX_SEEK_SET);
+    if (end < 0) { return 0; }
+    return end;
+}
+
+// reads up to n bytes in one syscall, returns bytes read, 0 = EOF or error. A single read() transfer caps at 2 GiB.
+fn os_file_read(h: OsFile, buf: *u8, n: i64): i64 {
+    if (h == 0) { return 0; }
+    fd := (h.cast(i64) - 1).cast(i32);
+    r := posix_read(fd, buf, n.cast(u64));
+    if (r <= 0) { return 0; }
+    return r;
+}
+
+// writes all n bytes, returns how many went out (== n on success)
+fn os_file_write(h: OsFile, buf: *u8, n: i64): i64 {
+    if (h == 0) { return 0; }
+    fd := (h.cast(i64) - 1).cast(i32);
+    total: i64 = 0;
+    while (total < n) {
+        p := buf |> byte_offset(total);
+        r := posix_write(fd, p, (n - total).cast(u64));
+        if (r <= 0) { break; }
+        total += r;
+    }
+    return total;
+}
+
+fn os_file_close(h: OsFile): void {
+    if (h == 0) { return; }
+    fd := (h.cast(i64) - 1).cast(i32);
+    posix_close(fd);
+}
+
+fn os_file_delete(path: *u8): bool {
+    return posix_unlink(path) == 0;
+}
+
+// stdout as a writable OsFile
+fn os_stdout_file(): OsFile {
+    return 2; // fd 1, stored as fd+1
+}
+
+// writes the cwd NUL-terminated into buf, returns the length without the NUL
+fn os_cwd(buf: *u8, cap: i64): i64 {
+    if (posix_getcwd(buf, cap.cast(u64)) == 0) { return 0; }
+    n: i64 = 0;
+    while (n < cap) {
+        if (ty_offset(buf, n).* == 0) { break; }
+        n += 1;
+    }
+    return n;
+}
+
+// directory listing: os_dir_open(it, "<dir>") then os_dir_next(it) until false. "." and ".." are included.
+
+struct OsDirIter {
+    handle: u64;    // DIR*
+    pending: bool;  // unused, matches the os_win struct shape
+    is_dir: bool;
+    name: []u8;     // view into the readdir entry, valid until the next os_dir_next; copy to keep
+};
+
+fn os_dir_open(it: *OsDirIter, dir_path: []u8): bool {
+    d := posix_opendir(#temp_c_string(dir_path));
+    if (d == 0) {
+        it.handle = 0;
+        return false;
+    }
+    it.handle = d.cast(u64);
+    it.pending = false;
+    return true;
+}
+
+fn os_dir_next(it: *OsDirIter): bool {
+    if (it.handle == 0) { return false; }
+    e := posix_readdir(it.handle.cast(*u8));
+    if (e == 0) { return false; }
+
+    // The entry only occupies d_reclen bytes; the [256] on d_name is the header's upper bound, not real storage.
+    // Bound the scan by d_reclen (d_name starts 19 bytes in) so a missing NUL cannot walk past the entry.
+    name_cap := min(e.d_reclen.cast(i64) - 19, 256);
+    it.name.ptr = e.d_name.ptr;
+    it.name.len = c_strlen(e.d_name.ptr, name_cap);
+    it.is_dir = e.d_type == POSIX_DT_DIR;
+    return true;
+}
+
+fn os_dir_close(it: *OsDirIter): void {
+    if (it.handle != 0) {
+        posix_closedir(it.handle.cast(*u8));
+        it.handle = 0;
+    }
+}
+
+// terminal input: os_term_input_init once, then os_term_poll per frame (non-blocking, false = nothing pending).
+// Events use the shared model from vt_input.mox. Resize is found by polling the tty size, no SIGWINCH handler.
+
+struct OsTermInput {
+    parser: VtParser;
+    last_w: u32;
+    last_h: u32;
+};
+
+fn os_term_input_init(ti: *OsTermInput): void {
+    vt_parser_init(ti.parser.^);
+    w: u32 = 0;
+    h: u32 = 0;
+    os_console_size(w.^, h.^);
+    ti.last_w = w;
+    ti.last_h = h;
+}
+
+fn _os_stdin_readable(): bool {
+    pfd: PosixPollFd = 0;
+    pfd.fd = 0;
+    pfd.events = POSIX_POLLIN;
+    return posix_poll(pfd.^, 1, 0) > 0;
+}
+
+// raw stdin bytes, for terminal query replies. Never blocks.
+fn os_stdin_read_bytes(ti: *OsTermInput, buf: *u8, cap: i64): i64 {
+    if (!_os_stdin_readable()) { return 0; }
+    r := posix_read(0, buf, cap.cast(u64));
+    if (r <= 0) { return 0; }
+    return r;
+}
+
+fn os_term_poll(ti: *OsTermInput, ev: *Event): bool {
+    // buffered bytes may already hold a full event
+    if (vt_next(ti.parser.^, false, ev)) { return true; }
+
+    // pull whatever stdin has
+    tmp: [128]u8 = #memory_garbage;
+    n := os_stdin_read_bytes(ti, tmp.ptr, 128);
+    while (n > 0) {
+        vt_feed_bytes(ti.parser.^, tmp.ptr, n);
+        if (vt_next(ti.parser.^, false, ev)) { return true; }
+        n = os_stdin_read_bytes(ti, tmp.ptr, 128);
+    }
+
+    // undecided tail (lone ESC or split sequence): wait briefly for the rest, then flush so a lone ESC becomes the escape key
+    if (ti.parser.len > 0) {
+        os_stdin_wait(10);
+        n = os_stdin_read_bytes(ti, tmp.ptr, 128);
+        if (n > 0) {
+            vt_feed_bytes(ti.parser.^, tmp.ptr, n);
+            if (vt_next(ti.parser.^, false, ev)) { return true; }
+        }
+        if (vt_next(ti.parser.^, true, ev)) { return true; }
+    }
+
+    // resize: poll the tty size
+    w: u32 = 0;
+    h: u32 = 0;
+    if (os_console_size(w.^, h.^)) {
+        if ((w != ti.last_w) || (h != ti.last_h)) {
+            ti.last_w = w;
+            ti.last_h = h;
+            ev.kind = .resize;
+            ev.w = w;
+            ev.h = h;
+            ev.repeat = 1;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Slice variants that cannot live in os.mox: OsTermInput differs per platform, and #temp_c_string needs c_interp.mox which os.mox cannot import.
+// Keep in sync with os_win.mox.
+
+fn os_stdin_read_bytes(ti: *OsTermInput, buf: []u8): i64 { return os_stdin_read_bytes(ti, buf.ptr, buf.len); }
+
+fn os_file_open_read(path: []u8): OsFile {
+    return os_file_open_read(#temp_c_string(path));
+}
+fn os_file_open_write(path: []u8): OsFile {
+    return os_file_open_write(#temp_c_string(path));
+}
+fn os_file_delete(path: []u8): bool {
+    return os_file_delete(#temp_c_string(path));
+}
+
+// "file" means any non-directory entry
+
+fn os_path_exists(path: []u8): bool {
+    return posix_access(#temp_c_string(path), 0) == 0; // F_OK
+}
+fn os_dir_exists(path: []u8): bool {
+    d := posix_opendir(#temp_c_string(path));
+    if (d == 0) { return false; }
+    posix_closedir(d);
+    return true;
+}
+fn os_file_exists(path: []u8): bool {
+    if (!os_path_exists(path)) { return false; }
+    return !os_dir_exists(path);
+}
+
+// runs cmd through the platform shell (/bin/sh -c here, cmd.exe /C on win), waits, returns its exit code. -1 = could not start.
+
+fn os_exec(cmd: []u8): i32 {
+    status := posix_system(#temp_c_string(cmd));
+    if (status < 0) { return -1; }                // fork or wait failed
+    sig := status & 127;
+    if (sig != 0) { return 128 + sig; }           // killed by a signal, 128+sig shell convention
+    return #shr(status, 8) & 255;                 // WEXITSTATUS
+}
+
+fn os_stdout_write(buf: []u8): void { os_stdout_write(buf.ptr, buf.len); }
+fn os_file_read(h: OsFile, buf: []u8): i64 { return os_file_read(h, buf.ptr, buf.len); }
+fn os_file_write(h: OsFile, buf: []u8): i64 { return os_file_write(h, buf.ptr, buf.len); }
+fn os_cwd(buf: []u8): i64 { return os_cwd(buf.ptr, buf.len); }
+fn os_clipboard_set(text: []u8): void { os_clipboard_set(text.ptr, 0 .cast(u32), text.len.cast(u32)); }
+fn os_clipboard_get(buf: []u8): u32 { return os_clipboard_get(buf.ptr, buf.len.cast(u32)); }

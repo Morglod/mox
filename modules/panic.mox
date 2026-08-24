@@ -1,0 +1,35 @@
+import "./internal.mox";
+import "./os.mox";
+import "./format.mox";
+import "./slice.mox";
+
+#linkc fn __mox_panic(msg: *u8, msg_len: i64): void {
+    os_stdout_write(msg, msg_len);
+    nl := "\n";
+    os_stdout_write(nl);
+    os_abort();
+}
+
+fn __do_panic(msg: []u8, loc: MoxSourceLocation = #caller_location): void {
+    if (!__mox_debug_break(msg.ptr, msg.len)) {
+        __mox_panic(msg.ptr, msg.len);
+    }
+}
+
+fn panic($msg_format: []u8, format_values: $T, loc: MoxSourceLocation = #caller_location): void {
+    buf_mem : [1024]u8 = #memory_garbage;
+    buf := buf_mem.^ |> slice();
+
+    off := format(buf, 0, "panic at: {}:{} module_id={} offset={}\n", .{ get_source_location_file_path(loc); loc.line; loc.module_id; loc.offset; });
+    off = format(buf, off, $msg_format, format_values);
+    off = format(buf, off, "\n", .{});
+
+    buf[off] = 0;
+    buf.len = off;
+
+    __do_panic(buf, loc);
+}
+
+fn panic(msg: []u8, loc: MoxSourceLocation = #caller_location): void {
+    __do_panic(msg, loc);
+}

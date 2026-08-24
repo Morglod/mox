@@ -1,0 +1,254 @@
+import "./internal.mox";
+import "./math.mox";
+import "./panic.mox";
+import "./arena.mox";
+import "./slice.mox";
+import "./context.mox";
+import "./format_float.mox";
+
+fn _format_push(dst: []u8, offset: i64, value: u8): i64 {
+    if (offset < dst.len) {
+        dst[offset] = value;
+    }
+    return offset + 1;
+}
+
+fn _format_push_string(dst: []u8, offset: i64, str: []u8): i64 {
+    if (offset + str.len <= dst.len) {
+        mem_copy(slice(dst, offset, str.len), str);
+        return offset + str.len;
+    }
+    // does not fit: still count everything, store only what fits
+    for (ch : iterate(str)) {
+        offset = _format_push(dst, offset, ch.*);
+    }
+    return offset;
+}
+
+fn format_u64(dst: []u8, offset: i64, x: u64): i64 {
+    const zero_char := char("0").cast(u8);
+
+    rest := x / 10;
+
+    if (rest != 0) {
+        offset = format_u64(dst, offset, rest);
+    }
+
+    d := x % 10;
+    return _format_push(dst, offset, zero_char + d.cast(u8));
+}
+
+fn format_i64(dst: []u8, offset: i64, x: i64): i64 {
+    const zero_char := char("0").cast(u8);
+
+    if (x < 0) {
+        offset = _format_push(dst, offset, char("-").cast(u8));
+        // TODO: handle -min_i64, it will overflow here
+        x = -x;
+    }
+
+    rest := x / 10;
+
+    if (rest != 0) {
+        offset = format_i64(dst, offset, rest);
+    }
+
+    d := x % 10;
+    return _format_push(dst, offset, zero_char + d.cast(u8));
+}
+
+fn format_len_u64(value: u64): i64 {
+    return ilog10(value).cast(i64) + 1;
+}
+
+fn format_len_i64(value: i64): i64 {
+    if (value >= 0) {
+        return ilog10(value.cast(u64)).cast(i64) + 1;
+    }
+    neg : i64 = -value;
+    if (neg < 0) {
+        return 1 + 19;
+    }
+    return 1 + ilog10(neg.cast(u64)).cast(i64) + 1;
+}
+
+fn format_f64(dst: []u8, offset: i64, value: f64): i64 {
+    buf: [40]u8 = #memory_garbage;
+    n := _format_f64_to_buf(buf.^.cast(*u8), value);
+    return _format_push_string(dst, offset, slice(buf.^, 0, n));
+}
+
+fn format_len_f64(value: f64): i64 {
+    buf: [40]u8 = #memory_garbage;
+    return _format_f64_to_buf(buf.^.cast(*u8), value);
+}
+
+fn format_f32(dst: []u8, offset: i64, value: f32): i64 {
+    buf: [40]u8 = #memory_garbage;
+    n := _format_f32_to_buf(buf.^.cast(*u8), value);
+    return _format_push_string(dst, offset, slice(buf.^, 0, n));
+}
+
+fn format_len_f32(value: f32): i64 {
+    buf: [40]u8 = #memory_garbage;
+    return _format_f32_to_buf(buf.^.cast(*u8), value);
+}
+
+fn format_bool(dst: []u8, offset: i64, value: bool): i64 {
+    s: []u8 = "false";
+
+    if (value) {
+        s = "true";
+    }
+
+    return _format_push_string(dst, offset, s);
+}
+
+fn format_len_bool(value: bool): i64 {
+    if (value) {
+        return 4;
+    }
+    return 5;
+}
+
+fn format(dst: []u8, offset: i64, type_kind: MoxTypeKind, value: *u8): i64 {
+    if (type_kind == .Bool){ return format_bool(dst, offset, value.cast(*bool).*); }
+    if (type_kind == .I8)  { return format_i64(dst, offset, value.cast(*i8).*.cast(i64)); }
+    if (type_kind == .I16) { return format_i64(dst, offset, value.cast(*i16).*.cast(i64)); }
+    if (type_kind == .I32) { return format_i64(dst, offset, value.cast(*i32).*.cast(i64)); }
+    if (type_kind == .I64) { return format_i64(dst, offset, value.cast(*i64).*.cast(i64)); }
+    if (type_kind == .U8)  { return format_u64(dst, offset, value.cast(*u8).*.cast(u64)); }
+    if (type_kind == .U16) { return format_u64(dst, offset, value.cast(*u16).*.cast(u64)); }
+    if (type_kind == .U32) { return format_u64(dst, offset, value.cast(*u32).*.cast(u64)); }
+    if (type_kind == .U64) { return format_u64(dst, offset, value.cast(*u64).*.cast(u64)); }
+    if (type_kind == .F32) { return format_f32(dst, offset, value.cast(*f32).*); }
+    if (type_kind == .F64) { return format_f64(dst, offset, value.cast(*f64).*); }
+
+    panic("format.mox: format unsupported type kind");
+    return offset;
+}
+
+// calculate byte length of format(dst, offset, type_kind, value)
+fn format_len(type_kind: MoxTypeKind, value: *u8): i64 {
+    if (type_kind == .Bool){ return format_len_bool(value.cast(*bool).*); }
+    if (type_kind == .I8)  { return format_len_i64(value.cast(*i8).*.cast(i64)); }
+    if (type_kind == .I16) { return format_len_i64(value.cast(*i16).*.cast(i64)); }
+    if (type_kind == .I32) { return format_len_i64(value.cast(*i32).*.cast(i64)); }
+    if (type_kind == .I64) { return format_len_i64(value.cast(*i64).*); }
+    if (type_kind == .U8)  { return format_len_u64(value.cast(*u8).*.cast(u64)); }
+    if (type_kind == .U16) { return format_len_u64(value.cast(*u16).*.cast(u64)); }
+    if (type_kind == .U32) { return format_len_u64(value.cast(*u32).*.cast(u64)); }
+    if (type_kind == .U64) { return format_len_u64(value.cast(*u64).*); }
+    if (type_kind == .F32) { return format_len_f32(value.cast(*f32).*); }
+    if (type_kind == .F64) { return format_len_f64(value.cast(*f64).*); }
+
+    panic("format.mox: format_len unsupported type kind");
+    return 0;
+}
+
+// n := format(dst, 0, "hello {} {}", .{ "world"; 123 .cast(i32); });
+fn format(dst: []u8, offset: i64, $fmt_str: []u8, values: $T): i64 {
+    #run {
+        i : i64 = 0;
+        value_index : i64 = 0;
+
+        while (i < $fmt_str.len) {
+            if ($fmt_str[i] == char("\\")) {
+                ch := $fmt_str[i + 1];
+                #emit {
+                    offset = _format_push(dst, offset, ch);
+                };
+                i += 2;
+                continue;
+            }
+
+            if ($fmt_str[i] == char("{") && $fmt_str[i + 1] == char("}")) {
+                member_offset := __compiler_member_offset($T, value_index);
+                member_type := __compiler_member_type($T, value_index);
+                member_type_kind := __compiler_type_kind(member_type).cast(MoxTypeKind);
+
+                if (is_string_type(member_type)) {
+                    #emit {
+                        offset = _format_push_string(dst, offset, byte_offset(values.^.cast(*u8), member_offset).cast(*[]u8).*);
+                    };
+                } else {
+                    #emit {
+                        offset = format(dst, offset, member_type_kind, values.^.cast(*u8) |> byte_offset(member_offset));
+                    };
+                }
+                i += 2;
+                value_index += 1;
+                continue;
+            }
+
+            ch := $fmt_str[i];
+            #emit {
+                offset = _format_push(dst, offset, ch);
+            };
+            i += 1;
+        }
+    };
+    return offset;
+}
+
+// calculate byte length of format() without formatting
+//   n := format_len("hello {} {}", .{ "world"; 123 .cast(i32); });
+fn format_len($fmt_str: []u8, values: $T): i64 {
+    total : i64 = 0;
+    #run {
+        i : i64 = 0;
+        value_index : i64 = 0;
+
+        while (i < $fmt_str.len) {
+            if ($fmt_str[i] == char("\\")) {
+                #emit {
+                    total += 1;
+                };
+                i += 2;
+                continue;
+            }
+
+            if ($fmt_str[i] == char("{") && $fmt_str[i + 1] == char("}")) {
+                member_offset := __compiler_member_offset($T, value_index);
+                member_type := __compiler_member_type($T, value_index);
+                member_type_kind := __compiler_type_kind(member_type).cast(MoxTypeKind);
+
+                if (is_string_type(member_type)) {
+                    #emit {
+                        total += byte_offset(values.^.cast(*u8), member_offset).cast(*[]u8).*.len;
+                    };
+                } else {
+                    #emit {
+                        total += format_len(member_type_kind, values.^.cast(*u8) |> byte_offset(member_offset));
+                    };
+                }
+                i += 2;
+                value_index += 1;
+                continue;
+            }
+
+            #emit {
+                total += 1;
+            };
+            i += 1;
+        }
+    };
+    return total;
+}
+
+fn #format_temp($buf_size: i64, $fmt_str: []u8, values: $T): []u8 {
+    buf: [$buf_size]u8 = #memory_garbage;
+    buf_slice := buf.^ |> slice();
+
+    len := format(buf_slice, 0, $fmt_str, values);
+    buf_slice[len] = 0;
+
+    return buf_slice;
+}
+
+fn #format_temp($fmt_str: []u8, values: $T): []u8 {
+    len := format_len($fmt_str, values);
+    buf := #temp_buffer(len);
+    format(buf, 0, $fmt_str, values);
+    return buf;
+}

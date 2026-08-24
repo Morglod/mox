@@ -1,0 +1,48 @@
+import "./internal.mox";
+
+// RFC 4648
+
+const BASE64_ABC := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn _b64_char(v: u32): u8 {
+    return BASE64_ABC[v];
+}
+
+fn base64_encoded_len(raw_len: i64): i64 {
+    return ((raw_len + 2) / 3) * 4;
+}
+
+// dst must hold at least base64_encoded_len(src.len) bytes
+// return how many bytes were written
+fn base64_encode(dst: []u8, src: []u8): i64 {
+    len := src.len;
+    i: i64 = 0;
+    o: i64 = 0;
+    while ((i + 3) <= len) {
+        n: u32 = #shl(src[i].cast(u32), 16) + #shl(src[i + 1].cast(u32), 8) + src[i + 2].cast(u32);
+        dst[o] = _b64_char(#shr(n, 18));
+        dst[o + 1] = _b64_char(#shr(n, 12) & 63);
+        dst[o + 2] = _b64_char(#shr(n, 6) & 63);
+        dst[o + 3] = _b64_char(n & 63);
+        i += 3;
+        o += 4;
+    }
+    rem := len - i;
+    if (rem == 1) {
+        n: u32 = #shl(src[i].cast(u32), 16);
+        dst[o] = _b64_char(#shr(n, 18));
+        dst[o + 1] = _b64_char(#shr(n, 12) & 63);
+        dst[o + 2] = char("=");
+        dst[o + 3] = char("=");
+        o += 4;
+    }
+    if (rem == 2) {
+        n: u32 = #shl(src[i].cast(u32), 16) + #shl(src[i + 1].cast(u32), 8);
+        dst[o] = _b64_char(#shr(n, 18));
+        dst[o + 1] = _b64_char(#shr(n, 12) & 63);
+        dst[o + 2] = _b64_char(#shr(n, 6) & 63);
+        dst[o + 3] = char("=");
+        o += 4;
+    }
+    return o;
+}

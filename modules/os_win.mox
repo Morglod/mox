@@ -1,0 +1,805 @@
+import "./internal.mox";
+import "./slice.mox";
+import "./vt_input.mox"; // shared Event model, filled by os_term_poll
+import "./context.mox";
+import "./c_interp.mox";
+
+// Wrapper over HANDLE
+const OsFile := #type u64;
+
+// Win32 HANDLE, pointer sized
+const WIN_HANDLE := #type *u8;
+
+#linkc("VirtualAlloc") fn win_virtual_alloc(ptr: *u8, size: u64, allocation_type: u32, protect: u32): *u8;
+#linkc("VirtualFree") fn win_virtual_free(ptr: *u8, size: u64, allocation_type: u32): u8;
+
+struct WIN_SystemInfo {
+    wProcessorArchitecture: u16;
+    wReserved: u16;
+
+    dwPageSize: u32;
+    lpMinimumApplicationAddress: *u8;
+    lpMaximumApplicationAddress: *u8;
+    dwActiveProcessorMask: *u32;
+    dwNumberOfProcessors: u32;
+    dwProcessorType: u32;
+    dwAllocationGranularity: u32;
+    wProcessorLevel: u16;
+    wProcessorRevision: u16;
+};
+
+#linkc("GetSystemInfo") fn win_get_system_info(system_info: *WIN_SystemInfo): void;
+
+system_info_cached: WIN_SystemInfo = #memory_garbage;
+
+fn win_get_system_info_cached(): WIN_SystemInfo {
+    if (system_info_cached.dwPageSize == 0) {
+        win_get_system_info(system_info_cached.^);
+    }
+    return system_info_cached;
+}
+
+fn win_get_page_size_cached(): u32 {
+    return win_get_system_info_cached().dwPageSize;
+}
+
+// console (xterm-256color terminal UI)
+
+const STD_INPUT_HANDLE  : u32 = 4294967286; // (DWORD)-10
+const STD_OUTPUT_HANDLE : u32 = 4294967285; // (DWORD)-11
+
+#linkc("GetStdHandle") fn GetStdHandle(nStdHandle: u32): WIN_HANDLE;
+#linkc("GetConsoleMode") fn GetConsoleMode(h: WIN_HANDLE, mode_out: *u32): i32;
+#linkc("SetConsoleMode") fn SetConsoleMode(h: WIN_HANDLE, mode: u32): i32;
+#linkc("GetNumberOfConsoleInputEvents") fn GetNumberOfConsoleInputEvents(h: WIN_HANDLE, count_out: *u32): i32;
+#linkc("ReadFile") fn ReadFile(h: WIN_HANDLE, buf: *u8, n: u32, read_out: *u32, overlapped: *u8): i32;
+#linkc("WaitForSingleObject") fn WaitForSingleObject(h: WIN_HANDLE, ms: u32): u32;
+#linkc("SetConsoleOutputCP") fn SetConsoleOutputCP(cp: u32): i32;
+
+// INPUT_RECORD.EventType
+enum WinEventType : u16 {
+    key                := 1;
+    mouse              := 2;
+    window_buffer_size := 4;
+};
+
+// SetConsoleMode bits for the input handle
+enum ConsoleInMode : u32 {
+    window   := 8;    // ENABLE_WINDOW_INPUT
+    mouse    := 16;   // ENABLE_MOUSE_INPUT
+    extended := 128;  // ENABLE_EXTENDED_FLAGS (also disables quick-edit)
+};
+
+// SetConsoleMode bits for the output handle
+enum ConsoleOutMode : u32 {
+    processed := 1;   // ENABLE_PROCESSED_OUTPUT
+    vt        := 4;   // ENABLE_VIRTUAL_TERMINAL_PROCESSING
+};
+
+// MOUSE_EVENT_RECORD.dwEventFlags
+enum MouseEventFlag : u32 {
+    moved        := 1;
+    double_click := 2;
+    wheeled      := 4;
+};
+
+// MOUSE_EVENT_RECORD.dwButtonState bits
+enum MouseButtonBit : u32 {
+    left   := 1;   // FROM_LEFT_1ST_BUTTON_PRESSED
+    right  := 2;   // RIGHTMOST_BUTTON_PRESSED
+    middle := 4;   // FROM_LEFT_2ND_BUTTON_PRESSED
+};
+
+// control key state masks, left and right variants OR-ed together
+enum ControlKeyMask : u32 {
+    shift := 16;  // SHIFT_PRESSED
+    ctrl  := 12;  // LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED
+    alt   := 3;   // LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED
+};
+
+struct COORD { X: i16; Y: i16; };
+struct SMALL_RECT { Left: i16; Top: i16; Right: i16; Bottom: i16; };
+
+struct KEY_EVENT_RECORD {
+    bKeyDown: i32;
+    wRepeatCount: u16;
+    wVirtualKeyCode: u16;
+    wVirtualScanCode: u16;
+    UnicodeChar: u16;
+    dwControlKeyState: u32;
+};
+
+struct MOUSE_EVENT_RECORD {
+    dwMousePosition: COORD;
+    dwButtonState: u32;
+    dwControlKeyState: u32;
+    dwEventFlags: u32;
+};
+
+struct WINDOW_BUFFER_SIZE_RECORD { dwSize: COORD; };
+
+// Win32 tagged union: EventType picks which *_EVENT_RECORD lives in the 16 byte Event blob, cast its address.
+struct INPUT_RECORD {
+    EventType: WinEventType;
+    _pad: u16;
+    Event: [16]u8;
+};
+
+struct CONSOLE_SCREEN_BUFFER_INFO {
+    dwSize: COORD;
+    dwCursorPosition: COORD;
+    wAttributes: u16;
+    srWindow: SMALL_RECT;
+    dwMaximumWindowSize: COORD;
+};
+
+#linkc("ReadConsoleInputW") fn ReadConsoleInputW(h: WIN_HANDLE, buf: *INPUT_RECORD, len: u32, read_out: *u32): i32;
+#linkc("GetConsoleScreenBufferInfo") fn GetConsoleScreenBufferInfo(h: WIN_HANDLE, info_out: *CONSOLE_SCREEN_BUFFER_INFO): i32;
+#linkc("WriteFile") fn WriteFile(h: WIN_HANDLE, buf: *u8, n: u32, written_out: *u32, overlapped: *u8): i32;
+
+// writes all n bytes in 2 GiB chunks (WriteFile counts in a DWORD), returns how many went out (== n on success)
+fn win_write_all(h: WIN_HANDLE, buf: *u8, n: i64): i64 {
+    total: i64 = 0;
+    while (total < n) {
+        remaining := n - total;
+        chunk: u32 = 2147483647; // 0x7FFFFFFF, max bytes per call
+        if (remaining < chunk.cast(i64)) { chunk = remaining.cast(u32); }
+        written: u32 = 0;
+        p := buf |> byte_offset(total);
+        if (WriteFile(h, p, chunk, written.^, nullptr(u8)) == 0) { break; }
+        total += written.cast(i64);
+        if (written < chunk) { break; } // short write
+    }
+    return total;
+}
+
+const INVALID_HANDLE_VALUE : u64 = 18446744073709551615; // (HANDLE)-1
+const CP_UTF8              : u32 = 65001;
+
+// clipboard, needs -luser32 at link time
+#linkc("OpenClipboard")    fn OpenClipboard(hwnd: WIN_HANDLE): i32;
+#linkc("CloseClipboard")   fn CloseClipboard(): i32;
+#linkc("EmptyClipboard")   fn EmptyClipboard(): i32;
+#linkc("SetClipboardData") fn SetClipboardData(fmt: u32, mem: *u8): *u8;
+#linkc("GetClipboardData") fn GetClipboardData(fmt: u32): *u8;
+#linkc("GlobalAlloc")      fn GlobalAlloc(flags: u32, bytes: u64): *u8;
+#linkc("GlobalLock")       fn GlobalLock(mem: *u8): *u8;
+#linkc("GlobalUnlock")     fn GlobalUnlock(mem: *u8): i32;
+
+const CF_TEXT        : u32 = 1;
+const CF_UNICODETEXT : u32 = 13;
+const GMEM_MOVEABLE  : u32 = 2;
+
+// files + directory listing
+
+const GENERIC_READ            : u32 = 2147483648; // 0x80000000
+const GENERIC_WRITE           : u32 = 1073741824; // 0x40000000
+const FILE_SHARE_READ         : u32 = 1;
+const OPEN_EXISTING           : u32 = 3;
+const CREATE_ALWAYS           : u32 = 2;
+const FILE_ATTRIBUTE_NORMAL   : u32 = 128;  // 0x80
+const FILE_ATTRIBUTE_DIRECTORY: u32 = 16;   // 0x10
+const INVALID_FILE_ATTRIBUTES : u32 = 4294967295; // 0xFFFFFFFF
+
+#linkc("CreateFileA") fn CreateFileA(name: *u8, access: u32, share: u32, sec: *u8, disposition: u32, flags: u32, templ: *u8): WIN_HANDLE;
+#linkc("GetFileAttributesA") fn GetFileAttributesA(path: *u8): u32;
+#linkc("CloseHandle")  fn CloseHandle(h: WIN_HANDLE): i32;
+#linkc("GetFileSizeEx") fn GetFileSizeEx(h: WIN_HANDLE, size_out: *i64): i32; // size_out = LARGE_INTEGER*
+
+struct FILETIME { dwLowDateTime: u32; dwHighDateTime: u32; };
+
+// ANSI form, cFileName is a plain byte string at offset 44
+struct WIN32_FIND_DATAA {
+    dwFileAttributes: u32;
+    ftCreationTime: FILETIME;
+    ftLastAccessTime: FILETIME;
+    ftLastWriteTime: FILETIME;
+    nFileSizeHigh: u32;
+    nFileSizeLow: u32;
+    dwReserved0: u32;
+    dwReserved1: u32;
+    cFileName: [260]u8;         // MAX_PATH
+    cAlternateFileName: [14]u8;
+};
+
+#linkc("FindFirstFileA") fn FindFirstFileA(name: *u8, data: *WIN32_FIND_DATAA): WIN_HANDLE;
+#linkc("FindNextFileA")  fn FindNextFileA(h: WIN_HANDLE, data: *WIN32_FIND_DATAA): i32;
+#linkc("FindClose")      fn FindClose(h: WIN_HANDLE): i32;
+
+// writes the cwd into buf NUL-terminated, returns the length without the NUL
+#linkc("GetCurrentDirectoryA") fn GetCurrentDirectoryA(buf_len: u32, buf: *u8): u32;
+
+// pseudo console (ConPTY) + child process
+// HANDLE out-params are *u64: pass a u64 var's address, then .cast(*u8) the value to use it as a HANDLE.
+
+const EXTENDED_STARTUPINFO_PRESENT      : u32 = 524288;  // 0x00080000
+const PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE : u64 = 131094; // 0x00020016
+const STILL_ACTIVE                      : u32 = 259;
+const INFINITE                          : u32 = 4294967295; // 0xFFFFFFFF, wait forever
+
+// COORD packed into a u32 (X = low 16 = cols, Y = high 16 = rows), win64 passes it in a register
+#linkc("CreatePipe")           fn CreatePipe(read_out: *u64, write_out: *u64, sec: *u8, size: u32): i32;
+#linkc("CreatePseudoConsole")  fn CreatePseudoConsole(size_packed: u32, hin: WIN_HANDLE, hout: WIN_HANDLE, flags: u32, pc_out: *u64): i32; // HRESULT (0 = S_OK)
+#linkc("ResizePseudoConsole")  fn ResizePseudoConsole(pc: WIN_HANDLE, size_packed: u32): i32;
+#linkc("ClosePseudoConsole")   fn ClosePseudoConsole(pc: WIN_HANDLE): void;
+#linkc("PeekNamedPipe")        fn PeekNamedPipe(h: WIN_HANDLE, buf: *u8, buf_size: u32, read_out: *u32, avail_out: *u32, msg_left_out: *u32): i32;
+
+#linkc("InitializeProcThreadAttributeList") fn InitializeProcThreadAttributeList(list: *u8, count: u32, flags: u32, size_inout: *u64): i32;
+#linkc("UpdateProcThreadAttribute")         fn UpdateProcThreadAttribute(list: *u8, flags: u32, attribute: u64, value: *u8, size: u64, prev: *u8, ret_size: *u64): i32;
+#linkc("DeleteProcThreadAttributeList")     fn DeleteProcThreadAttributeList(list: *u8): void;
+
+struct STARTUPINFOA {
+    cb: u32;
+    lpReserved: *u8;
+    lpDesktop: *u8;
+    lpTitle: *u8;
+    dwX: u32;
+    dwY: u32;
+    dwXSize: u32;
+    dwYSize: u32;
+    dwXCountChars: u32;
+    dwYCountChars: u32;
+    dwFillAttribute: u32;
+    dwFlags: u32;
+    wShowWindow: u16;
+    cbReserved2: u16;
+    lpReserved2: *u8;
+    hStdInput: WIN_HANDLE;
+    hStdOutput: WIN_HANDLE;
+    hStdError: WIN_HANDLE;
+};
+
+struct STARTUPINFOEXA {
+    StartupInfo: STARTUPINFOA;
+    lpAttributeList: *u8;
+};
+
+struct PROCESS_INFORMATION {
+    hProcess: WIN_HANDLE;
+    hThread: WIN_HANDLE;
+    dwProcessId: u32;
+    dwThreadId: u32;
+};
+
+#linkc("CreateProcessA")     fn CreateProcessA(app: *u8, cmdline: *u8, proc_attr: *u8, thread_attr: *u8, inherit: i32, flags: u32, env: *u8, cwd: *u8, startup: *STARTUPINFOEXA, proc_info: *PROCESS_INFORMATION): i32;
+#linkc("GetExitCodeProcess") fn GetExitCodeProcess(h: WIN_HANDLE, code_out: *u32): i32;
+#linkc("TerminateProcess")   fn TerminateProcess(h: WIN_HANDLE, code: u32): i32;
+#linkc("GetLastError")       fn GetLastError(): u32;
+#linkc("DeleteFileA")        fn DeleteFileA(path: *u8): i32;
+
+// ---- portable OS API ----
+// Same signatures as os_posix.mox. Import "./os.mox", it lands the module matching the build target.
+
+// virtual memory pages
+
+fn os_get_memory_page_size(): i64 {
+    return win_get_page_size_cached().cast(i64);
+}
+
+fn os_mem_virtual_reserve(size: i64): *u8 {
+    return win_virtual_alloc(nullptr(u8), size.cast(u64), 8192, 4); // MEM_RESERVE, PAGE_READWRITE
+}
+
+fn os_mem_virtual_commit(ptr: *u8, size: i64): bool {
+    ok := win_virtual_alloc(ptr, size.cast(u64), 4096, 4); // MEM_COMMIT
+    return ok != 0;
+}
+
+fn os_mem_virtual_decommit(ptr: *u8, size: i64): bool {
+    ok := win_virtual_free(ptr, size.cast(u64), 16384); // MEM_DECOMMIT
+    return ok != 0;
+}
+
+// size exists only for posix munmap parity.
+// MEM_RELEASE requires dwSize == 0 and always frees the whole reserved region; a real size makes VirtualFree fail and free nothing.
+fn os_mem_virtual_release(ptr: *u8, size: i64): bool {
+    ok := win_virtual_free(ptr, 0, 32768); // MEM_RELEASE, dwSize must be 0
+    return ok != 0;
+}
+
+// heap
+
+#linkc("_aligned_malloc")  fn win_aligned_malloc(size: u64, align: u64): *u8;
+#linkc("_aligned_realloc") fn win_aligned_realloc(mem: *u8, size: u64, align: u64): *u8;
+#linkc("_aligned_free")    fn win_aligned_free(mem: *u8): void;
+#linkc("ExitProcess")      fn ExitProcess(code: u32): void;
+
+fn os_heap_alloc(size: i64, align: u32): *u8 {
+    a := align.cast(u64);
+    if (a < 8) { a = 8; }
+    return win_aligned_malloc(size.cast(u64), a);
+}
+
+fn os_heap_realloc(mem: *u8, new_size: i64, align: u32): *u8 {
+    a := align.cast(u64);
+    if (a < 8) { a = 8; }
+    return win_aligned_realloc(mem, new_size.cast(u64), a);
+}
+
+fn os_heap_free(mem: *u8): void {
+    win_aligned_free(mem);
+}
+
+fn os_abort(): void {
+    ExitProcess(3);
+}
+
+// thread local storage: one pointer per thread per key.
+// FLS instead of TlsAlloc: only FLS runs the destructor on thread exit.
+
+const OsTlsKey  := #type u64;                                  // wraps an FLS index (DWORD)
+const OsTlsDtor : __type_ptr = #type *fn(value: *u8): void;    // called on thread exit if slot != null
+
+const FLS_OUT_OF_INDEXES : u32 = 4294967295; // 0xFFFFFFFF
+
+#linkc("FlsAlloc")    fn win_fls_alloc(callback: OsTlsDtor): u32;
+#linkc("FlsGetValue") fn win_fls_get_value(index: u32): *u8;
+#linkc("FlsSetValue") fn win_fls_set_value(index: u32, data: *u8): i32;
+#linkc("FlsFree")     fn win_fls_free(index: u32): i32;
+
+fn os_tls_key_create(key_out: *OsTlsKey, dtor: OsTlsDtor): bool {
+    idx := win_fls_alloc(dtor);
+    if (idx == FLS_OUT_OF_INDEXES) { return false; }
+    key_out.* = idx.cast(u64);
+    return true;
+}
+
+fn os_tls_key_create_simple(key_out: *OsTlsKey): bool {
+    return os_tls_key_create(key_out, nullptr(u8).cast(OsTlsDtor));
+}
+
+fn os_tls_get(key: OsTlsKey): *u8 {
+    return win_fls_get_value(key.cast(u32));
+}
+
+fn os_tls_set(key: OsTlsKey, value: *u8): bool {
+    return win_fls_set_value(key.cast(u32), value) != 0;
+}
+
+fn os_tls_key_free(key: OsTlsKey): bool {
+    return win_fls_free(key.cast(u32)) != 0;
+}
+
+// console
+
+_os_saved_in_mode: u32 = 0;
+_os_saved_out_mode: u32 = 0;
+
+// raw input (window + mouse events, no line/echo/quick-edit) + VT output + UTF-8
+fn os_console_setup_raw(): bool {
+    hin := GetStdHandle(STD_INPUT_HANDLE);
+    hout := GetStdHandle(STD_OUTPUT_HANDLE);
+    if ((hin.cast(u64) == INVALID_HANDLE_VALUE) || (hout.cast(u64) == INVALID_HANDLE_VALUE)) {
+        return false;
+    }
+
+    in_mode: u32 = 0;
+    out_mode: u32 = 0;
+    GetConsoleMode(hin, in_mode.^);
+    GetConsoleMode(hout, out_mode.^);
+    _os_saved_in_mode = in_mode;
+    _os_saved_out_mode = out_mode;
+
+    SetConsoleMode(hin, ConsoleInMode.window.cast(u32) | ConsoleInMode.mouse.cast(u32) | ConsoleInMode.extended.cast(u32));
+    SetConsoleMode(hout, out_mode | ConsoleOutMode.processed.cast(u32) | ConsoleOutMode.vt.cast(u32));
+    SetConsoleOutputCP(CP_UTF8);
+    return true;
+}
+
+fn os_console_restore(): void {
+    SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), _os_saved_in_mode);
+    SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), _os_saved_out_mode);
+}
+
+fn os_console_size(cols: *u32, rows: *u32): bool {
+    info: CONSOLE_SCREEN_BUFFER_INFO = #memory_garbage;
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), info.^) == 0) { return false; }
+    cols.* = (info.srWindow.Right - info.srWindow.Left + 1).cast(u32);
+    rows.* = (info.srWindow.Bottom - info.srWindow.Top + 1).cast(u32);
+    return true;
+}
+
+fn os_stdout_write(buf: *u8, len: i64): void {
+    win_write_all(GetStdHandle(STD_OUTPUT_HANDLE), buf, len);
+}
+
+fn os_stdin_wait(ms: u32): void {
+    WaitForSingleObject(GetStdHandle(STD_INPUT_HANDLE), ms);
+}
+
+// clipboard: text goes out as CF_UNICODETEXT; input is ASCII, so byte to u16 widening is exact
+
+fn os_clipboard_set(text: *u8, a: u32, b: u32): void {
+    n: u32 = b - a;
+    if (OpenClipboard(nullptr(u8)) == 0) { return; }
+    EmptyClipboard();
+    hmem := GlobalAlloc(GMEM_MOVEABLE, ((n + 1) * 2).cast(u64));
+    if (hmem != nullptr(u8)) {
+        dst := GlobalLock(hmem);
+        if (dst != nullptr(u8)) {
+            wdst := dst.cast(*u16);
+            src := text |> byte_offset(a.cast(i64));
+            for (i : it_range(n.cast(i64))) {
+                ty_offset(wdst, i).* = ty_offset(src, i).*.cast(u16);
+            }
+            ty_offset(wdst, n.cast(i64)).* = 0;
+            GlobalUnlock(hmem);
+            SetClipboardData(CF_UNICODETEXT, hmem); // clipboard owns hmem now
+        }
+    }
+    CloseClipboard();
+}
+
+// reads at most cap-1 bytes, non-ASCII chars are dropped
+fn os_clipboard_get(buf: *u8, cap: u32): u32 {
+    if (cap == 0) { return 0; } // cap - 1 below would underflow the u32
+    n: u32 = 0;
+    if (OpenClipboard(nullptr(u8)) == 0) { return 0; }
+    hdata := GetClipboardData(CF_UNICODETEXT);
+    if (hdata != nullptr(u8)) {
+        src := GlobalLock(hdata);
+        if (src != nullptr(u8)) {
+            wsrc := src.cast(*u16);
+            i: i64 = 0;
+            while (n < (cap - 1)) {
+                c := ty_offset(wsrc, i).*;
+                if (c == 0) { break; }
+                if (c < 128) {
+                    ty_offset(buf, n.cast(i64)).* = c.cast(u8);
+                    n += 1;
+                }
+                i += 1;
+            }
+            GlobalUnlock(hdata);
+        }
+    }
+    CloseClipboard();
+    return n;
+}
+
+// files, handle model: u64, 0 = invalid/failed
+
+fn os_file_open_read(path: *u8): OsFile {
+    h := CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr(u8), OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr(u8));
+    if (h.cast(u64) == INVALID_HANDLE_VALUE) { return 0; }
+    return h.cast(u64);
+}
+
+// create/truncate for writing
+fn os_file_open_write(path: *u8): OsFile {
+    h := CreateFileA(path, GENERIC_WRITE, 0, nullptr(u8), CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr(u8));
+    if (h.cast(u64) == INVALID_HANDLE_VALUE) { return 0; }
+    return h.cast(u64);
+}
+
+fn os_file_size(h: OsFile): i64 {
+    sz: i64 = 0;
+    if (GetFileSizeEx(h.cast(*u8), sz.^) == 0) { return 0; }
+    if (sz < 0) { return 0; }
+    return sz;
+}
+
+// reads up to n bytes in one call, returns bytes read, 0 = EOF or error. A single call caps at 2 GiB.
+fn os_file_read(h: OsFile, buf: *u8, n: i64): i64 {
+    if (h == 0) { return 0; }
+    chunk: u32 = 2147483647; // 0x7FFFFFFF, max bytes per call
+    if (n < chunk.cast(i64)) { chunk = n.cast(u32); }
+    got: u32 = 0;
+    if (ReadFile(h.cast(*u8), buf, chunk, got.^, nullptr(u8)) == 0) { return 0; }
+    return got.cast(i64);
+}
+
+// writes all n bytes, returns how many went out (== n on success)
+fn os_file_write(h: OsFile, buf: *u8, n: i64): i64 {
+    if (h == 0) { return 0; }
+    return win_write_all(h.cast(*u8), buf, n);
+}
+
+fn os_file_close(h: OsFile): void {
+    if (h != 0) { CloseHandle(h.cast(*u8)); }
+}
+
+fn os_file_delete(path: *u8): bool {
+    return DeleteFileA(path) != 0;
+}
+
+// stdout as a writable OsFile
+fn os_stdout_file(): OsFile {
+    return GetStdHandle(STD_OUTPUT_HANDLE).cast(u64);
+}
+
+// writes the cwd NUL-terminated into buf, returns the length without the NUL. Separators become "/".
+fn os_cwd(buf: *u8, cap: i64): i64 {
+    n := GetCurrentDirectoryA(cap.cast(u32), buf);
+    // n >= cap: buffer too small, GetCurrentDirectoryA returns the required size and leaves buf untouched
+    if ((n == 0) || (n.cast(i64) >= cap)) { return 0; }
+    replace_inplace(slice(buf, n.cast(i64)), char("\\"), char("/"));
+    return n.cast(i64);
+}
+
+// directory listing: os_dir_open(it, "<dir>") then os_dir_next(it) until false. "." and ".." are included.
+
+struct OsDirIter {
+    handle: u64;
+    pending: bool;      // fd holds the FindFirstFileA entry, not returned yet
+    is_dir: bool;
+    name: []u8;         // view into fd.cFileName, valid until the next os_dir_next; copy to keep
+    fd: WIN32_FIND_DATAA;
+};
+
+fn os_dir_open(it: *OsDirIter, dir_path: []u8): bool {
+    // build "<dir>/*" with a trailing NUL, Win32 accepts "/" separators
+    pat := #temp_buffer(dir_path.len + 3); // separator + '*' + NUL
+    n := dir_path.len;
+    mem_copy(pat.ptr, dir_path.ptr, n);
+    if (n > 0) {
+        last := pat[n - 1];
+        if ((last != char("\\")) && (last != char("/"))) {
+            pat[n] = char("/");
+            n += 1;
+        }
+    }
+    pat[n] = char("*");
+    pat[n + 1] = 0;
+
+    h := FindFirstFileA(pat.ptr, it.fd.^);
+    if (h.cast(u64) == INVALID_HANDLE_VALUE) {
+        it.handle = 0;
+        return false;
+    }
+    it.handle = h.cast(u64);
+    it.pending = true;
+    return true;
+}
+
+fn os_dir_next(it: *OsDirIter): bool {
+    if (it.handle == 0) { return false; }
+    if (!it.pending) {
+        if (FindNextFileA(it.handle.cast(*u8), it.fd.^) == 0) { return false; }
+    }
+    it.pending = false;
+
+    it.name.ptr = it.fd.cFileName.ptr;
+    it.name.len = c_strlen(it.fd.cFileName.ptr, 260);
+    it.is_dir = (it.fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    return true;
+}
+
+fn os_dir_close(it: *OsDirIter): void {
+    if (it.handle != 0) {
+        FindClose(it.handle.cast(*u8));
+        it.handle = 0;
+    }
+}
+
+// terminal input: os_term_input_init once, then os_term_poll per frame (non-blocking, false = nothing pending).
+// Events use the shared model from vt_input.mox, decoded from native console input records; resize arrives as a window_buffer_size record.
+
+struct OsTermInput {
+    hin: WIN_HANDLE;
+    prev_button_state: u32;
+};
+
+fn os_term_input_init(ti: *OsTermInput): void {
+    ti.hin = GetStdHandle(STD_INPUT_HANDLE);
+    ti.prev_button_state = 0;
+}
+
+fn _os_bit(flags: u32, f: $E): bool {
+    return (flags & f.cast(u32)) != 0;
+}
+
+fn _os_vk_to_keycode(vk: u16): KeyCode {
+    if (vk == 13)  { return .enter; }
+    if (vk == 27)  { return .escape; }
+    if (vk == 9)   { return .tab; }
+    if (vk == 8)   { return .backspace; }
+    if (vk == 46)  { return .delete; }
+    if (vk == 32)  { return .space; }
+    if (vk == 38)  { return .up; }
+    if (vk == 40)  { return .down; }
+    if (vk == 37)  { return .left; }
+    if (vk == 39)  { return .right; }
+    if (vk == 36)  { return .home; }
+    if (vk == 35)  { return .end; }
+    if (vk == 33)  { return .page_up; }
+    if (vk == 34)  { return .page_down; }
+    if (vk == 45)  { return .insert; }
+    if (vk == 112) { return .f1; }
+    if (vk == 113) { return .f2; }
+    if (vk == 114) { return .f3; }
+    if (vk == 115) { return .f4; }
+    if (vk == 116) { return .f5; }
+    if (vk == 117) { return .f6; }
+    if (vk == 118) { return .f7; }
+    if (vk == 119) { return .f8; }
+    if (vk == 120) { return .f9; }
+    if (vk == 121) { return .f10; }
+    if (vk == 122) { return .f11; }
+    if (vk == 123) { return .f12; }
+    return .char;
+}
+
+fn _os_decode_mods(cks: u32): u8 {
+    m: u8 = 0;
+    if (_os_bit(cks, ControlKeyMask.shift)) { m += MOD_SHIFT; }
+    if (_os_bit(cks, ControlKeyMask.ctrl)) { m += MOD_CTRL; }
+    if (_os_bit(cks, ControlKeyMask.alt)) { m += MOD_ALT; }
+    return m;
+}
+
+fn _os_changed_button(now: u32, was: u32): MouseButton {
+    if (_os_bit(now, MouseButtonBit.left) && !_os_bit(was, MouseButtonBit.left)) { return .left; }
+    if (_os_bit(now, MouseButtonBit.right) && !_os_bit(was, MouseButtonBit.right)) { return .right; }
+    if (_os_bit(now, MouseButtonBit.middle) && !_os_bit(was, MouseButtonBit.middle)) { return .middle; }
+    return .none;
+}
+
+fn _os_decode_input_record(rec: *INPUT_RECORD, prev_button: *u32, ev: *Event): bool {
+    et := rec.EventType;
+    ev.repeat = 1;
+
+    if (et == .key) {
+        kr := rec.Event.ptr.cast(*KEY_EVENT_RECORD);
+        if (kr.bKeyDown == 0) { return false; } // ignore key-up
+        ev.kind = .key;
+        ev.vk = kr.wVirtualKeyCode;
+        ev.code = _os_vk_to_keycode(kr.wVirtualKeyCode);
+        ev.mods = _os_decode_mods(kr.dwControlKeyState);
+        ev.ch = kr.UnicodeChar.cast(u32); // carry the char for every key, typing needs it
+        if (kr.wRepeatCount > 1) { ev.repeat = kr.wRepeatCount; } // held key: one record, N repeats
+        return true;
+    }
+
+    if (et == .mouse) {
+        mr := rec.Event.ptr.cast(*MOUSE_EVENT_RECORD);
+        ev.kind = .mouse;
+        ev.x = mr.dwMousePosition.X.cast(u32);
+        ev.y = mr.dwMousePosition.Y.cast(u32);
+        ev.mods = _os_decode_mods(mr.dwControlKeyState);
+        ev.button = .none;
+        ev.wheel = 0;
+        flags := mr.dwEventFlags;
+
+        if (_os_bit(flags, MouseEventFlag.moved)) {
+            ev.action = .move;
+            prev_button.* = mr.dwButtonState;
+            return true;
+        }
+        if (_os_bit(flags, MouseEventFlag.wheeled)) { // signed wheel delta in high word
+            ev.action = .wheel;
+            hw := #shr(mr.dwButtonState, 16);
+            if (hw > 32767) { ev.wheel = hw.cast(i32) - 65536; }
+            else { ev.wheel = hw.cast(i32); }
+            prev_button.* = mr.dwButtonState;
+            return true;
+        }
+
+        bs := mr.dwButtonState;
+        pv := prev_button.*;
+        pressed := _os_changed_button(bs, pv);
+        if (pressed != .none) {
+            ev.action = .press;
+            ev.button = pressed;
+        } else {
+            ev.action = .release;
+            ev.button = _os_changed_button(pv, bs);
+        }
+        prev_button.* = bs;
+        return true;
+    }
+
+    if (et == .window_buffer_size) {
+        wr := rec.Event.ptr.cast(*WINDOW_BUFFER_SIZE_RECORD);
+        ev.kind = .resize;
+        ev.w = wr.dwSize.X.cast(u32);
+        ev.h = wr.dwSize.Y.cast(u32);
+        return true;
+    }
+
+    return false;
+}
+
+fn os_term_poll(ti: *OsTermInput, ev: *Event): bool {
+    n: u32 = 0;
+    while (true) {
+        if (GetNumberOfConsoleInputEvents(ti.hin, n.^) == 0) { return false; }
+        if (n == 0) { return false; }
+
+        rec: INPUT_RECORD = #memory_garbage;
+        read: u32 = 0;
+        if (ReadConsoleInputW(ti.hin, rec.^, 1, read.^) == 0) { return false; }
+        if (read == 0) { return false; }
+
+        if (_os_decode_input_record(rec.^, ti.prev_button_state.^, ev)) {
+            return true;
+        }
+        // skipped record, read the next one
+    }
+    return false;
+}
+
+// raw stdin bytes, for terminal query replies. Under ConPTY a VT reply arrives as KEY_EVENT records, collect their chars. Never blocks.
+fn os_stdin_read_bytes(ti: *OsTermInput, buf: *u8, cap: i64): i64 {
+    pos: i64 = 0;
+    while (pos < cap) {
+        queued: u32 = 0;
+        if (GetNumberOfConsoleInputEvents(ti.hin, queued.^) == 0) { return pos; }
+        if (queued == 0) { return pos; }
+        rec: INPUT_RECORD = #memory_garbage;
+        read: u32 = 0;
+        if (ReadConsoleInputW(ti.hin, rec.^, 1, read.^) == 0) { return pos; }
+        if (read == 0) { return pos; }
+        if (rec.EventType == .key) {
+            kr := rec.Event.ptr.cast(*KEY_EVENT_RECORD);
+            if ((kr.bKeyDown != 0) && (kr.UnicodeChar != 0)) {
+                ty_offset(buf, pos).* = kr.UnicodeChar.cast(u8);
+                pos += 1;
+            }
+        }
+    }
+    return pos;
+}
+
+// Slice variants that cannot live in os.mox: OsTermInput differs per platform, and #temp_c_string needs c_interp.mox which os.mox cannot import.
+// Keep in sync with os_posix.mox.
+
+fn os_stdin_read_bytes(ti: *OsTermInput, buf: []u8): i64 { return os_stdin_read_bytes(ti, buf.ptr, buf.len); }
+
+fn os_file_open_read(path: []u8): OsFile {
+    return os_file_open_read(#temp_c_string(path));
+}
+fn os_file_open_write(path: []u8): OsFile {
+    return os_file_open_write(#temp_c_string(path));
+}
+fn os_file_delete(path: []u8): bool {
+    return os_file_delete(#temp_c_string(path));
+}
+
+// "file" means any non-directory entry
+
+fn os_path_exists(path: []u8): bool {
+    return GetFileAttributesA(#temp_c_string(path)) != INVALID_FILE_ATTRIBUTES;
+}
+fn os_dir_exists(path: []u8): bool {
+    attrs := GetFileAttributesA(#temp_c_string(path));
+    if (attrs == INVALID_FILE_ATTRIBUTES) { return false; }
+    return (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+fn os_file_exists(path: []u8): bool {
+    attrs := GetFileAttributesA(#temp_c_string(path));
+    if (attrs == INVALID_FILE_ATTRIBUTES) { return false; }
+    return (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
+// runs cmd through the platform shell (cmd.exe /C here, /bin/sh -c on posix), waits, returns its exit code. -1 = could not start.
+
+fn os_exec(cmd: []u8): i32 {
+    // CreateProcessA may write into the command line, build "cmd.exe /C <cmd>" writable and NUL-terminated in temp memory
+    prefix: []u8 = "cmd.exe /C ";
+    full := #temp_buffer(prefix.len + cmd.len + 1);
+    mem_copy(full.ptr, prefix.ptr, prefix.len);
+    mem_copy(ty_offset(full.ptr, prefix.len), cmd.ptr, cmd.len);
+    full[prefix.len + cmd.len] = 0;
+
+    si: STARTUPINFOEXA = 0;
+    si.StartupInfo.cb = sizeof_type(STARTUPINFOA).cast(u32);
+    pi: PROCESS_INFORMATION = 0;
+    // inherit=1: child shares our console and stdio
+    if (CreateProcessA(nullptr(u8), full.ptr, nullptr(u8), nullptr(u8), 1, 0, nullptr(u8), nullptr(u8), si.^, pi.^) == 0) {
+        return -1;
+    }
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    code: u32 = 0;
+    GetExitCodeProcess(pi.hProcess, code.^);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return code.cast(i32);
+}
+
+fn os_stdout_write(buf: []u8): void { os_stdout_write(buf.ptr, buf.len); }
+fn os_file_read(h: OsFile, buf: []u8): i64 { return os_file_read(h, buf.ptr, buf.len); }
+fn os_file_write(h: OsFile, buf: []u8): i64 { return os_file_write(h, buf.ptr, buf.len); }
+fn os_cwd(buf: []u8): i64 { return os_cwd(buf.ptr, buf.len); }
+fn os_clipboard_set(text: []u8): void { os_clipboard_set(text.ptr, 0 .cast(u32), text.len.cast(u32)); }
+fn os_clipboard_get(buf: []u8): u32 { return os_clipboard_get(buf.ptr, buf.len.cast(u32)); }

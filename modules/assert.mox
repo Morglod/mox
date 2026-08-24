@@ -1,0 +1,20 @@
+import "./internal.mox";
+import "./panic.mox";
+
+fn assert(condition: bool, loc: MoxSourceLocation = #caller_location): void {
+    if (!condition) {
+        panic("no panic callstack yet here", loc);
+    }
+}
+
+fn assert(condition: bool, msg: []u8, loc: MoxSourceLocation = #caller_location): void {
+    if (!condition) {
+        panic(msg, loc);
+    }
+}
+
+fn assert(condition: bool, $msg_format: []u8, format_values: $T, loc: MoxSourceLocation = #caller_location): void {
+    if (!condition) {
+        panic($msg_format, format_values, loc);
+    }
+}

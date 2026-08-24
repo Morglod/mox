@@ -1,0 +1,82 @@
+import "./internal.mox";
+import "./os.mox";
+
+enum AllocatorFnMode {
+    alloc;
+    realloc;
+    free;
+};
+
+const AllocatorFn: __type_ptr = #type fn(allocator_data: *u8, mode: AllocatorFnMode, size: i64, align: u32, old_mem: *u8): *u8;
+
+struct Alloc {
+    func: *AllocatorFn;
+    data: *u8;
+};
+
+_default_alloc: Alloc = 0;
+
+fn _alloc_default_fn(allocator_data: *u8, mode: AllocatorFnMode, size: i64, align: u32, old_mem: *u8): *u8 {
+    if (mode == .alloc) {
+        return __mox_mem_alloc(size, align);
+    }
+    if (mode == .realloc) {
+        return __mox_mem_realloc(old_mem, size, align);
+    }
+    if (mode == .free) {
+        __mox_mem_free(old_mem);
+    }
+    return nullptr(u8);
+}
+
+fn init_default_alloc() {
+    _default_alloc.func = _alloc_default_fn.^;
+    _default_alloc.data = nullptr(u8);
+}
+
+fn default_alloc(): *Alloc {
+    if (_default_alloc.func == nullptr(AllocatorFn)) {
+        init_default_alloc();
+    }
+    return _default_alloc.^;
+}
+
+fn mem_alloc(allocator: *Alloc, size: i64, align: u32 = 1): *u8 {
+    mem := allocator.func(allocator.data, .alloc, size, align, nullptr(u8));
+    return mem;
+}
+
+fn mem_alloc(allocator: *Alloc, $T: __type_ptr, align: u32 = 1): *$T {
+    return mem_alloc(allocator, sizeof_type($T), align).cast(*$T);
+}
+
+// len is element count, not byte size
+fn mem_alloc_slice(allocator: *Alloc, $T: __type_ptr, len: i64, align: u32 = 1): []$T {
+    mem := mem_alloc(allocator, sizeof_type($T) * len, align);
+    slice : []$T = #memory_garbage;
+    slice.ptr = mem.cast(*$T);
+    slice.len = len;
+    return slice;
+}
+
+fn mem_realloc(allocator: *Alloc, old_mem: *$T, new_size: i64, align: u32 = 1): *$T {
+    mem := allocator.func(allocator.data, .realloc, new_size, align, old_mem.cast(*u8));
+    return mem.cast(*$T);
+}
+
+// new_len is new element count, not byte size
+fn mem_realloc_slice(allocator: *Alloc, old_mem: []$T, new_len: i64, align: u32 = 1): []$T {
+    mem := allocator.func(allocator.data, .realloc, sizeof_type($T) * new_len, align, old_mem.ptr.cast(*u8));
+    slice : []$T = #memory_garbage;
+    slice.ptr = mem.cast(*$T);
+    slice.len = new_len;
+    return slice;
+}
+
+fn mem_free(allocator: *Alloc, ptr: *$T): void {
+    allocator.func(allocator.data, .free, 0, 0, ptr.cast(*u8));
+}
+
+fn mem_free(allocator: *Alloc, slice: []$T): void {
+    mem_free(allocator, slice.ptr);
+}

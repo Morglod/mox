@@ -1,0 +1,251 @@
+// SoA archetype ECS.
+//
+// A component set is a STRUCT type, every field of it is one component.
+
+import "internal.mox";
+import "alloc.mox";
+import "panic.mox";
+
+const ECS_NO_SLOT : u32 = max_u32;
+
+struct Entity {
+    index: u32;        // stable slot in [0, capacity)
+    generation: u32;   // matched against slot_generation[index]
+}
+
+struct Archetype($S: __type_ptr) {
+    slots: [__compiler_members_count($S)]*u8;  // one dense array per component
+    slot_to_dense:   []u32;   // [cap] slot -> dense, ECS_NO_SLOT if free
+    dense_to_slot:   []u32;   // [cap] dense -> slot
+    slot_generation: []u32;   // [cap] per slot generation
+    free_slots:      []u32;   // [cap] stack of freed slots
+    free_count: i64;
+    high_water: i64;
+    count: i64;
+    capacity: i64;
+    alloc: *Alloc;
+}
+
+// comptime: position of component $T in component struct $S
+fn arch_member_index($S: __type_ptr, $T: __type_ptr): i64 {
+    idx := __compiler_member_index_of_type($S, $T);
+    if (idx < 0) {
+        panic("ecs: component type is not a member of this archetype");
+    }
+    return idx;
+}
+
+fn arch_has($S: __type_ptr, $T: __type_ptr): bool {
+    return __compiler_member_index_of_type($S, $T) >= 0;
+}
+
+fn arch_count(arch: *Archetype($S)): i64 {
+    return arch.count;
+}
+
+fn arch_init(arch: *Archetype($S), alloc: *Alloc, cap: i64): void {
+    arch.alloc = alloc;
+    arch.capacity = cap;
+    arch.count = 0;
+    arch.high_water = 0;
+    arch.free_count = 0;
+
+    arch.slot_to_dense   = mem_alloc_slice(alloc, u32, cap);
+    arch.dense_to_slot   = mem_alloc_slice(alloc, u32, cap);
+    arch.slot_generation = mem_alloc_slice(alloc, u32, cap);
+    arch.free_slots      = mem_alloc_slice(alloc, u32, cap);
+
+    for (i : it_range(cap)) {
+        arch.slot_to_dense[i] = ECS_NO_SLOT;
+        arch.slot_generation[i] = 0;
+    }
+
+    // one dense array per component, unrolled at comptime
+    #run {
+        n := __compiler_members_count($S);
+        for (ci : it_range(n)) {
+            csize := __compiler_sizeof(__compiler_member_type($S, ci));
+            #emit {
+                arch.slots[ci] = mem_alloc(alloc, cap * csize, 64);
+            };
+        }
+    };
+}
+
+fn arch_alive(arch: *Archetype($S), e: Entity): bool {
+    if (e.index == ECS_NO_SLOT) { return false; }
+    if (e.index >= arch.capacity.cast(u32)) { return false; }
+    if (arch.slot_to_dense[e.index] == ECS_NO_SLOT) { return false; }
+    return arch.slot_generation[e.index] == e.generation;
+}
+
+fn arch_create(arch: *Archetype($S)): Entity {
+    slot : u32 = 0;
+    if (arch.free_count > 0) {
+        arch.free_count -= 1;
+        slot = arch.free_slots[arch.free_count];
+    } else if (arch.high_water < arch.capacity) {
+        slot = arch.high_water.cast(u32);
+        arch.high_water += 1;
+    } else {
+        return Entity.{ index = ECS_NO_SLOT; generation = 0; };
+    }
+    dense := arch.count;
+    arch.count += 1;
+    arch.slot_to_dense[slot] = dense.cast(u32);
+    arch.dense_to_slot[dense] = slot;
+    return Entity.{ index = slot; generation = arch.slot_generation[slot]; };
+}
+
+fn arch_at(arch: *Archetype($S), $T: __type_ptr, i: i64): *$T {
+    const idx := arch_member_index($S, $T);
+    return byte_offset(arch.slots[idx], i * sizeof_type($T)).cast(*$T);
+}
+
+// nullptr if the handle is dead
+fn arch_get(arch: *Archetype($S), $T: __type_ptr, e: Entity): *$T {
+    if (!arch_alive(arch, e)) { return nullptr($T); }
+    dense := arch.slot_to_dense[e.index].cast(i64);
+    return arch_at(arch, $T, dense);
+}
+
+fn arch_destroy(arch: *Archetype($S), e: Entity): void {
+    if (!arch_alive(arch, e)) { return; }
+
+    // swap and pop
+    // last dense entity is copied over the dead one
+    dead_dense := arch.slot_to_dense[e.index].cast(i64);
+    arch.count -= 1;
+    last_dense := arch.count;
+
+    if (dead_dense != last_dense) {
+        #run {
+            n := __compiler_members_count($S);
+            for (ci : it_range(n)) {
+                csize := __compiler_sizeof(__compiler_member_type($S, ci));
+                #emit {
+                    mem_copy(byte_offset(arch.slots[ci], dead_dense * csize), byte_offset(arch.slots[ci], last_dense * csize), csize);
+                };
+            }
+        };
+        moved_slot := arch.dense_to_slot[last_dense];
+        arch.slot_to_dense[moved_slot] = dead_dense.cast(u32);
+        arch.dense_to_slot[dead_dense] = moved_slot;
+    }
+
+    arch.slot_to_dense[e.index] = ECS_NO_SLOT;
+    arch.slot_generation[e.index] += 1;
+    arch.free_slots[arch.free_count] = e.index;
+    arch.free_count += 1;
+}
+
+// for (i : arch_iter(arch)) yields dense indices 0..count-1
+struct ArchIter { cur: i64; n: i64; }
+
+fn arch_iter(arch: *Archetype($S)): ArchIter {
+    return ArchIter.{ cur = -1; n = arch.count; };
+}
+
+fn iterator_next(it: *ArchIter): bool {
+    it.cur += 1;
+    return it.cur < it.n;
+}
+
+fn iterator_current(it: *ArchIter): i64 {
+    return it.cur;
+}
+
+// A world is any struct whose fields are Archetype(...) instances.
+
+// inits every archetype of the world with one allocator and one capacity;
+// for per archetype capacity call arch_init on the fields directly
+fn ecs_init(world: *$W, alloc: *Alloc, cap: i64): void {
+    base := world.cast(*u8);
+    #run {
+        n := __compiler_members_count($W);
+        for (ai : it_range(n)) {
+            atype := __compiler_member_type($W, ai);
+            aoff  := __compiler_member_offset($W, ai);
+            #emit {
+                arch_init(byte_offset(base, aoff).cast(#type *atype), alloc, cap);
+            };
+        }
+    };
+}
+
+struct Query($W: __type_ptr, $R: __type_ptr) {
+    // flat [segment][required component] -> dense array base
+    seg_bases: [(__compiler_members_count($W) * __compiler_members_count($R))]*u8;
+    seg_count: [__compiler_members_count($W)]i64;
+    seg_n: i64;
+    cur_seg: i64;    // -1 before the first query_next
+    cur_row: i64;
+}
+
+fn _query_scan(a: *Archetype($S), q: *Query($W, $R)): void {
+    #run {
+        nr := __compiler_members_count($R);
+        matches := true;
+        for (i : it_range(nr)) {
+            if (!arch_has($S, __compiler_member_type($R, i))) {
+                matches = false;
+            }
+        }
+        if (matches) {
+            #emit {
+                _seg := q.seg_n;
+                const _nr : i64 = __compiler_members_count($R);
+                q.seg_count[_seg] = arch_count(a);
+            };
+            for (ri : it_range(nr)) {
+                rcomp := __compiler_member_type($R, ri);
+                #emit {
+                    q.seg_bases[_seg * _nr + ri] = arch_at(a, rcomp, 0).cast(*u8);
+                };
+            }
+            #emit {
+                q.seg_n += 1;
+            };
+        }
+    };
+}
+
+fn ecs_query(world: *$W, $R: __type_ptr): Query($W, $R) {
+    q : Query($W, $R) = 0;
+    q.cur_seg = -1;
+    base := world.cast(*u8);
+    #run {
+        na := __compiler_members_count($W);
+        for (ai : it_range(na)) {
+            atype := __compiler_member_type($W, ai);
+            aoff  := __compiler_member_offset($W, ai);
+            #emit {
+                _query_scan(byte_offset(base, aoff).cast(#type *atype), q.^);
+            };
+        }
+    };
+    return q;
+}
+
+fn query_next(q: *Query($W, $R)): bool {
+    if (q.cur_seg < 0) {
+        q.cur_seg = 0;
+        q.cur_row = 0;
+    } else {
+        q.cur_row += 1;
+    }
+    while (q.cur_seg < q.seg_n) {
+        if (q.cur_row < q.seg_count[q.cur_seg]) { return true; }
+        q.cur_seg += 1;
+        q.cur_row = 0;
+    }
+    return false;
+}
+
+fn query_get(q: *Query($W, $R), $T: __type_ptr): *$T {
+    const nr : i64 = __compiler_members_count($R);
+    const k  : i64 = arch_member_index($R, $T);
+    seg := q.cur_seg;
+    base := q.seg_bases[seg * nr + k];
+    return byte_offset(base, q.cur_row * sizeof_type($T)).cast(*$T);
+}

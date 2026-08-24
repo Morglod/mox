@@ -1,0 +1,137 @@
+import "./internal.mox";
+import "./alloc.mox";
+
+// growth factor drops as the array gets bigger: x3 under 1000, x2 under 10000, x1.5 after, see _dynarr_grow
+
+const DYNARR_ALIGN : u32 = 8;
+const DYNARR_HEADER_SIZE: i64 = 16;
+
+struct DynArrStorage($T: __type_ptr) {
+    len: i64;
+    cap: i64;
+
+    // here data goes
+};
+
+struct DynArr($T: __type_ptr) {
+    storage: *DynArrStorage($T);
+    alloc: *Alloc;
+
+    #alias items = dynarr_items(self);
+    #alias len = dynarr_len(self);
+    #alias cap = dynarr_cap(self);
+};
+
+fn _dynarr_items_ptr(st: *DynArrStorage($T)): *$T {
+    p := st.cast(*u8) |> byte_offset(DYNARR_HEADER_SIZE);
+    return p.cast(*$T);
+}
+
+fn dynarr_len(arr: *DynArr($T)): i64 {
+    if (arr.storage == 0) { return 0; }
+    return arr.storage.len;
+}
+
+fn dynarr_cap(arr: *DynArr($T)): i64 {
+    if (arr.storage == 0) { return 0; }
+    return arr.storage.cap;
+}
+
+// no bounds check, storage must exist
+fn dynarr_at(arr: *DynArr($T), i: i64): *$T {
+    return ty_offset(_dynarr_items_ptr(arr.storage), i);
+}
+
+// live view, it dies on the next growth
+fn dynarr_items(arr: *DynArr($T)): []$T {
+    out: []$T = #memory_garbage;
+    if (arr.storage == 0) {
+        out.ptr = nullptr($T);
+        out.len = 0;
+        return out;
+    }
+    out.ptr = _dynarr_items_ptr(arr.storage);
+    out.len = arr.storage.len;
+    return out;
+}
+
+fn _dynarr_alloc(arr: *DynArr($T), cap: i64): void {
+    bytes := DYNARR_HEADER_SIZE + sizeof_type($T) * cap;
+    storage := mem_alloc(arr.alloc, bytes, DYNARR_ALIGN).cast(*DynArrStorage($T));
+    storage.len = 0;
+    storage.cap = cap;
+    arr.storage = storage;
+}
+
+fn _dynarr_realloc(arr: *DynArr($T), cap: i64): void {
+    if (arr.storage == 0) {
+        _dynarr_alloc(arr, cap);
+        return;
+    }
+    if (cap == arr.storage.cap) { return; }
+    bytes := DYNARR_HEADER_SIZE + sizeof_type($T) * cap;
+    storage := mem_realloc(arr.alloc, arr.storage.cast(*u8), bytes, DYNARR_ALIGN).cast(*DynArrStorage($T));
+    storage.cap = cap;
+    arr.storage = storage;
+}
+
+fn _dynarr_grow(arr: *DynArr($T), add: i64): void {
+    len := dynarr_len(arr);
+    need := len + add;
+    if (need <= dynarr_cap(arr)) { return; }
+
+    newcap := need * 3;
+    if (len >= 1000) { newcap = need * 2; }
+    if (len >= 10000) { newcap = (need * 3) / 2; }
+    _dynarr_realloc(arr, newcap);
+}
+
+fn dynarr_init(arr: *DynArr($T), alloc: *Alloc, cap: i64): void {
+    arr.alloc = alloc;
+    arr.storage = nullptr(#type DynArrStorage($T));
+    if (cap > 0) {
+        _dynarr_alloc(arr, cap);
+    }
+}
+
+// drops the elements, keeps the storage
+fn dynarr_reset(arr: *DynArr($T)): void {
+    if (arr.storage == 0) { return; }
+    arr.storage.len = 0;
+}
+
+fn dynarr_free(arr: *DynArr($T)): void {
+    if (arr.storage == 0) { return; }
+    mem_free(arr.alloc, arr.storage.cast(*u8));
+    arr.storage = nullptr(#type DynArrStorage($T));
+}
+
+fn dynarr_ensure(arr: *DynArr($T), extra: i64): void {
+    need := dynarr_len(arr) + extra;
+    if (need <= dynarr_cap(arr)) { return; }
+    _dynarr_realloc(arr, need);
+}
+
+fn push(arr: *DynArr($T), val: $T): void {
+    _dynarr_grow(arr, 1);
+    storage := arr.storage;
+    dst_ptr := _dynarr_items_ptr(storage) |> ty_offset(storage.len);
+    dst_ptr.* = val;
+    storage.len += 1;
+}
+
+fn push(arr: *DynArr($T), vals: []$T): void {
+    if (vals.len == 0) { return; }
+    _dynarr_grow(arr, vals.len);
+    storage := arr.storage;
+    dst := ty_offset(_dynarr_items_ptr(storage), storage.len);
+    mem_copy(dst.cast(*u8), vals.ptr.cast(*u8), sizeof_type($T) * vals.len);
+    storage.len += vals.len;
+}
+
+fn pop_back(arr: *DynArr($T)): void {
+    if (arr.storage == 0) { return; }
+    if (arr.storage.len > 0) {
+        arr.storage.len -= 1;
+    }
+}

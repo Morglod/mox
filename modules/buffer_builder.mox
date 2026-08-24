@@ -1,0 +1,138 @@
+import "./internal.mox";
+import "./alloc.mox";
+
+// growable buffer linked list
+// values are stored in chunks of BB_CHUNK_LEN
+// TODO: better name
+
+const BB_CHUNK_LEN : i64 = 512;
+
+struct BufferBuilder_ListNode($T: __type_ptr) {
+    buf: [BB_CHUNK_LEN]$T;
+    next: *BufferBuilder_ListNode($T);
+}
+
+struct BufferBuilder($T: __type_ptr) {
+    total_count: i64;
+    last_buf: *BufferBuilder_ListNode($T);
+    arena: *Alloc;
+    next_buf: *BufferBuilder_ListNode($T);
+    buf: [BB_CHUNK_LEN]$T;
+}
+
+fn init(bb: $T / *BufferBuilder($P), arena: *Alloc): void {
+    bb.total_count = 0;
+    bb.arena = arena;
+    bb.next_buf = nullptr(BufferBuilder_ListNode($P));
+    bb.last_buf = nullptr(BufferBuilder_ListNode($P));
+}
+
+fn _alloc_list_node(bb: $T / *BufferBuilder($P)): *BufferBuilder_ListNode($P) {
+    node := mem_alloc(bb.arena, BufferBuilder_ListNode($P), 8);
+    node.next = nullptr(BufferBuilder_ListNode($P));
+    return node;
+}
+
+fn push(bb: $T / *BufferBuilder($P), value: $P): void {
+    if (bb.total_count < BB_CHUNK_LEN) {
+        bb.buf[bb.total_count] = value;
+    }
+    else {
+        last_i := bb.total_count % BB_CHUNK_LEN;
+        if (last_i == 0) {
+            node := _alloc_list_node(bb);
+            if (bb.next_buf == nullptr(BufferBuilder_ListNode($P))) {
+                bb.next_buf = node;
+            }
+            else {
+                bb.last_buf.next = node;
+            }
+            bb.last_buf = node;
+        }
+        bb.last_buf.buf[last_i] = value;
+    }
+    bb.total_count += 1;
+}
+
+fn reset(bb: $T / *BufferBuilder($P)): void {
+    bb.total_count = 0;
+}
+
+fn destroy(bb: $T / *BufferBuilder($P)): void {
+    node := bb.next_buf;
+    while (node != nullptr(BufferBuilder_ListNode($P))) {
+        next := node.next;
+        mem_free(bb.arena, node);
+        node = next;
+    }
+    bb.next_buf = nullptr(BufferBuilder_ListNode($P));
+    bb.last_buf = nullptr(BufferBuilder_ListNode($P));
+    bb.total_count = 0;
+}
+
+fn finalize(bb: $T / *BufferBuilder($P), alloc: *Alloc, destroy: bool = true): []$P {
+    if (bb.total_count == 0) {
+        return .{ 0; 0; };
+    }
+
+    elem_size := sizeof_type($P);
+    ptr := mem_alloc(alloc, elem_size * bb.total_count, 8);
+
+    it := ptr;
+    count := bb.total_count;
+
+    n := min(count, BB_CHUNK_LEN);
+    mem_copy(it, bb.buf.ptr, n * elem_size);
+    it = byte_offset(it, n * elem_size);
+    count -= n;
+
+    node := bb.next_buf;
+    while (count > 0) {
+        n = min(count, BB_CHUNK_LEN);
+        mem_copy(it, node.buf.ptr, n * elem_size);
+        it = byte_offset(it, n * elem_size);
+        count -= n;
+        node = node.next;
+    }
+
+    if (destroy) {
+        destroy(bb);
+    }
+    return .{ ptr; bb.total_count; };
+}
+
+// does not free memory, just clear the content
+fn finalize_and_reset(bb: $T / *BufferBuilder($P), alloc: *Alloc): []$P {
+    out := finalize(bb, alloc, false);
+    reset(bb);
+    return out;
+}
+
+// -- iterator --------
+
+struct BufferBuilderIter($T: __type_ptr) {
+    bb: *BufferBuilder($T);
+    node: *BufferBuilder_ListNode($T);   // null while the inline chunk is current
+    index: i64;                          // -1 before the first iterator_next
+};
+
+fn iterate(bb: $T / *BufferBuilder($P)): BufferBuilderIter($P) {
+    out: BufferBuilderIter($P) = #memory_garbage;
+    out.bb = bb;
+    out.node = nullptr(BufferBuilder_ListNode($P));
+    out.index = -1;
+    return out;
+}
+
+fn iterator_next(it: *BufferBuilderIter($T)): bool {
+    it.index += 1;
+    if (it.index >= it.bb.total_count) { return false; }
+    if (it.index == BB_CHUNK_LEN) { it.node = it.bb.next_buf; }
+    if ((it.index > BB_CHUNK_LEN) && ((it.index % BB_CHUNK_LEN) == 0)) { it.node = it.node.next; }
+    return true;
+}
+
+fn iterator_current(it: *BufferBuilderIter($T)): *$T {
+    if (it.index < BB_CHUNK_LEN) { return ty_offset(it.bb.buf.ptr, it.index); }
+    return ty_offset(it.node.buf.ptr, it.index % BB_CHUNK_LEN);
+}

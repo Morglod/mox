@@ -1,0 +1,62 @@
+import "./internal.mox";
+import "./os.mox";
+import "./alloc.mox";
+import "./panic.mox";
+import "./slice.mox";
+
+const PATH_SEPARATOR : u8 = char("/");
+
+// "a/b"  -> "a/"
+// "a/b/" -> "a/"
+fn path_parent(path: []u8): []u8 {
+    end := path.len;
+    if ((end > 0) && (path[end - 1] == PATH_SEPARATOR)) { end -= 1; }
+    cut := index_of_last(path, PATH_SEPARATOR, end);
+    if (cut < 0) { return empty_slice(u8); }
+    return slice(path, 0, cut + 1);
+}
+
+// dir + "/" + name
+// the separator is added only when dir does not end with one.
+fn path_join(alloc: *Alloc, dir: []u8, name: []u8): []u8 {
+    has_sep := (name.len > 0) && (dir.len > 0) && (dir[dir.len - 1] != PATH_SEPARATOR);
+    out := mem_alloc_slice(alloc, u8, dir.len + has_sep.cast(i64) + name.len);
+    mem_copy(out, dir);
+    if (has_sep) { out[dir.len] = PATH_SEPARATOR; }
+    mem_copy(slice(out, dir.len + has_sep.cast(i64), name.len), name);
+    return out;
+}
+
+fn try_read_file_full(alloc: *Alloc, path: []u8): []u8 {
+    h := os_file_open_read(path);
+    if (h == 0) { return empty_slice(u8); }
+    defer os_file_close(h);
+
+    file_size := os_file_size(h);
+    buf := mem_alloc_slice(alloc, u8, file_size + 1);
+
+    total: i64 = 0;
+    while (total < buf.len) {
+        got := os_file_read(h, slice(buf, total, buf.len - total));
+        if (got == 0) {
+            // EOF or error
+            break;
+        }
+        total += got;
+    }
+
+    if (total != file_size) {
+        mem_free(alloc, buf);
+        return empty_slice(u8);
+    }
+
+    return slice(buf, 0, total);
+}
+
+fn read_file_full(alloc: *Alloc, path: []u8): []u8 {
+    out := try_read_file_full(alloc, path);
+    if (out.ptr == nullptr(u8)) {
+        panic("read_file_full failed to read \"{}\"", .{ path; });
+    }
+    return out;
+}

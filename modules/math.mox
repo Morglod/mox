@@ -1,0 +1,477 @@
+// Matrix($T, $X, $Y) is column-major: $X columns of $Y rows, stored as data[col][row].
+// Projections are right-handed with z in [0, 1] clip space (vulkan / d3d / wgpu).
+
+import "internal.mox";
+
+#linkc("sqrtf") fn c_sqrtf(x: f32): f32;
+#linkc("sqrt")  fn c_sqrt(x: f64): f64;
+#linkc("sinf")  fn c_sinf(x: f32): f32;
+#linkc("sin")   fn c_sin(x: f64): f64;
+#linkc("cosf")  fn c_cosf(x: f32): f32;
+#linkc("cos")   fn c_cos(x: f64): f64;
+#linkc("tanf")  fn c_tanf(x: f32): f32;
+#linkc("tan")   fn c_tan(x: f64): f64;
+#linkc("asinf") fn c_asinf(x: f32): f32;
+#linkc("asin")  fn c_asin(x: f64): f64;
+#linkc("acosf") fn c_acosf(x: f32): f32;
+#linkc("acos")  fn c_acos(x: f64): f64;
+#linkc("atanf") fn c_atanf(x: f32): f32;
+#linkc("atan")  fn c_atan(x: f64): f64;
+#linkc("atan2f") fn c_atan2f(y: f32, x: f32): f32;
+#linkc("atan2")  fn c_atan2(y: f64, x: f64): f64;
+#linkc("powf")  fn c_powf(b: f32, e: f32): f32;
+#linkc("pow")   fn c_pow(b: f64, e: f64): f64;
+#linkc("expf")  fn c_expf(x: f32): f32;
+#linkc("exp")   fn c_exp(x: f64): f64;
+#linkc("logf")  fn c_logf(x: f32): f32;
+#linkc("log")   fn c_log(x: f64): f64;
+#linkc("floorf") fn c_floorf(x: f32): f32;
+#linkc("floor")  fn c_floor(x: f64): f64;
+#linkc("ceilf") fn c_ceilf(x: f32): f32;
+#linkc("ceil")  fn c_ceil(x: f64): f64;
+#linkc("roundf") fn c_roundf(x: f32): f32;
+#linkc("round")  fn c_round(x: f64): f64;
+#linkc("fmodf") fn c_fmodf(a: f32, b: f32): f32;
+#linkc("fmod")  fn c_fmod(a: f64, b: f64): f64;
+#linkc("fabs")  fn c_fabs(x: f64): f64;
+
+fn sqrt(x: f32): f32 { return c_sqrtf(x); }
+fn sqrt(x: f64): f64 { return c_sqrt(x); }
+fn sin(x: f32): f32 { return c_sinf(x); }
+fn sin(x: f64): f64 { return c_sin(x); }
+fn cos(x: f32): f32 { return c_cosf(x); }
+fn cos(x: f64): f64 { return c_cos(x); }
+fn tan(x: f32): f32 { return c_tanf(x); }
+fn tan(x: f64): f64 { return c_tan(x); }
+fn asin(x: f32): f32 { return c_asinf(x); }
+fn asin(x: f64): f64 { return c_asin(x); }
+fn acos(x: f32): f32 { return c_acosf(x); }
+fn acos(x: f64): f64 { return c_acos(x); }
+fn atan(x: f32): f32 { return c_atanf(x); }
+fn atan(x: f64): f64 { return c_atan(x); }
+fn atan2(y: f32, x: f32): f32 { return c_atan2f(y, x); }
+fn atan2(y: f64, x: f64): f64 { return c_atan2(y, x); }
+fn pow(b: f32, e: f32): f32 { return c_powf(b, e); }
+fn pow(b: f64, e: f64): f64 { return c_pow(b, e); }
+fn exp(x: f32): f32 { return c_expf(x); }
+fn exp(x: f64): f64 { return c_exp(x); }
+fn log(x: f32): f32 { return c_logf(x); }
+fn log(x: f64): f64 { return c_log(x); }
+fn floor(x: f32): f32 { return c_floorf(x); }
+fn floor(x: f64): f64 { return c_floor(x); }
+fn ceil(x: f32): f32 { return c_ceilf(x); }
+fn ceil(x: f64): f64 { return c_ceil(x); }
+fn round(x: f32): f32 { return c_roundf(x); }
+fn round(x: f64): f64 { return c_round(x); }
+fn fmod(a: f32, b: f32): f32 { return c_fmodf(a, b); }
+fn fmod(a: f64, b: f64): f64 { return c_fmod(a, b); }
+// abs() exists in internal.mox
+
+fn pi($T: __type_ptr): $T {
+    return 4 * atan(1 .cast($T));
+}
+
+fn to_radians(deg: $T): $T {
+    return deg * pi($T) / 180;
+}
+fn to_degrees(rad: $T): $T {
+    return rad * 180 / pi($T);
+}
+
+fn umul128_hi(a: u64, b: u64): u64 {
+    a_lo := a & 4294967295;
+    a_hi := #shr(a, 32);
+    b_lo := b & 4294967295;
+    b_hi := #shr(b, 32);
+    p00 := a_lo * b_lo;
+    mid := a_hi * b_lo + #shr(p00, 32);
+    mid2 := (mid & 4294967295) + a_lo * b_hi;
+    return a_hi * b_hi + #shr(mid, 32) + #shr(mid2, 32);
+}
+
+// valid for the full u64 range
+fn div10_u64(x: u64): u64 {
+    h := umul128_hi(x, 14757395258967641293);
+    return #shr(h, 3);
+}
+
+fn div1e8_u64(x: u64): u64 {
+    h := umul128_hi(x, 12379400392853802749);
+    return #shr(h, 26);
+}
+
+// valid only while x fits in 32 bits
+fn div10_u32(x: u64): u64 {
+    return #shr(x * 3435973837, 35);
+}
+
+fn div10000_u32(x: u64): u64 {
+    return #shr(x * 3518437209, 45);
+}
+
+fn div_pow10(x: u64, k: u64): u64 {
+    while (k >= 8 && x >= 4294967296) {
+        x = div1e8_u64(x);
+        k -= 8;
+    }
+    while (k > 0 && x >= 4294967296) {
+        x = div10_u64(x);
+        k -= 1;
+    }
+    while (k >= 4) {
+        x = div10000_u32(x);
+        k -= 4;
+    }
+    while (k > 0) {
+        x = div10_u32(x);
+        k -= 1;
+    }
+    return x;
+}
+
+const vec2i := #type [2]i32;
+const vec3i := #type [3]i32;
+const vec4i := #type [4]i32;
+
+const vec2i64 := #type [2]i64;
+const vec3i64 := #type [3]i64;
+const vec4i64 := #type [4]i64;
+
+const vec2f := #type [2]f32;
+const vec3f := #type [3]f32;
+const vec4f := #type [4]f32;
+
+const vec2d := #type [2]f64;
+const vec3d := #type [3]f64;
+const vec4d := #type [4]f64;
+
+fn dot(a: [$N]$T, b: [$N]$T): $T {
+    acc: $T = 0;
+    for (i : it_range($N)) { acc += a[i] * b[i]; }
+    return acc;
+}
+
+fn length_sq(v: [$N]$T): $T { return dot(v, v); }
+fn length(v: [$N]$T): $T { return sqrt(dot(v, v)); }
+
+fn distance_sq(a: [$N]$T, b: [$N]$T): $T { d: [$N]$T = a - b; return dot(d, d); }
+fn distance(a: [$N]$T, b: [$N]$T): $T { d: [$N]$T = a - b; return sqrt(dot(d, d)); }
+
+fn normalize(v: [$N]$T): [$N]$T {
+    inv: $T = 1 .cast($T) / length(v);
+    return v * inv;
+}
+
+fn lerp(a: [$N]$T, b: [$N]$T, t: $T): [$N]$T { return a + (b - a) * t; }
+
+// mirror v about unit normal n
+fn reflect(v: [$N]$T, n: [$N]$T): [$N]$T {
+    return v - n * (dot(v, n) * 2);
+}
+
+fn vmin(a: [$N]$T, b: [$N]$T): [$N]$T {
+    out: [$N]$T = a;
+    for (i : it_range($N)) { out[i] = min(a[i], b[i]); }
+    return out;
+}
+fn vmax(a: [$N]$T, b: [$N]$T): [$N]$T {
+    out: [$N]$T = a;
+    for (i : it_range($N)) { out[i] = max(a[i], b[i]); }
+    return out;
+}
+fn vclamp(v: [$N]$T, lo: [$N]$T, hi: [$N]$T): [$N]$T {
+    out: [$N]$T = v;
+    for (i : it_range($N)) { out[i] = clamp(v[i], lo[i], hi[i]); }
+    return out;
+}
+fn vabs(v: [$N]$T): [$N]$T {
+    out: [$N]$T = v;
+    for (i : it_range($N)) { out[i] = abs(v[i]); }
+    return out;
+}
+
+fn cross(a: [3]$T, b: [3]$T): [3]$T {
+    out: [3]$T = a;
+    out.x = a.y * b.z - a.z * b.y;
+    out.y = a.z * b.x - a.x * b.z;
+    out.z = a.x * b.y - a.y * b.x;
+    return out;
+}
+
+struct Matrix($T: __type_ptr, $X: u32, $Y: u32) {
+    data: [$X][$Y]$T;
+};
+
+fn mget(m: $M / Matrix($T, $X, $Y), col: u32, row: u32): $T {
+    return m.data[col][row];
+}
+
+fn identity($T: __type_ptr, $N: u32): Matrix($T, $N, $N) {
+    out: Matrix($T, $N, $N) = #memory_garbage;
+    for (c : it_range(0u32, $N)) {
+        for (r : it_range(0u32, $N)) {
+            if (c == r) { out.data[c][r] = 1; } else { out.data[c][r] = 0; }
+        }
+    }
+    return out;
+}
+
+fn mzero($T: __type_ptr, $X: u32, $Y: u32): Matrix($T, $X, $Y) {
+    m: Matrix($T, $X, $Y) = #memory_garbage;
+    z: $T = 0;
+    for (c : it_range(0u32, $X)) {
+        for (r : it_range(0u32, $Y)) { m.data[c][r] = z; }
+    }
+    return m;
+}
+
+// (a: $A x $B) * (b: $B2 x $C), sizes are (cols x rows).
+// TODO: Correct only for square matrices, other shapes mix up column and row indexes.
+fn mul(a: $MA / Matrix($T, $A, $B), b: $MB / Matrix($T2, $B2, $C)): Matrix($T, $A, $C) {
+    out: Matrix($T, $A, $C) = #memory_garbage;
+    for (col : it_range(0u32, $C)) {
+        for (row : it_range(0u32, $A)) {
+            acc: $T = 0;
+            for (k : it_range(0u32, $B)) {
+                acc += a.data[k][row] * b.data[col][k];
+            }
+            out.data[col][row] = acc;
+        }
+    }
+    return out;
+}
+
+fn transpose(m: $M / Matrix($T, $X, $Y)): Matrix($T, $Y, $X) {
+    out: Matrix($T, $Y, $X) = #memory_garbage;
+    for (c : it_range(0u32, $X)) {
+        for (r : it_range(0u32, $Y)) { out.data[r][c] = m.data[c][r]; }
+    }
+    return out;
+}
+
+fn mul_vec(m: $M / Matrix($T, $X, $Y), v: [$X]$T): [$Y]$T {
+    out: [$Y]$T = #memory_garbage;
+    for (r : it_range(0u32, $Y)) {
+        acc: $T = 0;
+        for (c : it_range(0u32, $X)) {
+            acc += m.data[c][r] * v[c];
+        }
+        out[r] = acc;
+    }
+    return out;
+}
+
+// gauss elimination without pivoting, good enough for transform matrices
+fn determinant(m: $M / Matrix($T, $N, $N)): $T {
+    a: Matrix($T, $N, $N) = m;
+    det: $T = 1;
+    for (p : it_range(0u32, $N)) {
+        piv: $T = a.data[p][p];
+        det *= piv;
+        for (r : it_range(p + 1, $N)) {
+            factor: $T = a.data[p][r] / piv;
+            for (c : it_range(0u32, $N)) {
+                a.data[c][r] -= factor * a.data[c][p];
+            }
+        }
+    }
+    return det;
+}
+
+// gauss-jordan without pivoting
+fn inverse(m: $M / Matrix($T, $N, $N)): Matrix($T, $N, $N) {
+    a: Matrix($T, $N, $N) = m;
+    inv: Matrix($T, $N, $N) = identity($T, $N);
+    for (p : it_range(0u32, $N)) {
+        piv: $T = a.data[p][p];
+        for (c : it_range(0u32, $N)) {
+            a.data[c][p] /= piv;
+            inv.data[c][p] /= piv;
+        }
+        for (r : it_range(0u32, $N)) {
+            if (r != p) {
+                factor: $T = a.data[p][r];
+                for (cc : it_range(0u32, $N)) {
+                    a.data[cc][r] -= factor * a.data[cc][p];
+                    inv.data[cc][r] -= factor * inv.data[cc][p];
+                }
+            }
+        }
+    }
+    return inv;
+}
+
+fn translation(t: [3]$T): Matrix($T, 4, 4) {
+    m: Matrix($T, 4, 4) = identity($T, 4);
+    m.data[3][0] = t.x;
+    m.data[3][1] = t.y;
+    m.data[3][2] = t.z;
+    return m;
+}
+
+fn scaling(s: [3]$T): Matrix($T, 4, 4) {
+    m: Matrix($T, 4, 4) = identity($T, 4);
+    m.data[0][0] = s.x;
+    m.data[1][1] = s.y;
+    m.data[2][2] = s.z;
+    return m;
+}
+
+fn rotation_x(angle: $T): Matrix($T, 4, 4) {
+    m: Matrix($T, 4, 4) = identity($T, 4);
+    c: $T = cos(angle);
+    s: $T = sin(angle);
+    m.data[1][1] = c;  m.data[1][2] = s;
+    m.data[2][1] = -s; m.data[2][2] = c;
+    return m;
+}
+fn rotation_y(angle: $T): Matrix($T, 4, 4) {
+    m: Matrix($T, 4, 4) = identity($T, 4);
+    c: $T = cos(angle);
+    s: $T = sin(angle);
+    m.data[0][0] = c; m.data[0][2] = -s;
+    m.data[2][0] = s; m.data[2][2] = c;
+    return m;
+}
+fn rotation_z(angle: $T): Matrix($T, 4, 4) {
+    m: Matrix($T, 4, 4) = identity($T, 4);
+    c: $T = cos(angle);
+    s: $T = sin(angle);
+    m.data[0][0] = c;  m.data[0][1] = s;
+    m.data[1][0] = -s; m.data[1][1] = c;
+    return m;
+}
+
+// axis is normalized here, no need to do it on the caller side
+fn rotation_axis(axis: [3]$T, angle: $T): Matrix($T, 4, 4) {
+    a: [3]$T = normalize(axis);
+    c: $T = cos(angle);
+    s: $T = sin(angle);
+    t: $T = 1 - c;
+    x: $T = a.x; y: $T = a.y; z: $T = a.z;
+    m: Matrix($T, 4, 4) = identity($T, 4);
+    // data[col][row] = R[row][col]
+    m.data[0][0] = t*x*x + c;   m.data[1][0] = t*x*y - s*z; m.data[2][0] = t*x*z + s*y;
+    m.data[0][1] = t*x*y + s*z; m.data[1][1] = t*y*y + c;   m.data[2][1] = t*y*z - s*x;
+    m.data[0][2] = t*x*z - s*y; m.data[1][2] = t*y*z + s*x; m.data[2][2] = t*z*z + c;
+    return m;
+}
+
+fn perspective(fovy: $T, aspect: $T, near: $T, far: $T): Matrix($T, 4, 4) {
+    m: Matrix($T, 4, 4) = mzero($T, 4, 4);
+    th: $T = tan(fovy / 2);
+    m.data[0][0] = 1 / (aspect * th);
+    m.data[1][1] = 1 / th;
+    m.data[2][2] = far / (near - far);
+    m.data[2][3] = -1;
+    m.data[3][2] = -(far * near) / (far - near);
+    return m;
+}
+
+fn orthographic(left: $T, right: $T, bottom: $T, top: $T, near: $T, far: $T): Matrix($T, 4, 4) {
+    m: Matrix($T, 4, 4) = identity($T, 4);
+    m.data[0][0] = 2 / (right - left);
+    m.data[1][1] = 2 / (top - bottom);
+    m.data[2][2] = -1 / (far - near);
+    m.data[3][0] = -(right + left) / (right - left);
+    m.data[3][1] = -(top + bottom) / (top - bottom);
+    m.data[3][2] = -near / (far - near);
+    return m;
+}
+
+fn look_at(eye: [3]$T, center: [3]$T, up: [3]$T): Matrix($T, 4, 4) {
+    f: [3]$T = normalize(center - eye);
+    s: [3]$T = normalize(cross(f, up));
+    u: [3]$T = cross(s, f);
+    m: Matrix($T, 4, 4) = identity($T, 4);
+    m.data[0][0] = s.x;  m.data[1][0] = s.y;  m.data[2][0] = s.z;
+    m.data[0][1] = u.x;  m.data[1][1] = u.y;  m.data[2][1] = u.z;
+    m.data[0][2] = -f.x; m.data[1][2] = -f.y; m.data[2][2] = -f.z;
+    m.data[3][0] = -dot(s, eye);
+    m.data[3][1] = -dot(u, eye);
+    m.data[3][2] = dot(f, eye);
+    return m;
+}
+
+// x, y, z is the vector part, w is the scalar part
+struct Quat($T: __type_ptr) { x: $T; y: $T; z: $T; w: $T; };
+
+fn quat_identity($T: __type_ptr): Quat($T) {
+    q: Quat($T) = #memory_garbage;
+    q.x = 0; q.y = 0; q.z = 0; q.w = 1;
+    return q;
+}
+
+fn quat_mul(a: Quat($T), b: Quat($T)): Quat($T) {
+    q: Quat($T) = #memory_garbage;
+    q.w = a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z;
+    q.x = a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y;
+    q.y = a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x;
+    q.z = a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w;
+    return q;
+}
+
+fn quat_from_axis_angle(axis: [3]$T, angle: $T): Quat($T) {
+    half: $T = angle / 2;
+    s: $T = sin(half);
+    n: [3]$T = normalize(axis);
+    q: Quat($T) = #memory_garbage;
+    q.x = n.x * s; q.y = n.y * s; q.z = n.z * s; q.w = cos(half);
+    return q;
+}
+
+fn quat_normalize(q: Quat($T)): Quat($T) {
+    len: $T = sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
+    inv: $T = 1 / len;
+    r: Quat($T) = #memory_garbage;
+    r.x = q.x*inv; r.y = q.y*inv; r.z = q.z*inv; r.w = q.w*inv;
+    return r;
+}
+
+fn quat_to_matrix(q: Quat($T)): Matrix($T, 4, 4) {
+    m: Matrix($T, 4, 4) = identity($T, 4);
+    xx: $T = q.x*q.x; yy: $T = q.y*q.y; zz: $T = q.z*q.z;
+    xy: $T = q.x*q.y; xz: $T = q.x*q.z; yz: $T = q.y*q.z;
+    wx: $T = q.w*q.x; wy: $T = q.w*q.y; wz: $T = q.w*q.z;
+    m.data[0][0] = 1 - 2 * (yy + zz);   m.data[0][1] = 2 * (xy + wz);       m.data[0][2] = 2 * (xz - wy);
+    m.data[1][0] = 2 * (xy - wz);       m.data[1][1] = 1 - 2 * (xx + zz);   m.data[1][2] = 2 * (yz + wx);
+    m.data[2][0] = 2 * (xz + wy);       m.data[2][1] = 2 * (yz - wx);       m.data[2][2] = 1 - 2 * (xx + yy);
+    return m;
+}
+
+// q must be unit
+fn quat_rotate_vec(q: Quat($T), v: [3]$T): [3]$T {
+    qv: [3]$T = #memory_garbage;
+    qv.x = q.x; qv.y = q.y; qv.z = q.z;
+    t: [3]$T = cross(qv, v) * 2;
+    return v + t * q.w + cross(qv, t);
+}
+
+fn quat_slerp(a: Quat($T), b: Quat($T), t: $T): Quat($T) {
+    cosom: $T = a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w;
+    b2: Quat($T) = b;
+    if (cosom < 0) {
+        cosom = -cosom;
+        b2.x = -b.x; b2.y = -b.y; b2.z = -b.z; b2.w = -b.w;
+    }
+    r: Quat($T) = #memory_garbage;
+    // 0.9995, built without a float literal: a suffix would pin $T to one type
+    thresh: $T = 1 - 5 .cast($T) / 10000 .cast($T);
+    if (cosom > thresh) {
+        // too close for slerp, plain lerp
+        r.x = a.x + (b2.x - a.x)*t;
+        r.y = a.y + (b2.y - a.y)*t;
+        r.z = a.z + (b2.z - a.z)*t;
+        r.w = a.w + (b2.w - a.w)*t;
+        return quat_normalize(r);
+    }
+    omega: $T = acos(cosom);
+    sinom: $T = sin(omega);
+    scale0: $T = sin((1 - t)*omega) / sinom;
+    scale1: $T = sin(t*omega) / sinom;
+    r.x = a.x*scale0 + b2.x*scale1;
+    r.y = a.y*scale0 + b2.y*scale1;
+    r.z = a.z*scale0 + b2.z*scale1;
+    r.w = a.w*scale0 + b2.w*scale1;
+    return r;
+}

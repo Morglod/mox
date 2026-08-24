@@ -1,0 +1,17 @@
+import "./internal.mox";
+import "./slice.mox";
+
+const FNV1A32_OFFSET : u32 = 0x811C9DC5;
+const FNV1A32_PRIME  : u32 = 0x01000193;
+
+fn fnv1a_32(seed: u32, s: []u8): u32 {
+    h := seed;
+    for (b : iterate(s)) {
+        h = #wrap_mul(h ^ b.*.cast(u32), FNV1A32_PRIME);
+    }
+    return h;
+}
+
+fn fnv1a_32(seed: u32, p: *u8, n: i64): u32 { return fnv1a_32(seed, slice(p, n)); }
+fn fnv1a_32(s: []u8): u32 { return fnv1a_32(FNV1A32_OFFSET, s); }
+fn fnv1a_32_mix(seed: u32, v: u32): u32 { return #wrap_mul(seed ^ v, FNV1A32_PRIME); }

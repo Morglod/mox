@@ -1,0 +1,121 @@
+import "./internal.mox";
+import "./alloc.mox";
+import "./os_posix.mox";
+
+struct Pty {
+    master: i32;     // pty master fd (non-blocking)
+    pid: i32;        // child pid
+    cols: u32;
+    rows: u32;
+    alive: bool;
+    exit_status: i32; // raw waitpid status, captured when the child is reaped
+};
+
+fn _pty_set_winsize(fd: i32, cols: u32, rows: u32): void {
+    ws: PosixWinSize = 0;
+    ws.ws_col = cols.cast(u16);
+    ws.ws_row = rows.cast(u16);
+    posix_ioctl(fd, POSIX_TIOCSWINSZ, ws.^.cast(*u8));
+}
+
+// spawn `cmd` (NUL-terminated) as `/bin/sh -c cmd` in a cols x rows pty
+fn pty_spawn(alloc: *Alloc, cmd: *u8, cols: i64, rows: i64, out: *Pty): bool {
+    out.cols = max(cols, 1).cast(u32);
+    out.rows = max(rows, 1).cast(u32);
+    out.alive = false;
+    out.exit_status = 0;
+    // set master invalid first, pty_close closes it when it is a valid fd
+    out.master = POSIX_NO_FD;
+    out.pid = 0;
+
+    master := posix_openpt(POSIX_O_RDWR | POSIX_O_NOCTTY);
+    if (master < 0) { return false; }
+    if (posix_grantpt(master) != 0) { posix_close(master); return false; }
+    if (posix_unlockpt(master) != 0) { posix_close(master); return false; }
+    slave_name := posix_ptsname(master);
+    if (slave_name == 0) { posix_close(master); return false; }
+
+    pid := posix_fork();
+    if (pid < 0) { posix_close(master); return false; }
+
+    if (pid == 0) {
+        // child: new session, slave tty becomes the controlling terminal and all of stdio
+        posix_setsid();
+        slave := posix_open(slave_name, POSIX_O_RDWR, 0);
+        if (slave < 0) { posix_exit_now(127); }
+        posix_ioctl(slave, POSIX_TIOCSCTTY, nullptr(u8));
+        posix_dup2(slave, 0);
+        posix_dup2(slave, 1);
+        posix_dup2(slave, 2);
+        if (slave > 2) { posix_close(slave); }
+        posix_close(master);
+
+        sh := "/bin/sh";
+        dash_c := "-c";
+        argv: [4]*u8 = .{ sh.ptr; dash_c.ptr; cmd; nullptr(u8); };
+        posix_execvp(sh.ptr, argv.ptr.cast(*u8));
+        posix_exit_now(127);
+    }
+
+    // parent
+    _pty_set_winsize(master, out.cols, out.rows);
+    posix_fcntl(master, POSIX_F_SETFL, POSIX_O_NONBLOCK);
+    out.master = master;
+    out.pid = pid;
+    out.alive = true;
+    return true;
+}
+
+// non-blocking, returns 0 when the child produced nothing yet
+fn pty_read(pty: *Pty, buf: *u8, cap: i64): i64 {
+    if (pty.master < 0) { return 0; }
+    r := posix_read(pty.master, buf, cap.cast(u64));
+    if (r <= 0) { return 0; }
+    return r;
+}
+
+fn pty_write(pty: *Pty, buf: *u8, n: i64): void {
+    if (n == 0) { return; }
+    if (pty.master < 0) { return; }
+    posix_write(pty.master, buf, n.cast(u64));
+}
+
+// reaps the child once it exits, and keeps its status for pty_exit_code
+fn pty_alive(pty: *Pty): bool {
+    if (!pty.alive) { return false; }
+    st: i32 = 0;
+    r := posix_waitpid(pty.pid, st.^, POSIX_WNOHANG);
+    if (r == 0) { return true; }
+    pty.exit_status = st;
+    pty.alive = false;
+    return false;
+}
+
+// only meaningful after pty_alive() returned false
+fn pty_exit_code(pty: *Pty): u32 {
+    // WEXITSTATUS(status) = (status >> 8) & 0xff
+    return #shr(pty.exit_status.cast(u32), 8) & 255;
+}
+
+fn pty_resize(pty: *Pty, cols: i64, rows: i64): void {
+    if (!pty.alive) { return; }
+    cols_ := max(cols, 1).cast(u32);
+    rows_ := max(rows, 1).cast(u32);
+    if ((cols_ == pty.cols) && (rows_ == pty.rows)) { return; }
+    pty.cols = cols_;
+    pty.rows = rows_;
+    _pty_set_winsize(pty.master, cols_, rows_);
+}
+
+fn pty_close(pty: *Pty): void {
+    if (!pty.alive) {
+        if (pty.master >= 0) { posix_close(pty.master); pty.master = POSIX_NO_FD; }
+        return;
+    }
+    posix_kill(pty.pid, POSIX_SIGKILL);
+    st: i32 = 0;
+    posix_waitpid(pty.pid, st.^, 0);
+    posix_close(pty.master);
+    pty.master = POSIX_NO_FD;
+    pty.alive = false;
+}

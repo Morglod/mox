@@ -1,0 +1,24 @@
+import "./internal.mox";
+import "./slice.mox";
+
+#run {
+    import_code : []u8 = "import \"./os_posix.mox\" #export;";
+    if (mox_platform == MoxPlatform.x86_64_win) {
+        import_code = "import \"./os_win.mox\" #export;";
+    }
+
+    #land_ast __compiler_parse(import_code);
+}
+
+// heap hooks the runtime calls
+#linkc fn __mox_mem_alloc(size: i64, align: u32): *u8 {
+    return os_heap_alloc(size, align);
+}
+
+#linkc fn __mox_mem_realloc(old_mem: *u8, new_size: i64, align: u32): *u8 {
+    return os_heap_realloc(old_mem, new_size, align);
+}
+
+#linkc fn __mox_mem_free(mem: *u8): void {
+    os_heap_free(mem);
+}

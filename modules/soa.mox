@@ -1,0 +1,96 @@
+import "internal.mox";
+import "string.mox";
+import "format.mox";
+import "context.mox";
+import "assert.mox";
+import "slice.mox";
+import "alloc.mox";
+
+// TODO: to avoid getting generic params we can add comptime alias
+// that will act as static alias
+// so we can do SOA.$static_alias to get original type
+
+// struct MyType { x: i32; y: f32; };
+// const SOA_Type := #run #soa(MyType);
+//
+// struct SOA($OriginalType: __type_ptr) {
+//    __soa_slots: [2][]u8;
+//    #alias x -> []i32;
+//    #alias y -> []f32;
+// }
+//
+fn #soa($T: __type_ptr): __type_ptr {
+    assert($T.cast(*MoxType).kind == .Struct, "$T expected to be a struct");
+    T := $T.cast(*MoxType).cast(*MoxType_Struct);
+
+    ast: __ast_ptr = #memory_garbage;
+
+    {
+        alloc := #temp_arena_as_alloc();
+        sb := mem_alloc(alloc, StringBuilder);
+        init(sb, alloc);
+
+        members_count := T.fields.len;
+
+        format(sb, "struct SOA($OriginalType: __type_ptr) { \n __soa_slots: [{}][]u8; \n ", .{ members_count; });
+        for (i : it_range(members_count)) {
+            field_name := #run __compiler_ast_to_string(T.fields[i].ident);
+            field_type_ptr := T.fields[i].type.cast(*MoxType).cast(u64);
+            format(sb, "#alias {} = self.__soa_slots[{}] |> cast(#run __mox_dangerously_format_to_type_ptr({}));\n", .{ field_name; i; field_type_ptr; });
+        }
+        push(sb, "};");
+
+        code := finalize(sb, alloc, false);
+        ast = __compiler_parse(code);
+    }
+    #land_ast ast;
+
+    return #type SOA($T);
+}
+
+fn __soa_original_type($soa_type: __type_ptr): *MoxType_Struct {
+    return $soa_type.cast(*MoxType).cast(*MoxType_Struct).struct_generic_params.poly_params[0].value.cast(*MoxType_Struct);
+}
+
+fn __soa_field_type($soa_type: __type_ptr, $slot_index: i64): *MoxType {
+    return __soa_original_type($soa_type).fields[$slot_index].type;
+}
+
+fn __soa_fields_count($soa_type: __type_ptr): i64 {
+    return __soa_original_type($soa_type).fields.len;
+}
+
+fn soa_alloc(soa: *$T, max_items: i64, alloc: *Alloc): void {
+    const fields_count := __soa_fields_count($T);
+    #run {
+        for (i : it_range(fields_count)) {
+            const field_type := __soa_field_type($T, i);
+            const field_type_size := field_type.size .cast(i64);
+            #emit soa.__soa_slots[i] = mem_alloc_slice(alloc, u8, field_type_size * max_items);
+        }
+    };
+}
+
+fn soa_realloc(soa: *$T, max_items: i64, alloc: *Alloc): void {
+    const fields_count := __soa_fields_count($T);
+    #run {
+        for (i : it_range(fields_count)) {
+            const field_type := __soa_field_type($T, i);
+            const field_type_size := field_type.size .cast(i64);
+            #emit soa.__soa_slots[i] = mem_realloc_slice(alloc, soa.__soa_slots[i], field_type_size * max_items);
+        }
+    };
+}
+
+fn soa_free(soa: *$T, max_items: i64, alloc: *Alloc): void {
+    const fields_count := __soa_fields_count($T);
+    #run {
+        for (i : it_range(fields_count)) {
+            #emit {
+                soa.__soa_slots[i] = mem_free(alloc, soa.__soa_slots[i]);
+                soa.__soa_slots[i].ptr = nullptr(u8);
+                soa.__soa_slots[i].len = 0;
+            };
+        }
+    };
+}

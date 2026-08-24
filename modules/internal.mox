@@ -1,0 +1,493 @@
+// compiler internals and base utils
+
+const usize := u64;
+const isize := i64;
+
+const __mox_slice_length_type := isize;
+const __mox_string_length_type := u32;
+
+#linkc fn __mox_mem_alloc(size: i64, align: u32): *u8;
+#linkc fn __mox_mem_realloc(old_mem: *u8, new_size: i64, align: u32): *u8;
+#linkc fn __mox_mem_free(mem: *u8): void;
+
+#linkc fn __mox_debug_break(msg: *u8, msg_len: i64): bool {
+    return false;
+}
+
+enum MoxPlatform : u8 {
+    unknown;
+    x86_64_win;
+    x86_64_sysv;
+    x86_64_macos;
+};
+
+enum MoxTypeKind : u8 {
+    Unknown;
+    Void;
+    Bool;
+    I8;
+    I16;
+    I32;
+    I64;
+    U8;
+    U16;
+    U32;
+    U64;
+    F32;
+    F64;
+    Ptr;
+    AstPtr;
+    FuncSignature;
+    PolyFuncSignature;
+    Slice;
+    Struct;
+    TypePtr;
+    Enum;
+    EnumVariant;
+    Array;
+    PolyIdent;
+    PolyTypeDecl;
+    Placeholder;
+    ComptimeInt;
+    ComptimeFloat;
+};
+
+struct MoxType {
+    type_hash: u64;
+    size: u32;
+    kind: MoxTypeKind;
+    align: u8;
+    flags: u8;
+};
+
+struct MoxType_Ptr {
+    base: MoxType;
+    base_type: *MoxType;
+    flags: u8;
+};
+
+struct MoxType_Slice {
+    base: MoxType;
+    base_type: *MoxType;
+    fixed_len: u32;
+    has_fixed_len: bool;
+};
+
+struct MoxType_StructField {
+    ident: __ast_ptr;
+    type: *MoxType;
+    memory_offset: u32;
+};
+
+struct MoxType_Struct_GenericParams_Item {
+    value: *u8;
+};
+
+struct MoxType_Struct_GenericParams {
+    poly_type_decl: *MoxType;
+    poly_params: []MoxType_Struct_GenericParams_Item;
+};
+
+struct MoxType_Struct {
+    base: MoxType;
+    fields: []MoxType_StructField;
+    struct_generic_params: *MoxType_Struct_GenericParams;
+    alias_info: __ast_ptr;
+};
+
+// structure for #caller_location
+struct MoxSourceLocation {
+    offset: u64;
+    module_id: u64;
+    line: u64;
+};
+
+// compiler builtins, always available, no declaration needed:
+// fn __mox_jit_load_symbol(dll_path: *u8, func_name: *u8): *u8
+// fn __compiler_comptime_ptr_to_runtime_const_slice($ptr: *u8, $size: u32): []u8
+// fn __compiler_sizeof($type): i64
+// fn __compiler_print_i32(str: *u8, value: i32): void
+// fn __compiler_assert_known_type($type): void
+// fn __compiler_print_type($type): void
+// fn __compiler_print($str: *u8): void
+// fn __type_equal($type1, $type2): bool
+// fn __interp_break(): void
+// fn __compiler_get_type_of_value(value): Type
+// fn __compiler_platform(): MoxPlatform;
+// fn __compiler_members_count($type): i64;
+// fn __compiler_member_type($type, index: i64): Type;
+// fn __compiler_type_kind($type): u8 // cast to MoxTypeKind;
+// fn __compiler_member_offset($type, index: i64): *MEMBER_TYPE;
+// fn __compiler_link_lib(path: []u8, load_in_comptime: bool): void
+// fn __compiler_append_linker(str: []u8): void
+// fn __compiler_parse(code: []u8): __ast_ptr
+// fn __compiler_ast_to_string(__ast_ptr): []u8
+// __compiler_module_file_path
+// __compiler_comptime_alloc
+// __compiler_comptime_realloc
+// __compiler_comptime_free
+// __mox_source_path_table
+// __mox_source_path_count
+
+fn __mox_dangerously_format_to_type_ptr($type_ptr: u64): __type_ptr {
+    return $type_ptr.cast(*MoxType).cast(__type_ptr);
+}
+
+const mox_platform: MoxPlatform = __compiler_platform().cast(MoxPlatform);
+
+const max_u32: u32 = 4294967295;
+
+const mox_is_debug: bool = false;
+
+fn sizeof_type($T: __type_ptr): i64 {
+    sz := #run __compiler_sizeof($T);
+    return sz;
+}
+
+fn type_union($T1: __type_ptr, $T2: __type_ptr): __type_ptr {
+    sz1 := sizeof_type($T1);
+    sz2 := sizeof_type($T2);
+    out := $T1;
+    if (sz1 < sz2) {
+        out = $T2;
+    }
+    return out;
+}
+
+fn nullptr($T: __type_ptr): *$T {
+    return 0 .cast(u64) .cast(*$T);
+}
+
+fn byte_offset(ptr: $T / *$P, offset: isize) : $T {
+    addr := ptr.cast(u64);
+    if (offset < 0) {
+        addr -= (-offset .cast(u64));
+    } else {
+        addr += offset.cast(u64);
+    }
+    return addr.cast($T);
+}
+
+fn byte_offset(ptr: $T / *$P, offset: usize) : $T {
+    return (ptr.cast(u64) + offset).cast($T);
+}
+
+// pointer arithmetic without "pointer arithmetic", offset is scaled by element size
+// ptr : *i64 = 16;
+// ptr |> ty_offset(4) -> 16 + sizeof_type(i64) * 4 -> 48
+fn ty_offset(ptr: $T / *$P, offset: isize) : $T {
+    return byte_offset(ptr, sizeof_type($P) * offset);
+}
+
+fn ty_offset($ty: $T/__type_ptr, ptr: *$T, offset: isize) : *$T {
+    return byte_offset(ptr, sizeof_type($T) * offset);
+}
+
+fn ty_offset(ptr: $T / *$P, offset: usize) : $T {
+    return byte_offset(ptr, sizeof_type($P).cast(u64) * offset);
+}
+
+fn ty_offset($ty: $T/__type_ptr, ptr: *$T, offset: usize) : *$T {
+    return byte_offset(ptr, sizeof_type($T).cast(u64) * offset);
+}
+
+fn ptr_ty_diff(base: *$T, x: *$T): i64 {
+    return (x.cast(u64) - base.cast(u64)).cast(i64) / sizeof_type($T);
+}
+
+fn mem_copy(dst: *u8, src: *u8, size: i64): void {
+    end := src |> byte_offset(size);
+    while (src != end) {
+        dst.* = src.*;
+        src = src |> byte_offset(1);
+        dst = dst |> byte_offset(1);
+    }
+}
+
+fn mem_copy(dst: []$T, src: []$T): void {
+    len := min(dst.len, src.len);
+    src_ptr := src.ptr;
+    dst_ptr := dst.ptr;
+    end := src_ptr |> ty_offset(len);
+    while (src_ptr != end) {
+        dst_ptr.* = src_ptr.*;
+        src_ptr = src_ptr |> ty_offset(1);
+        dst_ptr = dst_ptr |> ty_offset(1);
+    }
+}
+
+fn mem_set(dst: *u8, value: u8, size: i64): void {
+    end := dst |> byte_offset(size);
+    while (dst != end) {
+        dst.* = value;
+        dst = dst |> byte_offset(1);
+    }
+}
+
+fn mem_eq(a: *u8, b: *u8, size_a: i64, size_b: i64): bool {
+    if (size_a != size_b) {
+        return false;
+    }
+
+    a_end := a |> byte_offset(size_a);
+
+    while (a != a_end) {
+        if (a.* != b.*) {
+            return false;
+        }
+        a = a |> byte_offset(1);
+        b = b |> byte_offset(1);
+    }
+
+    return true;
+}
+
+fn mem_eq(a: *$T, b: *$T): bool {
+    sz := sizeof_type($T);
+
+    return mem_eq(a.cast(*u8), b.cast(*u8), sz, sz);
+}
+
+fn align_up(value: $T, align: $T): $T {
+    return (value + align - 1) & ~(align - 1);
+}
+
+fn align_down(value: $T, align: $T): $T {
+    return value & ~(align - 1);
+}
+
+fn min(a: $T, b: $T): $T {
+    if (a < b) {
+        return a;
+    }
+    return b;
+}
+
+fn max(a: $T, b: $T): $T {
+    if (a > b) {
+        return a;
+    }
+    return b;
+}
+
+fn clamp(x: $T, lo: $T, hi: $T): $T {
+    if (x < lo) { return lo; }
+    if (x > hi) { return hi; }
+    return x;
+}
+
+fn abs(x: $T): $T {
+    if (x < 0) { return -x; }
+    return x;
+}
+
+fn lerp(a: $T, b: $T, t: $T): $T {
+    return a + (b - a) * t;
+}
+
+fn ilog2(v: $T): $T {
+    if (v == 0) {
+        return 0;
+    }
+    width: $T = (sizeof_type($T) * 8) .cast($T);
+    return width - 1 - #bit_count_leading_zeroes(v);
+}
+
+fn ilog10(v: u32): u32 {
+    if (v >= 100000) {
+        if (v >= 10000000) {
+            return 7 + (v >= 100000000).cast(u32) + (v >= 1000000000).cast(u32);
+        }
+        return 5 + (v >= 1000000).cast(u32);
+    }
+    if (v >= 1000) {
+        return 3 + (v >= 10000).cast(u32);
+    }
+    return (v >= 10).cast(u32) + (v >= 100).cast(u32);
+}
+
+fn ilog10(v: u64): u64 {
+    if (v == 0) {
+        return 0;
+    }
+
+    powers: [20]u64 = .{
+        1; 10; 100; 1000; 10000; 100000; 1000000; 10000000; 100000000;
+        1000000000; 10000000000; 100000000000; 1000000000000; 10000000000000;
+        100000000000000; 1000000000000000; 10000000000000000; 100000000000000000;
+        1000000000000000000; 10000000000000000000;
+    };
+
+    // 1233/4096 ~ log10(2), so this estimate is off by at most one digit
+    log2_val: u64 = 63 - #bit_count_leading_zeroes(v);
+    guess: u64 = #shr(log2_val * 1233, 12);
+    if (v >= powers[guess + 1]) {
+        guess += 1;
+    }
+    return guess;
+}
+
+fn push(dst: []$T, value: $T): []$T {
+    if (dst.len == 0) {
+        return dst;
+    }
+    dst.ptr.* = value;
+
+    out: []$T = #memory_garbage;
+    out.ptr = ty_offset(dst.ptr, 1);
+    out.len = dst.len - 1;
+
+    return out;
+}
+
+struct RangeIterator($T: __type_ptr) {
+    cur: $T;
+    end: $T;
+    step: $T;
+    started: bool;
+};
+
+fn it_range(initial: $T, end: $T, step: $T): RangeIterator($T) {
+    return .{
+        cur = initial;
+        end = end;
+        step = step;
+        started = false;
+    };
+}
+
+fn it_range(initial: $T, end: $T): RangeIterator($T) {
+    return it_range(initial, end, 1 .cast($T));
+}
+
+fn it_range(n: $T): RangeIterator($T) {
+    return it_range(0 .cast($T), n, 1 .cast($T));
+}
+
+fn iterator_next(it: *RangeIterator($T)): bool {
+    if (it.started) {
+        it.cur += it.step;
+    } else {
+        it.started = true;
+    }
+    return it.cur < it.end;
+}
+
+fn iterator_current(it: *RangeIterator($T)): $T {
+    return it.cur;
+}
+
+struct RangeReverseIterator($T: __type_ptr) {
+    cur: $T;   // one past the next yielded value
+    low: $T;
+};
+
+fn it_range_reverse(low: $T, end: $T): RangeReverseIterator($T) {
+    return .{
+        cur = end;
+        low = low;
+    };
+}
+
+fn it_range_reverse(n: $T): RangeReverseIterator($T) {
+    return it_range_reverse(0 .cast($T), n);
+}
+
+fn iterator_next(it: *RangeReverseIterator($T)): bool {
+    if (it.cur <= it.low) { return false; }
+    it.cur -= 1;
+    return true;
+}
+
+fn iterator_current(it: *RangeReverseIterator($T)): $T {
+    return it.cur;
+}
+
+struct PtrIterator($T: __type_ptr) {
+    cur: *$T;
+    end: *$T;
+    started: bool;
+};
+
+fn iterate(slice: []$T): PtrIterator($T) {
+    return .{
+        cur = slice.ptr;
+        end = slice.ptr |> ty_offset(slice.len);
+        started = false;
+    };
+}
+
+fn iterator_next(it: *PtrIterator($T)): bool {
+    if (it.started) {
+        it.cur = it.cur |> ty_offset(1);
+    } else {
+        it.started = true;
+    }
+    return it.cur != it.end;
+}
+
+fn iterator_current(it: *PtrIterator($T)): *$T {
+    return it.cur;
+}
+
+fn char(s: *u8): u8 {
+    return s.*;
+}
+
+fn is_string_type($T: __type_ptr): bool {
+    const ty := $T.cast(*MoxType);
+    const result := (ty.kind == .Slice) && ty.cast(*MoxType_Slice).base_type.kind == .U8;
+    return result;
+}
+
+// index of the first member of struct $S whose type is $T, -1 if there is none.
+fn __compiler_member_index_of_type($S: __type_ptr, $T: __type_ptr): i64 {
+    target := $T.cast(*MoxType).cast(u64);
+    n := __compiler_members_count($S);
+    for (i : it_range(n)) {
+        if (__compiler_member_type($S, i).cast(*MoxType).cast(u64) == target) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+struct MoxSourcePathRecord {
+    module_id: u64;
+    path_ptr: *u8;
+    path_len: i64;
+};
+
+// returns empty slice when the path is unavailable
+fn get_source_location_file_path(loc: MoxSourceLocation): []u8 {
+    if (#is_comptime) {
+        return __compiler_module_file_path(loc.module_id);
+    } else {
+        table := __mox_source_path_table .cast(*MoxSourcePathRecord);
+        i: i64 = 0;
+        n: i64 = __mox_source_path_count .cast(i64);
+        while (i < n) {
+            record := ty_offset(table, i) .*;
+            if (record.module_id == loc.module_id) {
+                out: []u8 = #memory_garbage;
+                out.ptr = record.path_ptr;
+                out.len = record.path_len;
+                return out;
+            }
+            i += 1;
+        }
+        empty: []u8 = #memory_garbage;
+        empty.ptr = nullptr(u8);
+        empty.len = 0;
+        return empty;
+    }
+}
+
+fn zeroed($T: __type_ptr): $T {
+    x: $T = 0;
+    return x;
+}
+
+const KILOBYTE: i64 = 1024;
+const MEGABYTE: i64 = KILOBYTE * 1024;
+const GIGABYTE: i64 = MEGABYTE * 1024;

@@ -1,0 +1,148 @@
+import "./internal.mox";
+import "./alloc.mox";
+import "./panic.mox";
+import "./os.mox";
+
+enum ArenaFlags : u8 {
+    NONE := 0;
+    IS_FIXED := 1;
+    IS_VIRTUAL := 2;
+};
+
+struct Arena {
+    pos: i64;
+    commit_pos: i64;
+    commit_size: i64;
+    reserve_size: i64;
+    flags: ArenaFlags;
+    // debug_name: *u8;
+    // prev: *Arena;
+    // next: *Arena;
+};
+
+const ARENA_ALIGN : i64 = 8;
+
+fn arena_ptr_at(arena: *Arena, pos: i64): *u8 {
+    return arena.cast(*u8) |> byte_offset(pos);
+}
+
+fn arena_create_fixed(buf: []u8): *Arena {
+    base_pos := align_up(sizeof_type(Arena), ARENA_ALIGN);
+
+    if (base_pos >= buf.len) {
+        panic("not enough buffer size, even to handle Arena type itself");
+    }
+
+    arena := buf.ptr.cast(*Arena);
+    arena.pos = base_pos;
+    arena.commit_pos = buf.len;
+    arena.commit_size = buf.len;
+    arena.reserve_size = buf.len;
+    arena.flags = .IS_FIXED;
+
+    return arena;
+}
+
+fn arena_create_virtual(reserve_size: i64, commit_size: i64): *Arena {
+    os_page_size := os_get_memory_page_size();
+
+    reserve_size = align_up(reserve_size, os_page_size);
+    commit_size = align_up(commit_size, os_page_size);
+
+    reserved_mem := os_mem_virtual_reserve(reserve_size);
+    os_mem_virtual_commit(reserved_mem, commit_size);
+
+    arena: *Arena = reserved_mem.cast(*Arena);
+
+    arena.commit_pos = commit_size;
+    arena.commit_size = commit_size;
+    arena.reserve_size = reserve_size;
+    arena.flags = .IS_VIRTUAL;
+
+    arena.pos = align_up(sizeof_type(Arena), ARENA_ALIGN);
+
+    return arena;
+}
+
+fn arena_destroy(arena: *Arena): void {
+    if ((arena.flags & .IS_VIRTUAL) != .NONE) {
+        os_mem_virtual_release(arena.cast(*u8), arena.reserve_size);
+    }
+}
+
+fn arena_push(arena: *Arena, size: i64, align: u32 = 1): []u8 {
+    start_pos := align_up(arena.pos, align .cast(i64));
+    new_pos := align_up(start_pos + size, ARENA_ALIGN);
+
+    if (new_pos > arena.reserve_size) {
+        panic("arena exceeds reserved size. new_pos={} requested_size={} reserve_size={}", .{ new_pos; size; arena.reserve_size; });
+    }
+
+    if (new_pos > arena.commit_pos) {
+        new_commit_pos := align_up(new_pos, arena.commit_size);
+        new_commit_pos = min(new_commit_pos, arena.reserve_size);
+        os_mem_virtual_commit(arena |> arena_ptr_at(arena.commit_pos), new_commit_pos - arena.commit_pos);
+        arena.commit_pos = new_commit_pos;
+    }
+
+    arena.pos = new_pos;
+    ptr: *u8 = arena_ptr_at(arena, start_pos);
+    
+    s : []u8 = #memory_garbage;
+    s.ptr = ptr;
+    s.len = size;
+
+    return s;
+}
+
+fn arena_push(arena: *Arena, $T: __type_ptr, align: u32 = 1): *$T {
+    ptr := arena_push(arena, sizeof_type($T), align).ptr;
+    return ptr.cast(*$T);
+}
+
+fn arena_pop_to(arena: *Arena, new_pos: i64, size: i64): void {
+    old_pos := arena.pos;
+    arena.pos = new_pos;
+    mem_set(arena_ptr_at(arena, new_pos), 0, size);
+}
+
+fn arena_pop_to(arena: *Arena, pos: i64): void {
+    if (pos > arena.pos) {
+        panic("arena_pop_to received pos over current arena.pos");
+    }
+    arena_pop_to(arena, pos, arena.pos - pos);
+}
+
+fn arena_pop(arena: *Arena, size: i64): void {
+    arena_pop_to(arena, arena.pos - size, size);
+}
+
+fn arena_current_pos(arena: *Arena): i64 {
+    return arena.pos;
+}
+
+fn arena_clear(arena: *Arena): void {
+    arena.pos = sizeof_type(Arena) |> align_up(ARENA_ALIGN);
+}
+
+fn _arena_alloc_fn(allocator_data: *u8, mode: AllocatorFnMode, size: i64, align: u32, old_mem: *u8): *u8 {
+    arena: *Arena = allocator_data.cast(*Arena);
+
+    if (mode == .alloc) {
+        return arena_push(arena, size, align).ptr;
+    }
+    if (mode == .realloc) {
+        panic("arena realloc is not supported");
+    }
+    if (mode == .free) {
+        panic("arena free is not supported");
+    }
+    return nullptr(u8);
+}
+
+fn arena_as_allocator(arena: *Arena): *Alloc {
+    alloc := arena_push(arena, Alloc, 8);
+    alloc.func = _arena_alloc_fn.^;
+    alloc.data = arena.cast(*u8);
+    return alloc;
+}

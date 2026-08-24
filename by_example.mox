@@ -1,0 +1,505 @@
+// comment
+/* comment too
+*/
+
+// compile with: mox ./by_example.mox linker=false
+
+fn this_is_a_function(arg1: i32, arg2: f32 = 123): f32 {
+    // .cast(type) is cast operator
+    return arg1 .cast(f32) + arg2;
+}
+
+struct MyStruct {
+    x: i32;
+};
+
+fn vars_and_types() {
+    // variable declarations:
+
+    // name : type = default value
+    var1 : i32 = 0;
+
+    // name := default value
+    // type is inferred from default value here
+    var2 := var1;
+
+    // variable declarations should always have default value specified
+
+    // basic types:
+    // i8, i16, i32, i64
+    // u8, u16, u32, u64
+    // f32, f64
+    // bool
+    // void
+    
+    // literals support type specifying for i8-i64, u8-u64, 0.0f for f32
+    var3 := 123i32;
+
+    // 0 is zero initialization, works for everything except pointers
+    var4 : MyStruct = 0;
+
+    // explicit no initialization
+    var5 : MyStruct = #memory_garbage;
+
+    // struct literals
+    var6 : MyStruct = .{ x = 123; };
+    var7 := MyStruct.{ x = 123; };
+
+    // string literals could materialize in two forms:
+    // slice of u8 that points to constant memory
+    // or C string (pointer to null terminated string)
+    var8 : []u8 = "string is a slice of u8";
+    var8_c : *u8 = "this is also a string, but instantiated as C string";
+
+    // slice is like struct {ptr: *$T, len: i64}
+    // array is like struct { item1; item2; item3; ... }
+
+    // array type is value that holds all elements inside
+    // when you move around array's value it is copied
+    // just like any other value
+
+    // when you move around slice's value, only ptr and len are copied
+
+    // []i32 is a slice (pointer + length)
+    // [3]i32 is explicitly specified fixed array
+    
+    // [?]i32 is inferred length fixed array
+    var9: [?]i32 = .{ 0; 1; 2; 3; 4; };
+    
+    // for ergonomics on arrays, .ptr "field" is available
+    // works as operator
+    // which basically takes a pointer to first item of the array
+
+    // by default enum picks minimal base type to fit all variants
+    enum MyEnum {
+        A;
+        B;
+    };
+
+    enum MyEnum : u8 {
+        A := 0;
+        B := 2;
+    };
+
+    var10 : MyEnum = .B;
+
+    // untyped literals are treated as comptime "numbers"
+    // math on them are folded at comptime
+    // untyped integers are treated as 128 bit signed
+    // untyped floats are treated as 64 bit floats
+    // when this untyped numbers gets materialized to some type, compiler checks that it could be casted lossless
+
+    // there are also two more builtin types, that will be explained further
+    // __ast_ptr  - pointer to ast
+    // __type_ptr - pointer to type, actually any type in mox is type of __type_ptr
+}
+
+fn operators() {
+    // arithmetics
+    1 + 1;
+    2 - 2;
+    3 * 3;
+    5 / 5;
+    5 % 5;
+
+    // comparison
+    2 == 2;
+    2 > 1;
+    2 >= 2;
+    2 != 1;
+
+    // structs, slices and array compared field by field, element by element
+    // two slices or arrays with same content but different pointers are equal
+    MyStruct.{10;} == MyStruct.{10;};
+
+    // boolean
+    true && true;
+    true || true;
+    !true;
+
+    // bit
+    5 & 5;
+    5 | 5;
+    5 ^ 5;
+    ~5u32;
+
+    // compound assignment
+    x : i64 = 0;
+    x += 1;
+    x -= 1;
+    x *= 1;
+    x /= 1;
+    x %= 1;
+    x &= 1;
+
+    // bitshitfs are builtins
+    #shl(10u32, 2); // bit shift left
+    #shr(10u32, 2); // bit shift right
+    #bit_popcount(10u32);
+    #bit_count_leading_zeroes(10u32);
+    #bit_count_trailing_zeroes(10u32);
+    #bit_first_set(10u32);
+    #bit_parity(10u32);
+    #bit_reverse(10u32);
+
+    // wrapping arithmetics
+    // by default +-* assumes that overflow never happens
+    #wrap_add(10u32, 10u32);
+    #wrap_sub(10u32, 10u32);
+    #wrap_mul(10u32, 10u32);
+
+    // math on 2-4 sized arrays works as 3d vector math
+    // swizzling access operators on 2-4 sized arrays supported
+    vec1 := [3]f32.{ 1; 2; 3;};
+    vec2 := [3]f32.{ 4; 5; 6;};
+    vec1.yz = vec2.xx * 2;
+    // vec1 is { 1; 8; 8; } here
+}
+
+fn pipe_operator(x: i32) {
+    if (x > 0) {
+        (x - 1) |> pipe_operator();
+    }
+
+    // expression |> function_call() |> other_function_call();
+    // compiler sees it as:
+    // other_function_call(function_call(expression))
+
+    // there could be some limitations on this, as it is implemented on parsing level
+}
+
+// this is module import
+// non relative paths for module imports resolved over compiler/modules directory
+import "internal.mox";
+
+// you can have named module import
+const internal := import "internal.mox";
+
+// by default imported module declarations are visible only in current module
+// in some cases we want to make "root" module that re exports all declarations of submodules
+// to re export all decls from imported module, use #export
+// import "./my_module.mox" #export;
+
+fn pointers() {
+    var1 : MyStruct = #memory_garbage;
+
+    // .^ is take a pointer operator
+    var2 : *MyStruct = var1.^; // same as &var1 in C
+    var3 := var1.x.^; // same as &var1.x in C
+
+    // .* is deref operator
+    var4 : MyStruct = var2.*; // same as *var2 in C
+    
+    // we dont need any special operator to access field by pointer
+    var5 : i32 = var2.x; // same as var2->x in C
+
+    // there are no pointer arithmetics, but you could use helpers from internal.mox
+    var2 |> byte_offset(123); // var2 + 123 bytes to pointer
+    var2 |> ty_offset(123); // var2 + 123 * sizeof(MyStruct) bytes to pointer
+}
+
+fn control_flow() {
+    // we can defer any expression, so it will be executed at the end of current scope
+    defer puts("hello world");
+
+    while (false) {
+        continue;
+        break;
+        return;
+    }
+
+    switch(123u32) {
+        case 1, 2:
+            // no fall through
+        case:
+            // default case, required for non enums
+    }
+
+    // for loops currently done as syntax sugar over while loops through pulling iterators
+    for (x : it_range(10u32)) {
+        // x is 0..9
+    }
+
+    // compiler sees it as:
+    //    __it := it_range(10u32);
+    //    while (iterator_next(__it.^)) {
+    //        x := iterator_current(__it.^);
+    //        {
+    //               // body
+    //        }
+    //    }
+
+    // you can easily define (overload) your own iterator_next / iterator_current
+
+    // indexed supported too
+    for (x, index : it_range(10u32)) {
+        // x is 0..9
+    }
+}
+
+fn function_overload(x: i32) {}
+fn function_overload(x: f32) {}
+
+fn function_overloading() {
+    x : i32 = 0;
+    function_overload(x);
+
+    // when compiler sees function overloading it tries to pick best matching function
+    // that is visible from caller scope
+
+    // so if you dont import some module with needed function overload
+    // it will be not visible to the compiler
+}
+
+// external linkage
+#linkc fn puts(str: *u8): void;
+
+// specify external name
+#linkc("puts") fn libc_puts(str: *u8): void;
+
+fn macro_alias() {
+    fn foo(): i32 { return 0; }
+
+    // #alias binds expression to some name
+    // expression is evaluated in binding scope, not in caller scope
+    // it means that "alias" unlike defines in C, could not refer to caller's scope
+    // better dont use it as it is slow to compile and smells
+
+    // #alias name = expr;
+
+    // alias could be defined in module scope, function body or struct
+    
+    #alias boo = foo();
+
+    // here compiler sees that "boo" is an alias
+    // then it compiles expression in place of alias declaration,
+    // resolves "foo" function and "boo" becomes foo function call expression
+    // it means every time alias is evaluated, it gets recompiled
+    x : i32 = boo;
+
+    struct Something {
+        ptr: *i32;
+        len: i64;
+
+        // self is a pointer to Something in #alias inside struct
+        #alias as_slice = slice(self.ptr, self.len);
+
+        // resolves as reference to .len
+        // so smth.len2 = 123; works
+        #alias len2 = self.len;
+
+        // aliases are not visible inside struct's type fields
+    };
+}
+
+
+// easies way is to think about generics as templates over comptime baked values
+struct GenericStruct($T: __type_ptr, $size: i64) {
+    x: $T;
+    y: []$T;
+    z: [$size + 1]$T;
+};
+
+// generic func should always have return type specified
+fn generic_func(arg1: i64, $arg2: i64, $T: __type_ptr): void {
+    // generic arguments starts with $ sign
+    // they are available as constants
+    // they are comptime values from compiler perspective
+}
+
+// we can overload function and infer generic params
+fn generic_func(x: *GenericStruct($T, $SIZE)): i64 {
+    return $SIZE;
+}
+
+fn generics() {
+    generic: GenericStruct(i32, 10) = 0;
+
+    const size : i64 = 10;
+    generic_func(10i64, size, i32); // because second argument accepts type, we can pass type as value there
+
+    const type : __type_ptr = i32;
+    generic_func(10i64, size, type);
+
+    // call other overloaded variant that accepts pointer to GenericStruct
+    generic_func(generic.^);
+}
+
+// $T / pattern
+// with this syntax we can capture whole type
+fn generic_func2(x: $PtrT / *GenericStruct($T, $SIZE), y: $PtrT): $PtrT {
+    return x;
+}
+
+fn comptime_exec() {
+    // any mox code could be executed at compile time
+    // including external linked functions (as long as they are loaded to compiler process)
+
+    var1 := #run 10u32 + 20u32;
+
+    #run {
+        libc_puts("hello world from comptime!");
+    };
+
+    // constant variables always exist in comptime context
+    // and because types are first class comptime values
+    // we can assign it to constant
+    const var2 : __type_ptr = i32;
+
+    // we can also operate on ast as comptime values
+    // here ast is captured as is, without execution
+    const var3 : __ast_ptr = #ast libc_puts("hello world from comptime 2!");
+
+    // we can "land" any ast
+    // compiler will treat "landed" ast as this code was written here by hand
+    #land_ast var3;
+
+    var4 : u32 = 0;
+    #run {
+        for (i : it_range(10u32)) {
+            // we can emit code from comptime
+            // which will be "landed" and compiled to runtime
+            // capturing any comptime value
+            #emit {
+                var4 += i;
+            };
+        }
+    };
+
+    // there are compiler builtin function that could parse any string as mox code to ast
+    const code : __ast_ptr = __compiler_parse("libc_puts(\"hello world from comptime 3!\");");
+
+    // then we could "insert" this code to current place, like it was written here
+    #land_ast code;
+}
+
+counter1 : i64 = 0;
+counter2 : i64 = 0; #no_comptime_reset
+
+fn comptime_and_globals() {
+    fn foo() {
+        counter1 += 1;
+        counter1 += 1;
+        counter2 += 1;
+        counter2 += 1;
+    }
+
+    #run foo();
+    #run foo();
+    #run {
+        // here counter1 and counter2 globals will be equal 4
+        // at runtime counter1 will be resetted to its initial value
+        // but counter2 will stay equal 4
+    };
+
+    // so here (at runtime)
+    counter1 == 0;
+    counter2 == 4;
+
+    // note: comptime code is executed partially by interpretation
+    // so it could be slow sometimes
+    // on jit backend, interpretator could call jit compiled functions
+    // so compilation becomes much faster
+
+    // because any function could run at comptime
+    // we sometimes need to check for it
+    if (#is_comptime) {
+
+    }
+}
+
+import "slice.mox";
+
+// functions started with # are macro expantions
+// their body is placed in caller scope
+// but variable names are not visible for caller
+fn #temp_memory($size: i64): []u8 {
+    buf: [$size]u8 = #memory_garbage;
+    return buf.^ |> slice();
+}
+
+fn #leak_variable_name(): void {
+    // variables with ` are visible to caller
+    // `x is accessable as x
+    `x : i32 = 0;
+
+    {
+        // `defer is run at caller scope
+        // even if it is defined in nested scope here
+        `defer `x += 1;
+    }
+
+    {
+        // this control flow is placed in caller scope
+        `return;
+        // `break;
+        // `continue;
+    }
+}
+
+fn #repeat(n: u64, code: __ast_ptr) {
+    `it: u64 = 0;               // caller see plain "it"
+    while (`it < n) {
+        #land_ast code;
+        `it = `it + 1;
+    }
+}
+
+struct TryResult($T: __type_ptr) {
+    error_code: i64;
+    value: $T;
+};
+
+// concept of try macro
+fn #try(x: TryResult($T)): $T {
+    if (x.error_code != 0) {
+        `return .{
+            error_code = x.error_code;
+            value = 0;
+        };
+    }
+    return x.value;
+}
+
+fn macro_expansion() {
+    {
+        // here we have slice of [512]u8 array
+        // this array will die and the end of the scope
+        temp_buf := #temp_memory(512);
+    }
+
+    var1 : u64 = 0;
+    // "it" is exposed from #repeat macro
+    #repeat(10, #run #ast var1 += it);
+}
+
+fn caller_source_location(loc: MoxSourceLocation = #caller_location) {
+    // here #caller_location default value
+    // will automatically pass callers location
+
+    // returns path to source location
+    // embed_source_paths=true should be specified for compiler
+    // to make it available
+    get_source_location_file_path(loc);
+}
+
+fn useful_things() {
+    // sometimes compiler could not resolve type when it is passed as value
+    // because compiler/parser treat it as expression
+    // for this cases #type could be used
+
+    const ptr_type := #type *u8;
+
+    // append linker command with some library
+    // path should be without .a .lib .dll .so
+    // const link_at_comptime = false;
+    // #run __compiler_link_lib("path/to/lib", link_at_comptime);
+
+    // __type_ptr could be safely casted to *MoxType
+    // to inspect type info
+}
+
+#linkc fn main(): i32 {
+    libc_puts("hello world!");
+    return 0;
+}

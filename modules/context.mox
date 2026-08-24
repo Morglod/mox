@@ -1,0 +1,85 @@
+import "./internal.mox";
+import "./alloc.mox";
+import "./arena.mox";
+import "./thread_local.mox";
+
+struct _ArenaContext {
+    arena: *Arena;
+    arena_as_alloc: *Alloc;
+};
+
+_context_is_init := create_thread_local(#type *u8);
+_context_alloc := create_thread_local(#type *Alloc);
+_context_temp_arena := create_thread_local(_ArenaContext);
+
+fn init_default_context() {
+    thread_local_set(_context_alloc.^, default_alloc());
+
+    temp_arena := arena_create_virtual(1024i64 * 1024i64, 1024i64);
+    set_context_temp_arena(temp_arena);
+}
+
+fn _require_context_init() {
+    if (_context_is_init.key == 0) {
+        init_default_context();
+        thread_local_set(_context_is_init.^, 1 .cast(u64).cast(*u8));
+        return;
+    }
+    if (thread_local_get(_context_is_init.^) == nullptr(u8)) {
+        init_default_context();
+        thread_local_set(_context_is_init.^, 1 .cast(u64).cast(*u8));
+        return;
+    }
+}
+
+fn get_context_alloc(): *Alloc {
+    _require_context_init();
+    return thread_local_get(_context_alloc.^);
+}
+
+fn get_context_temp_arena(): *Arena {
+    _require_context_init();
+    return thread_local_get(_context_temp_arena.^).arena;
+}
+
+fn #temp_arena(): *Arena {
+    arena := get_context_temp_arena();
+    cur_pos := arena_current_pos();
+    defer arena_pop_to(arena, cur_pos);
+    return arena;
+}
+
+fn get_context_temp_arena_as_alloc(): *Alloc {
+    _require_context_init();
+    return thread_local_get(_context_temp_arena.^).arena_as_alloc;
+}
+
+fn set_context_temp_arena(arena: *Arena): _ArenaContext {
+    temp_arena_as_alloc := arena_as_allocator(arena);
+    return set_context_temp_arena(arena, temp_arena_as_alloc);
+}
+
+fn set_context_temp_arena(arena: *Arena, arena_as_alloc: *Alloc): _ArenaContext {
+    prev := thread_local_get(_context_temp_arena.^).*;
+    ctx_value: _ArenaContext = .{
+        arena = arena;
+        arena_as_alloc = arena_as_alloc;
+    };
+    thread_local_set(_context_temp_arena.^, ctx_value);
+    return prev;
+}
+
+fn #temp_arena_as_alloc(): *Alloc {
+    arena := get_context_temp_arena();
+    cur_pos := arena_current_pos(arena);
+    defer arena_pop_to(arena, cur_pos);
+    return get_context_temp_arena_as_alloc();
+}
+
+fn #temp_buffer(size: i64): []u8 {
+    arena := get_context_temp_arena();
+    cur_pos := arena_current_pos(arena);
+    tmp := arena_push(arena, size);
+    defer arena_pop_to(arena, cur_pos);
+    return tmp;
+}
