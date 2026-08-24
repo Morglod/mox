@@ -24,6 +24,10 @@ Planned:
 * Compiler hooks
 * Generic modules
 
+## Download link
+
+* [0.1.0 pre release (x86_64 win/linux)](https://github.com/Morglod/mox/releases/download/0.1.0/mox_010_250826.zip)
+
 ## Some feature highlights
 
 Builtin 3d math with swizzling:
