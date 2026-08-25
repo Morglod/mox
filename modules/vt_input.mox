@@ -1,0 +1,466 @@
+import "./internal.mox";
+import "./utf8.mox"; // utf8_seq_len, utf8_decode
+
+// VT/xterm terminal input: shared event model + byte-stream parser.
+//
+// Event, KeyCode, the mouse enums and MOD_* are the one event model used by term.mox and the os layer on every platform.
+//
+// VtParser + vt_feed/vt_next decode raw VT bytes (UTF-8 chars, CSI sequences, SGR mouse reports) into Events.
+// No OS calls and no allocation, so the parser is usable on its own.
+// Resize is not a VT sequence, the os layer makes those events itself.
+
+enum EventKind : u8 { none; key; mouse; resize; };
+enum MouseAction : u8 { move; press; release; wheel; };
+enum MouseButton : u8 { none; left; right; middle; };
+
+enum KeyCode : u16 {
+    unknown;
+    char;
+    enter; escape; tab; backspace; delete; space;
+    up; down; left; right;
+    home; end; page_up; page_down; insert;
+    f1; f2; f3; f4; f5; f6; f7; f8; f9; f10; f11; f12;
+};
+
+const MOD_SHIFT : u8 = 1;
+const MOD_CTRL  : u8 = 2;
+const MOD_ALT   : u8 = 4;
+
+struct Event {
+    kind: EventKind;
+    code: KeyCode;
+    ch: u32;
+    vk: u16;      // win virtual key code; posix fills it via keycode_to_vk
+    mods: u8;
+    repeat: u16;  // key auto-repeat count (win input records; VT always gives 1)
+    x: u32;
+    y: u32;
+    button: MouseButton;
+    action: MouseAction;
+    wheel: i32;
+    w: u32;
+    h: u32;
+};
+
+// win virtual key code for a decoded key, so hotkey checks (ev.vk == 65) work the same on every platform
+fn keycode_to_vk(code: KeyCode, ch: u32): u16 {
+    if (code == .enter)     { return 13; }
+    if (code == .escape)    { return 27; }
+    if (code == .tab)       { return 9; }
+    if (code == .backspace) { return 8; }
+    if (code == .delete)    { return 46; }
+    if (code == .space)     { return 32; }
+    if (code == .up)        { return 38; }
+    if (code == .down)      { return 40; }
+    if (code == .left)      { return 37; }
+    if (code == .right)     { return 39; }
+    if (code == .home)      { return 36; }
+    if (code == .end)       { return 35; }
+    if (code == .page_up)   { return 33; }
+    if (code == .page_down) { return 34; }
+    if (code == .insert)    { return 45; }
+    if (code == .f1)  { return 112; }
+    if (code == .f2)  { return 113; }
+    if (code == .f3)  { return 114; }
+    if (code == .f4)  { return 115; }
+    if (code == .f5)  { return 116; }
+    if (code == .f6)  { return 117; }
+    if (code == .f7)  { return 118; }
+    if (code == .f8)  { return 119; }
+    if (code == .f9)  { return 120; }
+    if (code == .f10) { return 121; }
+    if (code == .f11) { return 122; }
+    if (code == .f12) { return 123; }
+    if (code == .char) {
+        c := ch;
+        if ((c >= 1) && (c <= 26))    { return (64 + c).cast(u16); }  // Ctrl+A..Z byte
+        if ((c >= 97) && (c <= 122))  { return (c - 32).cast(u16); }  // a..z -> A..Z
+        if ((c >= 65) && (c <= 90))   { return c.cast(u16); }
+        if ((c >= 48) && (c <= 57))   { return c.cast(u16); }         // 0..9
+    }
+    return 0;
+}
+
+const VT_BUF_CAP : u32 = 128;
+
+struct VtParser {
+    buf: [VT_BUF_CAP]u8;  // bytes fed but not decoded yet
+    len: u32;
+};
+
+// result of one parse step
+const _VT_NEED_MORE : u32 = 0;  // incomplete, wait for more bytes
+const _VT_GOT_EVENT : u32 = 1;  // ev is filled
+const _VT_CONSUMED  : u32 = 2;  // sequence eaten, no event out of it
+
+fn vt_parser_init(p: *VtParser): void {
+    p.len = 0;
+}
+
+fn vt_feed(p: *VtParser, b: u8): void {
+    if (p.len >= VT_BUF_CAP) {
+        // Overflow inside an unterminated string sequence (OSC/DCS/APC): keep the 2 byte intro and the newest byte, drop the middle.
+        // The newest byte may be a pending ESC of the ESC \ terminator, it has to survive.
+        if (p.len >= 3) {
+            p.buf[2] = p.buf[p.len - 1];
+            p.len = 3;
+        } else {
+            p.len = 0;
+        }
+    }
+    p.buf[p.len] = b;
+    p.len += 1;
+}
+
+fn vt_feed_bytes(p: *VtParser, ptr: *u8, n: i64): void {
+    for (i : it_range(0i64, n)) {
+        vt_feed(p, ty_offset(ptr, i).*);
+    }
+}
+
+// slice variant
+fn vt_feed_bytes(p: *VtParser, bytes: []u8): void { vt_feed_bytes(p, bytes.ptr, bytes.len); }
+
+// drop n bytes from the front
+fn _vt_consume(p: *VtParser, n: u32): void {
+    if (n >= p.len) { p.len = 0; return; }
+    rem := p.len - n;
+    for (i : it_range(0 .cast(u32), rem)) {
+        p.buf[i] = p.buf[i + n];
+    }
+    p.len = rem;
+}
+
+fn _vt_ev_clear(ev: *Event): void {
+    ev.kind = .none;
+    ev.code = .unknown;
+    ev.ch = 0;
+    ev.vk = 0;
+    ev.mods = 0;
+    ev.repeat = 1;
+    ev.x = 0;
+    ev.y = 0;
+    ev.button = .none;
+    ev.action = .move;
+    ev.wheel = 0;
+    ev.w = 0;
+    ev.h = 0;
+}
+
+fn _vt_key(ev: *Event, code: KeyCode, ch: u32, mods: u8): void {
+    _vt_ev_clear(ev);
+    ev.kind = .key;
+    ev.code = code;
+    ev.ch = ch;
+    ev.mods = mods;
+    ev.vk = keycode_to_vk(code, ch);
+}
+
+// an ESC that starts nothing = the escape key itself
+fn _vt_escape_key(p: *VtParser, ev: *Event): bool {
+    _vt_consume(p, 1);
+    _vt_key(ev, .escape, 27, 0);
+    return true;
+}
+
+// xterm modifier parameter -> MOD_* bits (value - 1: 1=shift 2=alt 4=ctrl)
+fn _vt_xterm_mods(m: u32): u8 {
+    if (m < 2) { return 0; }
+    x := m - 1;
+    r: u8 = 0;
+    if ((x & 1) != 0) { r |= MOD_SHIFT; }
+    if ((x & 2) != 0) { r |= MOD_ALT; }
+    if ((x & 4) != 0) { r |= MOD_CTRL; }
+    return r;
+}
+
+// utf8_seq_len as u32, the buffer length is u32
+fn _vt_utf8_need(b: u8): u32 {
+    n := utf8_seq_len(b);
+    return n.cast(u32);
+}
+
+// Decode one plain (non-ESC) byte or UTF-8 char at the front of the buffer.
+// true = event produced, false = multibyte char not complete yet.
+fn _vt_plain(p: *VtParser, flush: bool, ev: *Event): bool {
+    b := p.buf[0];
+
+    if (b == 13)  { _vt_consume(p, 1); _vt_key(ev, .enter, 13, 0); return true; }
+    if (b == 10)  { _vt_consume(p, 1); _vt_key(ev, .enter, 13, 0); return true; }
+    if (b == 9)   { _vt_consume(p, 1); _vt_key(ev, .tab, 9, 0); return true; }
+    if (b == 127) { _vt_consume(p, 1); _vt_key(ev, .backspace, 8, 0); return true; }
+    if (b == 8)   { _vt_consume(p, 1); _vt_key(ev, .backspace, 8, MOD_CTRL); return true; }
+    if (b == 0)   { _vt_consume(p, 1); _vt_key(ev, .space, 32, MOD_CTRL); return true; } // Ctrl+Space
+    if (b < 32) {
+        // rest of the control bytes: 1..26 = Ctrl+A..Ctrl+Z, 28..31 = Ctrl+\ ] ^ _ (ESC never gets here, vt_next takes it first)
+        _vt_consume(p, 1);
+        _vt_key(ev, .char, b.cast(u32), MOD_CTRL);
+        return true;
+    }
+    if (b == 32) { _vt_consume(p, 1); _vt_key(ev, .space, 32, 0); return true; }
+
+    need := _vt_utf8_need(b);
+    if (p.len < need) {
+        if (!flush) { return false; }
+        // nothing more is coming, emit the raw byte instead of stalling forever
+        _vt_consume(p, 1);
+        _vt_key(ev, .char, b.cast(u32), 0);
+        return true;
+    }
+
+    // on a bad continuation byte the decoder reports the lead as one raw byte and the rest is re-parsed, so garbage never eats the bytes behind it
+    pending: []u8 = #memory_garbage;
+    pending.ptr = p.buf.ptr;
+    pending.len = p.len.cast(i64);
+    cp: u32 = 0;
+    adv := utf8_decode(pending, 0, cp.^);
+    used := adv.cast(u32);
+    _vt_consume(p, used);
+    _vt_key(ev, .char, cp, 0);
+    return true;
+}
+
+// CSI <n> ~ key table
+fn _vt_tilde_code(k: u32): KeyCode {
+    if (k == 1)  { return .home; }
+    if (k == 2)  { return .insert; }
+    if (k == 3)  { return .delete; }
+    if (k == 4)  { return .end; }
+    if (k == 5)  { return .page_up; }
+    if (k == 6)  { return .page_down; }
+    if (k == 7)  { return .home; }
+    if (k == 8)  { return .end; }
+    if (k == 11) { return .f1; }
+    if (k == 12) { return .f2; }
+    if (k == 13) { return .f3; }
+    if (k == 14) { return .f4; }
+    if (k == 15) { return .f5; }
+    if (k == 17) { return .f6; }
+    if (k == 18) { return .f7; }
+    if (k == 19) { return .f8; }
+    if (k == 20) { return .f9; }
+    if (k == 21) { return .f10; }
+    if (k == 23) { return .f11; }
+    if (k == 24) { return .f12; }
+    return .unknown;
+}
+
+// final byte of an SS3 (and of the CSI 1;<mods> P..S form)
+fn _vt_ss3_code(fin: u8): KeyCode {
+    if (fin == 65) { return .up; }     // A
+    if (fin == 66) { return .down; }   // B
+    if (fin == 67) { return .right; }  // C
+    if (fin == 68) { return .left; }   // D
+    if (fin == 72) { return .home; }   // H
+    if (fin == 70) { return .end; }    // F
+    if (fin == 80) { return .f1; }     // P
+    if (fin == 81) { return .f2; }     // Q
+    if (fin == 82) { return .f3; }     // R
+    if (fin == 83) { return .f4; }     // S
+    return .unknown;
+}
+
+// kitty CSI-u / xterm modifyOtherKeys key: unicode codepoint + MOD_* bits.
+// The codepoint is the unshifted key (kitty sends 'o' for Ctrl+Shift+O).
+fn _vt_csiu_key(cp: u32, mods: u8, ev: *Event): void {
+    if (cp == 13) { _vt_key(ev, .enter, 13, mods); return; }
+    if (cp == 10) { _vt_key(ev, .enter, 13, mods); return; }
+    if (cp == 9)  { _vt_key(ev, .tab, 9, mods); return; }
+    if (cp == 127) { _vt_key(ev, .backspace, 8, mods); return; }
+    if (cp == 8)   { _vt_key(ev, .backspace, 8, mods); return; }
+    if (cp == 27) { _vt_key(ev, .escape, 27, mods); return; }
+    if (cp == 32) { _vt_key(ev, .space, 32, mods); return; }
+    _vt_key(ev, .char, cp, mods);
+}
+
+// SGR mouse report: ESC [ < b ; x ; y M (press/motion) or m (release)
+fn _vt_sgr_mouse(b: u32, col: u32, row: u32, press: bool, ev: *Event): void {
+    _vt_ev_clear(ev);
+    ev.kind = .mouse;
+    if (col > 0) { ev.x = col - 1; }  // the report counts from 1
+    if (row > 0) { ev.y = row - 1; }
+    if ((b & 4) != 0)  { ev.mods |= MOD_SHIFT; }
+    if ((b & 8) != 0)  { ev.mods |= MOD_ALT; }
+    if ((b & 16) != 0) { ev.mods |= MOD_CTRL; }
+
+    if ((b >= 64) && (b < 66)) {
+        ev.action = .wheel;
+        if (b == 64) { ev.wheel = 120; }  // one notch, same value as win WHEEL_DELTA
+        else { ev.wheel = -120; }
+        return;
+    }
+    if ((b & 32) != 0) {
+        ev.action = .move;  // motion, maybe with a button held
+        return;
+    }
+    low := b & 3;
+    btn: MouseButton = .none;
+    if (low == 0) { btn = .left; }
+    if (low == 1) { btn = .middle; }
+    if (low == 2) { btn = .right; }
+    ev.button = btn;
+    if (press) { ev.action = .press; }
+    else { ev.action = .release; }
+}
+
+const _VT_MAX_PAR : u32 = 4;
+
+// parse a CSI sequence at the front of the buffer (buf = ESC [ ...)
+fn _vt_csi(p: *VtParser, flush: bool, ev: *Event): u32 {
+    i: u32 = 2;
+    priv: u8 = 0;
+    if (i < p.len) {
+        c0 := p.buf[i];
+        if ((c0 >= 60) && (c0 <= 63)) { priv = c0; i += 1; } // '<' '=' '>' '?'
+    }
+
+    par: [_VT_MAX_PAR]u32 = 0;
+    npar: u32 = 0;
+    cur: u32 = 0;
+    has_digit := false;
+    in_sub := false; // inside a ':' sub-parameter (kitty alternate keys / event types): ignored
+    fin: u8 = 0;
+    while (i < p.len) {
+        c := p.buf[i];
+        if ((c >= 48) && (c <= 57)) {
+            if (!in_sub) {
+                // garbled sequences can overflow the accumulator, wrap instead of trapping
+                cur = #wrap_add(#wrap_mul(cur, 10), (c - 48).cast(u32));
+                has_digit = true;
+            }
+            i += 1;
+        }
+        else if (c == 58) { // ':' starts a sub-parameter, skip until ';' or the final byte
+            in_sub = true;
+            i += 1;
+        }
+        else if (c == 59) { // ';'
+            if (npar < _VT_MAX_PAR) { par[npar] = cur; npar += 1; }
+            cur = 0;
+            has_digit = false;
+            in_sub = false;
+            i += 1;
+        }
+        else if ((c >= 64) && (c <= 126)) { fin = c; break; }
+        else { i += 1; } // intermediates: skip
+    }
+    if (fin == 0) {
+        if (p.len >= (VT_BUF_CAP - 8)) { p.len = 0; return _VT_CONSUMED; } // runaway garbage
+        if (flush) {
+            _vt_escape_key(p, ev);
+            return _VT_GOT_EVENT;
+        }
+        return _VT_NEED_MORE;
+    }
+    if (has_digit || (npar > 0)) {
+        if (npar < _VT_MAX_PAR) { par[npar] = cur; npar += 1; }
+    }
+    _vt_consume(p, i + 1);
+
+    if ((priv == 60) && ((fin == 77) || (fin == 109))) { // '<' with final M/m = SGR mouse
+        if (npar >= 3) {
+            _vt_sgr_mouse(par[0], par[1], par[2], fin == 77, ev);
+            return _VT_GOT_EVENT;
+        }
+        return _VT_CONSUMED;
+    }
+    if (priv != 0) { return _VT_CONSUMED; } // other private sequences (DEC replies etc.)
+
+    mods: u8 = 0;
+    if (npar >= 2) { mods = _vt_xterm_mods(par[1]); }
+
+    if (fin == 117) { // 'u': kitty keyboard protocol, CSI <cp> ; <mods> u
+        if (npar >= 1) { _vt_csiu_key(par[0], mods, ev); return _VT_GOT_EVENT; }
+        return _VT_CONSUMED;
+    }
+    if (fin == 65) { _vt_key(ev, .up, 0, mods); return _VT_GOT_EVENT; }     // A
+    if (fin == 66) { _vt_key(ev, .down, 0, mods); return _VT_GOT_EVENT; }   // B
+    if (fin == 67) { _vt_key(ev, .right, 0, mods); return _VT_GOT_EVENT; }  // C
+    if (fin == 68) { _vt_key(ev, .left, 0, mods); return _VT_GOT_EVENT; }   // D
+    if (fin == 72) { _vt_key(ev, .home, 0, mods); return _VT_GOT_EVENT; }   // H
+    if (fin == 70) { _vt_key(ev, .end, 0, mods); return _VT_GOT_EVENT; }    // F
+    if (fin == 90) { _vt_key(ev, .tab, 9, mods | MOD_SHIFT); return _VT_GOT_EVENT; } // Z = shift-tab
+    if ((fin >= 80) && (fin <= 83)) { // P..S: F1..F4 in the CSI 1;<mods> P form
+        _vt_key(ev, _vt_ss3_code(fin), 0, mods);
+        return _VT_GOT_EVENT;
+    }
+    if (fin == 126) { // '~'
+        k: u32 = 0;
+        if (npar >= 1) { k = par[0]; }
+        if ((k == 27) && (npar >= 3)) { // xterm modifyOtherKeys: CSI 27 ; <mods> ; <cp> ~
+            _vt_csiu_key(par[2], mods, ev);
+            return _VT_GOT_EVENT;
+        }
+        code := _vt_tilde_code(k);
+        if (code != .unknown) { _vt_key(ev, code, 0, mods); return _VT_GOT_EVENT; }
+        return _VT_CONSUMED;
+    }
+    return _VT_CONSUMED; // unknown final byte: drop
+}
+
+// skip an OSC / DCS / APC / PM string sequence, it ends with BEL or ESC \
+fn _vt_skip_string(p: *VtParser): u32 {
+    i: u32 = 2;
+    while (i < p.len) {
+        c := p.buf[i];
+        if (c == 7) { _vt_consume(p, i + 1); return _VT_CONSUMED; } // BEL
+        if ((c == 27) && ((i + 1) < p.len)) {
+            if (p.buf[i + 1] == 92) { _vt_consume(p, i + 2); return _VT_CONSUMED; } // ESC backslash
+        }
+        i += 1;
+    }
+    return _VT_NEED_MORE;
+}
+
+// Decode the next event from the pending bytes.
+// false = the buffer is empty or holds an incomplete sequence, feed more bytes and call again.
+// flush means no more bytes are coming soon: a lone ESC becomes the escape key and a cut UTF-8 char is emitted as a raw byte.
+// Pass flush=false while bytes can still arrive, flush=true after a short idle timeout.
+fn vt_next(p: *VtParser, flush: bool, ev: *Event): bool {
+    while (p.len > 0) {
+        if (p.buf[0] != 27) {
+            return _vt_plain(p, flush, ev);
+        }
+
+        if (p.len == 1) {
+            if (flush) { return _vt_escape_key(p, ev); }
+            return false;
+        }
+
+        b1 := p.buf[1];
+        if (b1 == 91) { // '[' CSI
+            r := _vt_csi(p, flush, ev);
+            if (r == _VT_GOT_EVENT) { return true; }
+            if (r == _VT_NEED_MORE) { return false; }
+            // _VT_CONSUMED: sequence without an event, keep parsing
+        }
+        else if (b1 == 79) { // 'O' SS3
+            if (p.len < 3) {
+                if (flush) { return _vt_escape_key(p, ev); }
+                return false;
+            }
+            fin := p.buf[2];
+            _vt_consume(p, 3);
+            code := _vt_ss3_code(fin);
+            if (code != .unknown) { _vt_key(ev, code, 0, 0); return true; }
+            // unknown SS3: dropped, keep parsing
+        }
+        else if ((b1 == 93) || (b1 == 80) || (b1 == 95) || (b1 == 94)) { // ] P _ ^ = OSC/DCS/APC/PM
+            if (_vt_skip_string(p) == _VT_NEED_MORE) { return false; }
+            // consumed, keep parsing
+        }
+        else if (b1 == 27) { // ESC ESC
+            return _vt_escape_key(p, ev);
+        }
+        else {
+            // Alt+<char>: ESC in front of a plain char
+            _vt_consume(p, 1);
+            if (_vt_plain(p, flush, ev)) {
+                ev.mods |= MOD_ALT;
+                return true;
+            }
+            return false;
+        }
+    }
+    return false;
+}
