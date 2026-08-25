@@ -26,7 +26,7 @@ Planned:
 
 ## Download link
 
-* [0.1.0 pre release (x86_64 win/linux)](https://github.com/Morglod/mox/releases/download/0.1.0/mox_010_250826.zip)
+* [0.1.0 pre release (x86_64 win/linux)](https://github.com/Morglod/mox/releases/download/0.1.0/mox_010_250826_2.zip)
 
 ## Some feature highlights
 
