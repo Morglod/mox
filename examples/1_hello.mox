@@ -1,4 +1,4 @@
-// run: ./mox ./hello.mox
+// run: ./mox ./1_hello.mox
 
 import "internal.mox";
 import "format.mox";
