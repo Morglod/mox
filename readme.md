@@ -1,32 +1,50 @@
-# mox programming language
+*This is release repository. Development is going on closed source for now.*  
 
-* Statically typed, data oriented, low level, no GC, no OOP, etc
-* Fast compilation (0.5-1 mil LOC/sec)
-* Comptime execution and code generation
+# mox
+
+Mox is statically typed, data oriented, low level programming language, for software and games.
+
+* Compile time code execution and code generation
 * Interpreter based type checking, ast and types are first class
+* Fast compilation (20-30x faster than clang, 0.5-1 mil LOC/sec vs 28k LOC/sec)
 * Hygyenic macros
-* Generics and function overloading
-* 3 backends supported: fast x86_64, llvm, C
+* Generics, polymorphism and function overloading
+* 3 backends supported: fast x86_64 JIT, LLVM, C
+* Cyclic module imports
 * DWARF debug symbols
-* Cyclic imports and forward references *mostly work*
 
-x86_64 targetted, but llvm and c backend could emit for any platform
+JIT backend is x86_64 targetted, but llvm and C backend could emit for any platform  
 
-windows / linux tested
+Windows / Linux x86_64 tested
 
-Planned:
+To know language better, you can read [./by_example.mox](./by_example.mox)
 
-* Better CLI
-* Better std lib
-* Syntax/semantic stabilization
-* Compiler optimizations
-* Inline assembler
-* Compiler hooks
-* Generic modules
+[Compilation speed comparison](./benchmark/result.md)
 
 ## Download link
 
+Zip archive already contains both versions of compiler and base modules.  
+Compile hello.mox from root directory.
+
 * [0.1.0 pre release (x86_64 win/linux)](https://github.com/Morglod/mox/releases/download/0.1.0/mox_010_250826_2.zip)
+
+*Later smaller version without LLVM backend will be added (few megabytes)*
+
+*For highlighting you can use C or Go or Rust for now*
+
+## CLI
+
+There are compatability flags like -O0, -O3, -g, -o  
+But mostly CLI arguments are verbose
+
+Compiler emits obj file on JIT and LLVM backends, but by default runs external linker too
+
+```bash
+mox help
+mox ./hello.mox
+mox compile="./hello.mox" backend=llvm
+mox ./hello.mox -O3 -o ./hello
+```
 
 ## Some feature highlights
 
@@ -38,22 +56,7 @@ b: [4]f32 = 0;
 c: [3]f32 = (a + b).xyw * 2.0f;
 ```
 
-Macros:
-
-```rust
-fn #scoped_temp_buffer($buf_size: i64): []u8 {
-    buf: [$buf_size]u8 = #memory_garbage;
-    buf_slice := buf.^ |> slice();
-    return buf_slice;
-}
-
-fn foo() {
-    temp_buf := #scoped_temp_buffer(512);
-    // temp_buf is alive only in current scope
-}
-```
-
-Comptime with codegen example:
+Compile time execution with code generation example:
 
 ```rust
 fn go_like_import($path: []u8) {
@@ -65,7 +68,7 @@ fn go_like_import($path: []u8) {
     return ast;
 }
 
-// becomes import "/cache/path/module.mox";
+// becomes import "cache/path/module.mox";
 #run #land_ast go_like_import("github.com/module/path");
 ```
 
@@ -98,10 +101,11 @@ fn something(storage: *Storage($T)): #run _promote_type_to_pointer($T) {
 }
 ```
 
-## CLI
+## Planned
 
-```bash
-mox help
-mox ./entry_module.mox
-mox compile="./entry_module.mox" backend=llvm
-```
+* Union macros and struct fields offsets
+* Inline assembler
+* llvm-jit double backend for fast compile time execution
+* Better compile time debugging and function introspection
+* Web target
+* Hook compiler from user space

@@ -9,6 +9,7 @@ fn this_is_a_function(arg1: i32, arg2: f32 = 123): f32 {
     return arg1 .cast(f32) + arg2;
 }
 
+// Structures memory layout follows C
 struct MyStruct {
     x: i32;
 };
@@ -18,6 +19,9 @@ fn vars_and_types() {
 
     // name : type = default value
     var1 : i32 = 0;
+    
+    // variables should always have default value
+    // var1 : i32; // compilation error
 
     // name := default value
     // type is inferred from default value here
@@ -38,7 +42,7 @@ fn vars_and_types() {
     // 0 is zero initialization, works for everything except pointers
     var4 : MyStruct = 0;
 
-    // explicit no initialization
+    // explicit no initialization, for this #memory_garbage keyword is used
     var5 : MyStruct = #memory_garbage;
 
     // struct literals
@@ -81,7 +85,7 @@ fn vars_and_types() {
         B := 2;
     };
 
-    var10 : MyEnum = .B;
+    var10 : MyEnum = .B; // enum literal is inferred by type, same as MyEnum.B
 
     // untyped literals are treated as comptime "numbers"
     // math on them are folded at comptime
@@ -150,18 +154,30 @@ fn operators() {
 
     // math on 2-4 sized arrays works as 3d vector math
     // swizzling access operators on 2-4 sized arrays supported
+    // this arrays are classical fixed arrays without any special, they just have this operators available
+
     vec1 := [3]f32.{ 1; 2; 3;};
     vec2 := [3]f32.{ 4; 5; 6;};
     vec1.yz = vec2.xx * 2;
     // vec1 is { 1; 8; 8; } here
+
+    // rgba swizzling also works
+
+    // swizzling on arrays bigger than 4 is not available
+    
+    // there is no operator overloading
 }
 
-fn pipe_operator(x: i32) {
+fn pipe_operator(x: i32, y: i32) {
     if (x > 0) {
-        (x - 1) |> pipe_operator();
+        (x - 1) |> pipe_operator(y);
     }
 
+    // pipe operator pipes expression as first argument of next function call
+
+    // for example:
     // expression |> function_call() |> other_function_call();
+    
     // compiler sees it as:
     // other_function_call(function_call(expression))
 
@@ -216,6 +232,7 @@ fn control_flow() {
     }
 
     // for loops currently done as syntax sugar over while loops through pulling iterators
+    // it_range here is just helper function from internal.mox
     for (x : it_range(10u32)) {
         // x is 0..9
     }
@@ -294,6 +311,7 @@ fn macro_alias() {
 
 
 // easies way is to think about generics as templates over comptime baked values
+// __type_ptr is pointer to mox type
 struct GenericStruct($T: __type_ptr, $size: i64) {
     x: $T;
     y: []$T;
@@ -309,6 +327,8 @@ fn generic_func(arg1: i64, $arg2: i64, $T: __type_ptr): void {
 
 // we can overload function and infer generic params
 fn generic_func(x: *GenericStruct($T, $SIZE)): i64 {
+    // Because GenericStruct's second parameter is type of i64
+    // $SIZE is i64 here
     return $SIZE;
 }
 
@@ -443,22 +463,6 @@ fn #repeat(n: u64, code: __ast_ptr) {
         #land_ast code;
         `it = `it + 1;
     }
-}
-
-struct TryResult($T: __type_ptr) {
-    error_code: i64;
-    value: $T;
-};
-
-// concept of try macro
-fn #try(x: TryResult($T)): $T {
-    if (x.error_code != 0) {
-        `return .{
-            error_code = x.error_code;
-            value = 0;
-        };
-    }
-    return x.value;
 }
 
 fn macro_expansion() {
