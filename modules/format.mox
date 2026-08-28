@@ -151,6 +151,7 @@ fn format(dst: []u8, offset: i64, $fmt_str: []u8, values: $T): i64 {
     #run {
         i : i64 = 0;
         value_index : i64 = 0;
+        members_count := __compiler_members_count($T);
 
         while (i < $fmt_str.len) {
             if ($fmt_str[i] == char("\\")) {
@@ -163,6 +164,10 @@ fn format(dst: []u8, offset: i64, $fmt_str: []u8, values: $T): i64 {
             }
 
             if ($fmt_str[i] == char("{") && $fmt_str[i + 1] == char("}")) {
+                if (value_index >= members_count) {
+                    panic("format(\"{}\") expected to have more values", .{ $fmt_str; });
+                }
+
                 member_offset := __compiler_member_offset($T, value_index);
                 member_type := __compiler_member_type($T, value_index);
                 member_type_kind := __compiler_type_kind(member_type).cast(MoxTypeKind);
@@ -198,6 +203,7 @@ fn format_len($fmt_str: []u8, values: $T): i64 {
     #run {
         i : i64 = 0;
         value_index : i64 = 0;
+        members_count := __compiler_members_count($T);
 
         while (i < $fmt_str.len) {
             if ($fmt_str[i] == char("\\")) {
@@ -209,6 +215,9 @@ fn format_len($fmt_str: []u8, values: $T): i64 {
             }
 
             if ($fmt_str[i] == char("{") && $fmt_str[i + 1] == char("}")) {
+                if (value_index >= members_count) {
+                    panic("format_len(\"{}\") expected to have more values", .{ $fmt_str; });
+                }
                 member_offset := __compiler_member_offset($T, value_index);
                 member_type := __compiler_member_type($T, value_index);
                 member_type_kind := __compiler_type_kind(member_type).cast(MoxTypeKind);

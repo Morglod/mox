@@ -7,6 +7,7 @@ import "c_interp.mox";
 import "string.mox";
 
 // mox ./tests/2_sdl3.mox
+#run os_stdout_write("\n\nchange path to libSDL3.dll.a at 10 line of examples/2_sdl3.mox\n\n");
 #run __compiler_append_linker("libSDL3.dll.a");
 
 fn #fail($fmt: []u8, values: $T) {
@@ -23,7 +24,7 @@ fn #fail($fmt: []u8, values: $T) {
     // 1. Initialize SDL
     init_status := SDL_Init(SDL_INIT_VIDEO);
     if (!init_status) {
-        #fail("sdl init failed with code: {}\n{}\n", .{ init_status; });
+        #fail("sdl init failed with code: {}\n", .{ init_status; });
     }
 
     defer SDL_Quit();
