@@ -3,13 +3,15 @@ import "./slice.mox";
 import "./vt_input.mox"; // shared Event model + the VT byte parser
 import "./context.mox";
 import "./c_interp.mox";
+import "./arena.mox";
+import "./alloc.mox";
+import "./string.mox";
 
 // Stored as fd+1
 const OsFile := #type u64;
 
-// POSIX (linux / x86_64 sysv) side of the portable OS API. Import "./os.mox", it lands the module matching the build target.
 // Signatures must match the portable section of os_win.mox exactly.
-// Constants are linux/x86_64 values, WSL is the reference target. macOS needs different values for some, not done yet.
+// macOS needs different values for some constants, not done yet.
 
 // libc declarations
 
@@ -54,6 +56,7 @@ struct PosixDirent {
 #linkc("grantpt")  fn posix_grantpt(fd: i32): i32;
 #linkc("unlockpt") fn posix_unlockpt(fd: i32): i32;
 #linkc("ptsname")  fn posix_ptsname(fd: i32): *u8;
+#linkc("pipe")     fn posix_pipe(fds: *i32): i32;
 #linkc("fork")     fn posix_fork(): i32;
 #linkc("setsid")   fn posix_setsid(): i32;
 #linkc("dup2")     fn posix_dup2(oldfd: i32, newfd: i32): i32;
@@ -62,6 +65,14 @@ struct PosixDirent {
 #linkc("kill")     fn posix_kill(pid: i32, sig: i32): i32;
 #linkc("waitpid")  fn posix_waitpid(pid: i32, status: *i32, options: i32): i32;
 #linkc("system")   fn posix_system(cmd: *u8): i32; // returns a wait status, not an exit code
+#linkc("chdir")    fn posix_chdir(path: *u8): i32;
+#linkc("signal")   fn posix_signal(sig: i32, handler: *u8): *u8;
+
+struct PosixTimespec { tv_sec: i64; tv_nsec: i64; };
+#linkc("clock_gettime") fn posix_clock_gettime(clock_id: i32, ts: *PosixTimespec): i32;
+#linkc("getenv")   fn posix_getenv(name: *u8): *u8;
+#linkc("setenv")   fn posix_setenv(name: *u8, value: *u8, overwrite: i32): i32;
+#linkc("unsetenv") fn posix_unsetenv(name: *u8): i32;
 
 // linux/x86_64 constants
 
@@ -89,9 +100,19 @@ const POSIX_TIOCGWINSZ   : u64 = 21523; // 0x5413
 const POSIX_TIOCSWINSZ   : u64 = 21524; // 0x5414
 const POSIX_TIOCSCTTY    : u64 = 21518; // 0x540E
 const POSIX_POLLIN       : i16 = 1;
+const POSIX_POLLOUT      : i16 = 4;
+const POSIX_POLLERR      : i16 = 8;
+const POSIX_POLLHUP      : i16 = 16;
+const POSIX_POLLNVAL     : i16 = 32;
 
 const POSIX_WNOHANG : i32 = 1;
 const POSIX_SIGKILL : i32 = 9;
+const POSIX_SIGPIPE : i32 = 13;
+const POSIX_SIG_IGN : u64 = 1;          // (sighandler_t)1
+const POSIX_CLOCK_MONOTONIC : i32 = 1;
+
+const _OS_EXEC_READ_CHUNK      : i64 = 4096;
+const _OS_EXEC_SCRATCH_RESERVE : i64 = GIGABYTE;
 const POSIX_DT_DIR  : u8 = 4;
 
 const POSIX_MAP_FAILED : u64 = 18446744073709551615; // (void*)-1
@@ -315,7 +336,7 @@ fn os_stdout_file(): OsFile {
     return 2; // fd 1, stored as fd+1
 }
 
-// writes the cwd NUL-terminated into buf, returns the length without the NUL
+// writes the cwd NULL-terminated into buf, returns the length without the NULL
 fn os_cwd(buf: *u8, cap: i64): i64 {
     if (posix_getcwd(buf, cap.cast(u64)) == 0) { return 0; }
     n: i64 = 0;
@@ -352,7 +373,7 @@ fn os_dir_next(it: *OsDirIter): bool {
     if (e == 0) { return false; }
 
     // The entry only occupies d_reclen bytes; the [256] on d_name is the header's upper bound, not real storage.
-    // Bound the scan by d_reclen (d_name starts 19 bytes in) so a missing NUL cannot walk past the entry.
+    // Bound the scan by d_reclen (d_name starts 19 bytes in) so a missing NULL cannot walk past the entry.
     name_cap := min(e.d_reclen.cast(i64) - 19, 256);
     it.name.ptr = e.d_name.ptr;
     it.name.len = c_strlen(e.d_name.ptr, name_cap);
@@ -477,9 +498,281 @@ fn os_file_exists(path: []u8): bool {
 fn os_exec(cmd: []u8): i32 {
     status := posix_system(#temp_c_string(cmd));
     if (status < 0) { return -1; }                // fork or wait failed
+    return _posix_status_to_exit_code(status);
+}
+
+fn os_monotonic_ms(): i64 {
+    ts: PosixTimespec = 0;
+    posix_clock_gettime(POSIX_CLOCK_MONOTONIC, ts.^);
+    return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+enum OsExecStreamMode : u8 {
+    inherit := 0; // share the parent's handle
+    buffer  := 1; // stdin: fed from ExecOptions.stdin_data, then closed; stdout/stderr: captured into ExecResult
+    null    := 2; // NULL / /dev/null
+    file    := 3; // the OsFile in ExecOptions.*_file (opened by the caller, stays open)
+    merge   := 4; // stderr only: goes wherever stdout goes
+};
+
+struct ExecOptions {
+    stdin_mode: OsExecStreamMode;
+    stdin_data: []u8;   // written to the child when stdin_mode == .buffer, then its stdin is closed
+    stdin_file: OsFile;
+    stdout_mode: OsExecStreamMode;
+    stdout_file: OsFile;
+    stderr_mode: OsExecStreamMode;
+    stderr_file: OsFile;
+    cwd: []u8;          // empty = inherit
+    timeout_ms: i64;    // 0 = wait forever; on expiry the child is killed and timed_out is set
+    no_window: bool;    // windows only: CREATE_NO_WINDOW, no console flashes up from a GUI parent
+};
+
+struct ExecResult {
+    started: bool;      // false = the command could not be started, nothing else is meaningful
+    ok: bool;
+    timed_out: bool;
+    exit_code: i32;     // -1 when not started; 128+signal when killed by a signal on posix (also after a timeout kill)
+    stdout: []u8;       // on arena, filled only when stdout_mode == .buffer
+    stderr: []u8;       // on arena, filled only when stderr_mode == .buffer
+};
+
+// resolves the child's fd for one standard stream from its option.
+// child_out: what the child dup2's onto 0/1/2 (-1 = inherit); ours_out: our end of the pipe (-1 = none);
+// owned_out: child_out was created here and is closed by the parent after fork.
+fn _posix_exec_child_fd(mode: OsExecStreamMode, file: OsFile, child_reads: bool, child_out: *i32, ours_out: *i32, owned_out: *bool): bool {
+    child_out.* = POSIX_NO_FD;
+    ours_out.* = POSIX_NO_FD;
+    owned_out.* = false;
+    if (mode == .buffer) {
+        fds: [2]i32 = 0;
+        if (posix_pipe(fds.ptr) != 0) { return false; }
+        if (child_reads) {
+            child_out.* = fds[0];
+            ours_out.* = fds[1];
+        } else {
+            child_out.* = fds[1];
+            ours_out.* = fds[0];
+        }
+        owned_out.* = true;
+        return true;
+    }
+    if (mode == .null) {
+        devnull := "/dev/null";
+        fd := posix_open(devnull.ptr, POSIX_O_RDWR, 0);
+        if (fd < 0) { return false; }
+        child_out.* = fd;
+        owned_out.* = true;
+        return true;
+    }
+    if (mode == .file) {
+        if (file == 0) { return false; }
+        child_out.* = (file.cast(i64) - 1).cast(i32);
+        return true;
+    }
+    return true;
+}
+
+fn _posix_close_if(fd: i32): void {
+    if (fd >= 0) { posix_close(fd); }
+}
+
+fn _posix_close_extra(fd: i32): void {
+    if (fd > 2) { posix_close(fd); }
+}
+
+// reads what is ready on fd into a fresh scratch chunk pushed on sb. At EOF the fd is closed and set to -1.
+fn _posix_exec_pump(fd: *i32, sb: *StringBuilder, alloc: *Alloc): void {
+    fdv := fd.*;
+    chunk := mem_alloc(alloc, _OS_EXEC_READ_CHUNK, 1);
+    r := posix_read(fdv, chunk, _OS_EXEC_READ_CHUNK.cast(u64));
+    if (r <= 0) {
+        posix_close(fdv);
+        fd.* = POSIX_NO_FD;
+        return;
+    }
+    push(sb, slice(chunk, r));
+}
+
+fn _posix_status_to_exit_code(status: i32): i32 {
     sig := status & 127;
     if (sig != 0) { return 128 + sig; }           // killed by a signal, 128+sig shell convention
     return #shr(status, 8) & 255;                 // WEXITSTATUS
+}
+
+// runs cmd through the platform shell (/bin/sh -c here, cmd.exe /C on win) with options
+// Captured output lives on arena.
+fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): ExecResult {
+    res: ExecResult = 0;
+    res.exit_code = -1;
+
+    scratch_arena := arena_create_virtual(_OS_EXEC_SCRATCH_RESERVE, 65536);
+    scratch := arena_as_allocator(scratch_arena);
+    defer arena_destroy(scratch_arena);
+
+    cmd_z := arena_push_str_copy_c(scratch_arena,cmd).ptr;
+    cwd_z := nullptr(u8);
+    if (opts.cwd.len > 0) { cwd_z = arena_push_str_copy_c(scratch_arena,opts.cwd).ptr; }
+
+    in_child: i32 = POSIX_NO_FD;  in_ours: i32 = POSIX_NO_FD;  in_owned := false;
+    out_child: i32 = POSIX_NO_FD; out_ours: i32 = POSIX_NO_FD; out_owned := false;
+    err_child: i32 = POSIX_NO_FD; err_ours: i32 = POSIX_NO_FD; err_owned := false;
+
+    ok := _posix_exec_child_fd(opts.stdin_mode, opts.stdin_file, true, in_child.^, in_ours.^, in_owned.^);
+    if (ok) { ok = _posix_exec_child_fd(opts.stdout_mode, opts.stdout_file, false, out_child.^, out_ours.^, out_owned.^); }
+    if (ok) {
+        if (opts.stderr_mode == .merge) {
+            err_child = out_child; // same fd, closed once through out_owned
+        } else {
+            ok = _posix_exec_child_fd(opts.stderr_mode, opts.stderr_file, false, err_child.^, err_ours.^, err_owned.^);
+        }
+    }
+
+    pid: i32 = -1;
+    if (ok) { pid = posix_fork(); }
+
+    if (pid == 0) {
+        // child: route 0/1/2, drop every other fd we created, move to cwd, exec the shell
+        if (in_child >= 0)  { posix_dup2(in_child, 0); }
+        if (out_child >= 0) { posix_dup2(out_child, 1); }
+        if (err_child >= 0) { posix_dup2(err_child, 2); }
+        _posix_close_extra(in_child);
+        _posix_close_extra(out_child);
+        _posix_close_extra(err_child);
+        _posix_close_if(in_ours);
+        _posix_close_if(out_ours);
+        _posix_close_if(err_ours);
+        if (cwd_z != 0) {
+            if (posix_chdir(cwd_z) != 0) { posix_exit_now(126); }
+        }
+        sh := "/bin/sh";
+        dash_c := "-c";
+        argv: [4]*u8 = .{ sh.ptr; dash_c.ptr; cmd_z; nullptr(u8); };
+        posix_execvp(sh.ptr, argv.ptr.cast(*u8));
+        posix_exit_now(127);
+    }
+
+    // parent (or the fork failed): the child ends are its now
+    if (in_owned)  { posix_close(in_child); }
+    if (out_owned) { posix_close(out_child); }
+    if (err_owned) { posix_close(err_child); }
+    if (pid < 0) {
+        _posix_close_if(in_ours);
+        _posix_close_if(out_ours);
+        _posix_close_if(err_ours);
+        return res;
+    }
+    res.started = true;
+
+    // nothing to feed: the child sees EOF right away
+    if ((in_ours >= 0) && (opts.stdin_data.len == 0)) {
+        posix_close(in_ours);
+        in_ours = POSIX_NO_FD;
+    }
+    // a child that exits before reading all of its stdin would otherwise SIGPIPE us on write
+    prev_sigpipe := nullptr(u8);
+    sigpipe_ignored := false;
+    if (in_ours >= 0) {
+        prev_sigpipe = posix_signal(POSIX_SIGPIPE, POSIX_SIG_IGN.cast(*u8));
+        sigpipe_ignored = true;
+    }
+
+    out_sb: StringBuilder = #memory_garbage;
+    err_sb: StringBuilder = #memory_garbage;
+    init(out_sb.^, scratch);
+    init(err_sb.^, scratch);
+
+    deadline: i64 = 0;
+    if (opts.timeout_ms > 0) { deadline = os_monotonic_ms() + opts.timeout_ms; }
+    in_off: i64 = 0;
+
+    while ((in_ours >= 0) || (out_ours >= 0) || (err_ours >= 0)) {
+        wait_ms: i32 = -1;
+        if (deadline != 0) {
+            left := deadline - os_monotonic_ms();
+            if (left <= 0) {
+                posix_kill(pid, POSIX_SIGKILL);
+                res.timed_out = true;
+                break;
+            }
+            wait_ms = left.cast(i32);
+        }
+
+        pfds: [3]PosixPollFd = 0;
+        n: i64 = 0;
+        if (in_ours >= 0)  { p: PosixPollFd = 0; p.fd = in_ours;  p.events = POSIX_POLLOUT; pfds[n] = p; n += 1; }
+        if (out_ours >= 0) { p: PosixPollFd = 0; p.fd = out_ours; p.events = POSIX_POLLIN;  pfds[n] = p; n += 1; }
+        if (err_ours >= 0) { p: PosixPollFd = 0; p.fd = err_ours; p.events = POSIX_POLLIN;  pfds[n] = p; n += 1; }
+
+        r := posix_poll(pfds.ptr, n.cast(u64), wait_ms);
+        if (r <= 0) { continue; } // timeout (handled at the top) or EINTR
+
+        i: i64 = 0;
+        while (i < n) {
+            p := pfds[i];
+            i += 1;
+            if (p.revents == 0) { continue; }
+            if (p.fd == in_ours) {
+                if ((p.revents & (POSIX_POLLERR | POSIX_POLLHUP | POSIX_POLLNVAL)) != 0) {
+                    posix_close(in_ours); // child closed its stdin, the rest of the data is not wanted
+                    in_ours = POSIX_NO_FD;
+                    continue;
+                }
+                chunk := min(opts.stdin_data.len - in_off, _OS_EXEC_READ_CHUNK);
+                w := posix_write(in_ours, opts.stdin_data.ptr |> byte_offset(in_off), chunk.cast(u64));
+                if (w > 0) { in_off += w; }
+                if ((w <= 0) || (in_off >= opts.stdin_data.len)) {
+                    posix_close(in_ours); // all fed (or write failed): EOF for the child
+                    in_ours = POSIX_NO_FD;
+                }
+            } else if (p.fd == out_ours) {
+                _posix_exec_pump(out_ours.^, out_sb.^, scratch);
+            } else {
+                _posix_exec_pump(err_ours.^, err_sb.^, scratch);
+            }
+        }
+    }
+    _posix_close_if(in_ours);
+    _posix_close_if(out_ours);
+    _posix_close_if(err_ours);
+    if (sigpipe_ignored) { posix_signal(POSIX_SIGPIPE, prev_sigpipe); }
+
+    // the child may outlive its pipes (closed stdout early); wait for it with whatever time is left
+    st: i32 = 0;
+    if ((deadline != 0) && (!res.timed_out)) {
+        while (posix_waitpid(pid, st.^, POSIX_WNOHANG) == 0) {
+            if (os_monotonic_ms() >= deadline) {
+                posix_kill(pid, POSIX_SIGKILL);
+                res.timed_out = true;
+                posix_waitpid(pid, st.^, 0);
+                break;
+            }
+            _posix_sleep_ms(10);
+        }
+    } else {
+        posix_waitpid(pid, st.^, 0);
+    }
+    res.exit_code = _posix_status_to_exit_code(st);
+
+    // chunks live on scratch (an arena: no free, so no destroy); the joined outputs go to the caller's arena
+    out_alloc := arena_as_allocator(arena);
+    if (opts.stdout_mode == .buffer) { res.stdout = finalize(out_sb.^, out_alloc, false); }
+    if (opts.stderr_mode == .buffer) { res.stderr = finalize(err_sb.^, out_alloc, false); }
+    res.ok = res.exit_code == 0 && res.started;
+    return res;
+}
+
+// poll with no fds is a plain sleep
+fn _posix_sleep_ms(ms: i32): void {
+    posix_poll(nullptr(PosixPollFd), 0, ms);
+}
+
+// runs cmd through the platform shell, waits, returns everything it wrote to stdout (on arena).
+// Empty when the command could not start (or printed nothing). stdin and stderr stay inherited; append "2>&1" to capture stderr too.
+fn os_exec_output(cmd: []u8, arena: *Arena = #temp_arena()): []u8 {
+    opts: ExecOptions = 0;
+    opts.stdout_mode = .buffer;
+    return os_exec_ex(cmd, opts, arena).stdout;
 }
 
 fn os_stdout_write(buf: []u8): void { os_stdout_write(buf.ptr, buf.len); }
@@ -488,3 +781,23 @@ fn os_file_write(h: OsFile, buf: []u8): i64 { return os_file_write(h, buf.ptr, b
 fn os_cwd(buf: []u8): i64 { return os_cwd(buf.ptr, buf.len); }
 fn os_clipboard_set(text: []u8): void { os_clipboard_set(text.ptr, 0 .cast(u32), text.len.cast(u32)); }
 fn os_clipboard_get(buf: []u8): u32 { return os_clipboard_get(buf.ptr, buf.len.cast(u32)); }
+
+fn os_get_env(name: []u8): []u8 {
+    env := posix_getenv(#temp_c_string(name));
+    if (env == 0) {
+        return empty_slice(u8);
+    }
+    env_len := c_strlen(env);
+    buf := #temp_buffer(env_len);
+    mem_copy(buf.ptr, env, env_len);
+
+    return buf;
+}
+
+fn os_set_env(name: []u8, value: []u8): void {
+    posix_setenv(#temp_c_string(name), #temp_c_string(value), 1);
+}
+
+fn os_delete_env(name: []u8): void {
+    posix_unsetenv(#temp_c_string(name));
+}

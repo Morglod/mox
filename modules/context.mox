@@ -44,7 +44,7 @@ fn get_context_temp_arena(): *Arena {
 
 fn #temp_arena(): *Arena {
     arena := get_context_temp_arena();
-    cur_pos := arena_current_pos();
+    cur_pos := arena_current_pos(arena);
     defer arena_pop_to(arena, cur_pos);
     return arena;
 }

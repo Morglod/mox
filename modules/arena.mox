@@ -100,6 +100,35 @@ fn arena_push(arena: *Arena, $T: __type_ptr, align: u32 = 1): *$T {
     return ptr.cast(*$T);
 }
 
+fn arena_push_copy(arena: *Arena, value: $T, align: u32 = 1): *$T {
+    ptr := arena_push(arena, $T, align);
+    ptr.* = value;
+    return ptr;
+}
+
+// copies s onto the arena
+fn arena_push_slice_copy(arena: *Arena, s: []$T, align: u32 = 1): []$T {
+    elem_size := sizeof_type($T);
+    mem := arena_push(arena, elem_size * s.len, align);
+    mem_copy(mem.ptr, s.ptr.cast(*u8), elem_size * s.len);
+    out: []$T = #memory_garbage;
+    out.ptr = mem.ptr.cast(*$T);
+    out.len = s.len;
+    return out;
+}
+
+fn arena_push_str_copy(arena: *Arena, s: []u8): []u8 {
+    return arena_push_slice_copy(arena, s);
+}
+
+// copies as a C string: NUL-terminated, and the NUL is counted in the returned slice's len
+fn arena_push_str_copy_c(arena: *Arena, s: []u8): []u8 {
+    mem := arena_push(arena, s.len + 1);
+    mem_copy(mem.ptr, s.ptr, s.len);
+    mem[s.len] = 0;
+    return mem;
+}
+
 fn arena_pop_to(arena: *Arena, new_pos: i64, size: i64): void {
     old_pos := arena.pos;
     arena.pos = new_pos;

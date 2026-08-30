@@ -3,6 +3,9 @@ import "./slice.mox";
 import "./vt_input.mox"; // shared Event model, filled by os_term_poll
 import "./context.mox";
 import "./c_interp.mox";
+import "./arena.mox";
+import "./alloc.mox";
+import "./string.mox";
 
 // Wrapper over HANDLE
 const OsFile := #type u64;
@@ -47,6 +50,7 @@ fn win_get_page_size_cached(): u32 {
 
 const STD_INPUT_HANDLE  : u32 = 4294967286; // (DWORD)-10
 const STD_OUTPUT_HANDLE : u32 = 4294967285; // (DWORD)-11
+const STD_ERROR_HANDLE  : u32 = 4294967284; // (DWORD)-12
 
 #linkc("GetStdHandle") fn GetStdHandle(nStdHandle: u32): WIN_HANDLE;
 #linkc("GetConsoleMode") fn GetConsoleMode(h: WIN_HANDLE, mode_out: *u32): i32;
@@ -175,6 +179,7 @@ const GMEM_MOVEABLE  : u32 = 2;
 const GENERIC_READ            : u32 = 2147483648; // 0x80000000
 const GENERIC_WRITE           : u32 = 1073741824; // 0x40000000
 const FILE_SHARE_READ         : u32 = 1;
+const FILE_SHARE_WRITE        : u32 = 2;
 const OPEN_EXISTING           : u32 = 3;
 const CREATE_ALWAYS           : u32 = 2;
 const FILE_ATTRIBUTE_NORMAL   : u32 = 128;  // 0x80
@@ -266,6 +271,19 @@ struct PROCESS_INFORMATION {
 #linkc("TerminateProcess")   fn TerminateProcess(h: WIN_HANDLE, code: u32): i32;
 #linkc("GetLastError")       fn GetLastError(): u32;
 #linkc("DeleteFileA")        fn DeleteFileA(path: *u8): i32;
+
+struct SECURITY_ATTRIBUTES {
+    nLength: u32;
+    lpSecurityDescriptor: *u8;
+    bInheritHandle: i32;
+};
+const STARTF_USESTDHANDLES : u32 = 0x100;
+const HANDLE_FLAG_INHERIT  : u32 = 1;
+const CREATE_NO_WINDOW     : u32 = 0x08000000;
+const _OS_EXEC_READ_CHUNK  : i64 = 4096;
+const _OS_EXEC_SCRATCH_RESERVE : i64 = 1073741824; // 1 GiB of address space for captured output, committed as used
+#linkc("SetHandleInformation") fn SetHandleInformation(h: WIN_HANDLE, mask: u32, flags: u32): i32;
+#linkc("GetTickCount64")       fn GetTickCount64(): u64;
 
 // ---- portable OS API ----
 // Same signatures as os_posix.mox. Import "./os.mox", it lands the module matching the build target.
@@ -774,19 +792,23 @@ fn os_file_exists(path: []u8): bool {
 
 // runs cmd through the platform shell (cmd.exe /C here, /bin/sh -c on posix), waits, returns its exit code. -1 = could not start.
 
-fn os_exec(cmd: []u8): i32 {
-    // CreateProcessA may write into the command line, build "cmd.exe /C <cmd>" writable and NUL-terminated in temp memory
+fn _win_shell_cmdline(cmd: []u8, arena: *Arena): *u8 {
     prefix: []u8 = "cmd.exe /C ";
-    full := #temp_buffer(prefix.len + cmd.len + 1);
+    full := arena_push(arena, prefix.len + cmd.len + 1);
     mem_copy(full.ptr, prefix.ptr, prefix.len);
-    mem_copy(ty_offset(full.ptr, prefix.len), cmd.ptr, cmd.len);
+    mem_copy(full.ptr |> byte_offset(prefix.len), cmd.ptr, cmd.len);
     full[prefix.len + cmd.len] = 0;
+    return full.ptr;
+}
+
+fn os_exec(cmd: []u8): i32 {
+    full := _win_shell_cmdline(cmd, #temp_arena());
 
     si: STARTUPINFOEXA = 0;
     si.StartupInfo.cb = sizeof_type(STARTUPINFOA).cast(u32);
     pi: PROCESS_INFORMATION = 0;
     // inherit=1: child shares our console and stdio
-    if (CreateProcessA(nullptr(u8), full.ptr, nullptr(u8), nullptr(u8), 1, 0, nullptr(u8), nullptr(u8), si.^, pi.^) == 0) {
+    if (CreateProcessA(nullptr(u8), full, nullptr(u8), nullptr(u8), 1, 0, nullptr(u8), nullptr(u8), si.^, pi.^) == 0) {
         return -1;
     }
     WaitForSingleObject(pi.hProcess, INFINITE);
@@ -797,9 +819,259 @@ fn os_exec(cmd: []u8): i32 {
     return code.cast(i32);
 }
 
+fn os_monotonic_ms(): i64 {
+    return GetTickCount64().cast(i64);
+}
+
+enum OsExecStreamMode : u8 {
+    inherit := 0; // share the parent's handle
+    buffer  := 1; // stdin: fed from ExecOptions.stdin_data, then closed; stdout/stderr: captured into ExecResult
+    null    := 2; // NUL / /dev/null
+    file    := 3; // the OsFile in ExecOptions.*_file (opened by the caller, stays open)
+    merge   := 4; // stderr only: goes wherever stdout goes
+};
+
+struct ExecOptions {
+    stdin_mode: OsExecStreamMode;
+    stdin_data: []u8;   // written to the child when stdin_mode == .buffer, then its stdin is closed
+    stdin_file: OsFile;
+    stdout_mode: OsExecStreamMode;
+    stdout_file: OsFile;
+    stderr_mode: OsExecStreamMode;
+    stderr_file: OsFile;
+    cwd: []u8;          // empty = inherit
+    timeout_ms: i64;    // 0 = wait forever; on expiry the child is killed and timed_out is set
+    no_window: bool;    // windows only: CREATE_NO_WINDOW, no console flashes up from a GUI parent
+};
+
+struct ExecResult {
+    started: bool;      // false = the command could not be started, nothing else is meaningful
+    ok: bool;
+    timed_out: bool;
+    exit_code: i32;     // -1 when not started; 128+signal when killed by a signal on posix (also after a timeout kill)
+    stdout: []u8;       // on arena, filled only when stdout_mode == .buffer
+    stderr: []u8;       // on arena, filled only when stderr_mode == .buffer
+};
+
+// resolves the child's handle for one standard stream from its option.
+// child_out: what the child gets; ours_out: our end of the pipe (0 = none); owned_out: child_out is ours to close after CreateProcess.
+// pipe_size is the pipe buffer hint (0 = default).
+fn _win_exec_child_handle(mode: OsExecStreamMode, std_id: u32, file: OsFile, child_reads: bool, pipe_size: u32, sa: *SECURITY_ATTRIBUTES, child_out: *u64, ours_out: *u64, owned_out: *bool): bool {
+    child_out.* = 0;
+    ours_out.* = 0;
+    owned_out.* = false;
+    if (mode == .buffer) {
+        r: u64 = 0;
+        w: u64 = 0;
+        if (CreatePipe(r.^, w.^, sa.cast(*u8), pipe_size) == 0) { return false; }
+        child: u64 = w;
+        ours: u64 = r;
+        if (child_reads) { child = r; ours = w; }
+        SetHandleInformation(ours.cast(*u8), HANDLE_FLAG_INHERIT, 0); // only the child's end may be inherited
+        child_out.* = child;
+        ours_out.* = ours;
+        owned_out.* = true;
+        return true;
+    }
+    if (mode == .null) {
+        nul := "NUL";
+        h := CreateFileA(nul.ptr, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, sa.cast(*u8), OPEN_EXISTING, 0, nullptr(u8));
+        if (h.cast(u64) == INVALID_HANDLE_VALUE) { return false; }
+        child_out.* = h.cast(u64);
+        owned_out.* = true;
+        return true;
+    }
+    if (mode == .file) {
+        if (file == 0) { return false; }
+        SetHandleInformation(file.cast(*u8), HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT); // cleared again after CreateProcess
+        child_out.* = file;
+        return true;
+    }
+    child_out.* = GetStdHandle(std_id).cast(u64);
+    return true;
+}
+
+fn _win_close_if(h: u64): void {
+    if (h != 0) { CloseHandle(h.cast(*u8)); }
+}
+
+// moves whatever the pipe holds right now into a fresh scratch chunk pushed on sb. Returns false when nothing was pending.
+// At EOF (every write end closed) the handle is closed and zeroed.
+fn _win_exec_pump(h: *u64, sb: *StringBuilder, alloc: *Alloc): bool {
+    hv := h.*;
+    avail: u32 = 0;
+    if (PeekNamedPipe(hv.cast(*u8), nullptr(u8), 0, nullptr(u32), avail.^, nullptr(u32)) == 0) {
+        CloseHandle(hv.cast(*u8));
+        h.* = 0;
+        return true;
+    }
+    if (avail == 0) { return false; }
+    n := min(avail.cast(i64), _OS_EXEC_READ_CHUNK);
+    chunk := mem_alloc(alloc, n, 1);
+    got: u32 = 0;
+    if (ReadFile(hv.cast(*u8), chunk, n.cast(u32), got.^, nullptr(u8)) == 0) {
+        CloseHandle(hv.cast(*u8));
+        h.* = 0;
+        return true;
+    }
+    push(sb, slice(chunk, got.cast(i64)));
+    return true;
+}
+
+// runs cmd through the platform shell (cmd.exe /C here, /bin/sh -c on posix) with options
+// Captured output lives on arena.
+fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): ExecResult {
+    res: ExecResult = 0;
+    res.exit_code = -1;
+
+    scratch_arena := arena_create_virtual(_OS_EXEC_SCRATCH_RESERVE, 65536);
+    scratch := arena_as_allocator(scratch_arena);
+    defer arena_destroy(scratch_arena);
+
+    full := _win_shell_cmdline(cmd, scratch_arena);
+    cwd := nullptr(u8);
+    if (opts.cwd.len > 0) { cwd = arena_push_str_copy_c(scratch_arena,opts.cwd).ptr; }
+
+    sa: SECURITY_ATTRIBUTES = 0;
+    sa.nLength = sizeof_type(SECURITY_ATTRIBUTES).cast(u32);
+    sa.bInheritHandle = 1;
+
+    in_child: u64 = 0;  in_ours: u64 = 0;  in_owned := false;
+    out_child: u64 = 0; out_ours: u64 = 0; out_owned := false;
+    err_child: u64 = 0; err_ours: u64 = 0; err_owned := false;
+
+    stdin_pipe_size := min(max(opts.stdin_data.len, 1), 2147483647).cast(u32);
+    ok := _win_exec_child_handle(opts.stdin_mode, STD_INPUT_HANDLE, opts.stdin_file, true, stdin_pipe_size, sa.^, in_child.^, in_ours.^, in_owned.^);
+    if (ok) { ok = _win_exec_child_handle(opts.stdout_mode, STD_OUTPUT_HANDLE, opts.stdout_file, false, 0, sa.^, out_child.^, out_ours.^, out_owned.^); }
+    if (ok) {
+        if (opts.stderr_mode == .merge) {
+            err_child = out_child; // same handle, closed once through out_owned
+        } else {
+            ok = _win_exec_child_handle(opts.stderr_mode, STD_ERROR_HANDLE, opts.stderr_file, false, 0, sa.^, err_child.^, err_ours.^, err_owned.^);
+        }
+    }
+
+    pi: PROCESS_INFORMATION = 0;
+    if (ok) {
+        si: STARTUPINFOEXA = 0;
+        si.StartupInfo.cb = sizeof_type(STARTUPINFOA).cast(u32);
+        si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        si.StartupInfo.hStdInput = in_child.cast(*u8);
+        si.StartupInfo.hStdOutput = out_child.cast(*u8);
+        si.StartupInfo.hStdError = err_child.cast(*u8);
+        flags: u32 = 0;
+        if (opts.no_window) { flags = CREATE_NO_WINDOW; }
+        // inherit=1 hands over the marked handles
+        ok = CreateProcessA(nullptr(u8), full, nullptr(u8), nullptr(u8), 1, flags, nullptr(u8), cwd, si.^, pi.^) != 0;
+    }
+
+    // the child holds its own copies now (or never started): release the child ends and un-mark caller files
+    if (in_owned)  { CloseHandle(in_child.cast(*u8)); }
+    if (out_owned) { CloseHandle(out_child.cast(*u8)); }
+    if (err_owned) { CloseHandle(err_child.cast(*u8)); }
+    if (opts.stdin_mode == .file)  { SetHandleInformation(in_child.cast(*u8), HANDLE_FLAG_INHERIT, 0); }
+    if (opts.stdout_mode == .file) { SetHandleInformation(out_child.cast(*u8), HANDLE_FLAG_INHERIT, 0); }
+    if (opts.stderr_mode == .file) { SetHandleInformation(err_child.cast(*u8), HANDLE_FLAG_INHERIT, 0); }
+    if (!ok) {
+        _win_close_if(in_ours);
+        _win_close_if(out_ours);
+        _win_close_if(err_ours);
+        return res;
+    }
+    res.started = true;
+
+    // stdin first: the pipe buffer holds all of it, so this returns without waiting on the child. Closing = EOF for the child.
+    if (in_ours != 0) {
+        win_write_all(in_ours.cast(*u8), opts.stdin_data.ptr, opts.stdin_data.len);
+        CloseHandle(in_ours.cast(*u8));
+        in_ours = 0;
+    }
+
+    out_sb: StringBuilder = #memory_garbage;
+    err_sb: StringBuilder = #memory_garbage;
+    init(out_sb.^, scratch);
+    init(err_sb.^, scratch);
+
+    deadline: i64 = 0;
+    if (opts.timeout_ms > 0) { deadline = os_monotonic_ms() + opts.timeout_ms; }
+
+    // drain both pipes until EOF; anonymous pipes have no overlapped I/O, so it is peek + short waits on the process
+    exited := false;
+    while ((out_ours != 0) || (err_ours != 0)) {
+        if ((deadline != 0) && (!res.timed_out) && (os_monotonic_ms() >= deadline)) {
+            TerminateProcess(pi.hProcess, 1);
+            res.timed_out = true;
+            exited = true;
+        }
+        progressed := false;
+        if (out_ours != 0) { if (_win_exec_pump(out_ours.^, out_sb.^, scratch)) { progressed = true; } }
+        if (err_ours != 0) { if (_win_exec_pump(err_ours.^, err_sb.^, scratch)) { progressed = true; } }
+        if (progressed) { continue; }
+        if (exited) { break; } // child is gone and its pipes are drained; whoever still holds a write end is not our child
+        if (WaitForSingleObject(pi.hProcess, 10) == 0) { exited = true; }
+    }
+    _win_close_if(out_ours);
+    _win_close_if(err_ours);
+
+    // the child may outlive its pipes (closed stdout early); wait for it with whatever time is left
+    remaining: u32 = INFINITE;
+    if (deadline != 0) {
+        left := deadline - os_monotonic_ms();
+        if (left < 0) { left = 0; }
+        remaining = left.cast(u32);
+    }
+    if (WaitForSingleObject(pi.hProcess, remaining) != 0) {
+        TerminateProcess(pi.hProcess, 1);
+        res.timed_out = true;
+        WaitForSingleObject(pi.hProcess, INFINITE);
+    }
+    code: u32 = 0;
+    GetExitCodeProcess(pi.hProcess, code.^);
+    res.exit_code = code.cast(i32);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    // chunks live on scratch (an arena: no free, so no destroy); the joined outputs go to the caller's arena
+    out_alloc := arena_as_allocator(arena);
+    if (opts.stdout_mode == .buffer) { res.stdout = finalize(out_sb.^, out_alloc, false); }
+    if (opts.stderr_mode == .buffer) { res.stderr = finalize(err_sb.^, out_alloc, false); }
+    res.ok = res.exit_code == 0 && res.started;
+    return res;
+}
+
+// runs cmd through the platform shell, waits, returns everything it wrote to stdout (on arena).
+// Empty when the command could not start (or printed nothing). stdin and stderr stay inherited; append "2>&1" to capture stderr too.
+fn os_exec_output(cmd: []u8, arena: *Arena = #temp_arena()): []u8 {
+    opts: ExecOptions = 0;
+    opts.stdout_mode = .buffer;
+    return os_exec_ex(cmd, opts, arena).stdout;
+}
+
 fn os_stdout_write(buf: []u8): void { os_stdout_write(buf.ptr, buf.len); }
 fn os_file_read(h: OsFile, buf: []u8): i64 { return os_file_read(h, buf.ptr, buf.len); }
 fn os_file_write(h: OsFile, buf: []u8): i64 { return os_file_write(h, buf.ptr, buf.len); }
 fn os_cwd(buf: []u8): i64 { return os_cwd(buf.ptr, buf.len); }
 fn os_clipboard_set(text: []u8): void { os_clipboard_set(text.ptr, 0 .cast(u32), text.len.cast(u32)); }
 fn os_clipboard_get(buf: []u8): u32 { return os_clipboard_get(buf.ptr, buf.len.cast(u32)); }
+
+#linkc("GetEnvironmentVariableA") fn win_GetEnvironmentVariableA(name: *u8, buffer: *u8, size: u32): u32;
+#linkc("SetEnvironmentVariableA") fn win_SetEnvironmentVariableA(name: *u8, value: *u8): i32;
+
+fn os_get_env(name: []u8): []u8 {
+    name_c := #temp_c_string(name);
+    len := win_GetEnvironmentVariableA(name_c, nullptr(u8), 0);
+    if (len == 0) {
+        return empty_slice(u8);
+    }
+    buf := #temp_buffer(len);
+    win_GetEnvironmentVariableA(name_c, buf.ptr, len);
+    return slice(buf, 0, len - 1);
+}
+
+fn os_set_env(name: []u8, value: []u8): void {
+    win_SetEnvironmentVariableA(#temp_c_string(name), #temp_c_string(value));
+}
+
+fn os_delete_env(name: []u8): void {
+    win_SetEnvironmentVariableA(#temp_c_string(name), nullptr(u8));
+}

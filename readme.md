@@ -51,53 +51,61 @@ mox ./hello.mox -O3 -o ./hello
 Builtin 3d math with swizzling:
 
 ```rust
-a: [4]f32 = 0;
-b: [4]f32 = 0;
-c: [3]f32 = (a + b).xyw * 2.0f;
+fn foo(a: [4]f32, b: [4]f32): [3]f32 {
+    return (a + b).xyy * 2.0f;
+}
 ```
 
-Compile time execution with code generation example:
+Compile time code execution:
+
+*Which works for externally linked functions too*
 
 ```rust
-fn go_like_import($path: []u8) {
-    cached_path := path_to_cache($path);
-    if (!cache_exists(cached_path)) {
-        download_dep($path, cached_path);
+#linkc fn puts(str: *u8): void;
+
+#run puts("this message will be printed at compilation time");
+
+// this constant will be baked from env variable at compilation time, not at runtime
+const SOME_COMPTIME_FLAG := #run os_get_env("PUBLIC_URL");
+
+fn main() {
+    build_version := #run os_exec_output("git rev-parse HEAD");
+}
+```
+
+Code generation and ast manipulation:
+
+```rust
+fn per_platform_import_statement($path: []u8): __ast_ptr {
+    platform_subpath : []u8 = "";
+
+    switch (mox_platform) {
+        case .x86_64_win:
+            platform_subpath = "win";
+        case .x86_64_sysv:
+            platform_subpath = "sysv";
+        case:
+            platform_subpath = "unknown";
     }
-    ast := __compiler_parse(#format_temp("import \"{}\";", .{ cached_path; }));
+
+    code_str := #format_temp("import \"{}_{}\";", .{ $path; platform_subpath; });
+    ast := __compiler_parse(code_str);
     return ast;
 }
 
-// becomes import "cache/path/module.mox";
-#run #land_ast go_like_import("github.com/module/path");
+#run #land_ast per_platform_import_statement("module/path");
 ```
 
-Interp based type checking:
+Type manipulation:
 
 ```rust
+fn alloc($T: __type_ptr): *$T {
+    const type_size := $T.cast(*MoxType).size;
+    return malloc(type_size).cast(*$T);
+}
+
 fn foo() {
-    #run {
-        type := i32;
-        if (...) {
-            type = f32;
-        }
-        x: type = 0;
-    };
-}
-
-fn _promote_type_to_pointer($T: __type_ptr): __type_ptr {
-    if ($T.cast(*MoxType).kind == .Ptr) {
-        return $T;
-    }
-    return #type *$T;
-}
-
-fn something(storage: *Storage($T)): #run _promote_type_to_pointer($T) {
-    if (#run $T.cast(*MoxType).kind != .Ptr) {
-        return nullptr($T);
-    } else {
-        return zeroed($T);
-    }
+    x : *i32 = alloc(i32);
 }
 ```
 
