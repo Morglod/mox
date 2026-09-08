@@ -1,0 +1,146 @@
+// fn parse_uint(s: []u8, out: *u64, base: u8 = 0): bool
+// fn parse_int (s: []u8, out: *i64, base: u8 = 0): bool
+//
+// Formats: 1234 (base 10), 0xff (base 16), 0o777 (base 8), 0b10101 (base 2).
+// base = 0 auto-detects from the prefix (no prefix -> base 10).
+// An explicit base 16/8/2 also accepts its optional matching prefix (0x, 0o, 0b).
+// The whole slice must be the number, no other characters.
+// Returns false on empty input, invalid character, overflow or unsupported base;
+
+import "internal.mox";
+import "slice.mox";
+
+// (2^64 - 1) / 10 and % 10
+const _DEC_CUTOFF : u64 = 1844674407370955161;
+const _DEC_CUTLIM : u64 = 5;
+// (2^64 - 1) / 100000000 and % 100000000
+const _DEC8_CUTOFF : u64 = 184467440737;
+const _DEC8_CUTLIM : u64 = 9551615;
+
+fn _swar_is_8_digits(v: u64): bool {
+    hi := v & 0xF0F0F0F0F0F0F0F0;
+    over := #wrap_add(v, 0x0606060606060606) & 0xF0F0F0F0F0F0F0F0;
+    return (hi | #shr(over, 4)) == 0x3333333333333333;
+}
+
+fn _swar_parse_8_digits(v: u64): u64 {
+    v = #shr(#wrap_mul(v & 0x0F0F0F0F0F0F0F0F, 2561), 8);
+    v = #shr(#wrap_mul(v & 0x00FF00FF00FF00FF, 6553601), 16);
+    v = #shr(#wrap_mul(v & 0x0000FFFF0000FFFF, 42949672960001), 32);
+    return v;
+}
+
+fn _parse_u64_dec(s: []u8, out: *u64): bool {
+    if (s.len == 0) { return false; }
+    res : u64 = 0;
+    while (s.len >= 8) {
+        v := s.ptr.cast(*u64).*;
+        if (_swar_is_8_digits(v) == false) { return false; }
+        chunk := _swar_parse_8_digits(v);
+        if (res > _DEC8_CUTOFF) { return false; }
+        if (res == _DEC8_CUTOFF) { if (chunk > _DEC8_CUTLIM) { return false; } }
+        res = res * 100000000 + chunk;
+        s = slice(s, 8);
+    }
+    it := s.ptr;
+    end_ptr := ty_offset(s.ptr, s.len);
+    while (it != end_ptr) {
+        d := #wrap_sub(it.*.cast(u64), 48);
+        if (d > 9) { return false; }
+        if (res > _DEC_CUTOFF) { return false; }
+        if (res == _DEC_CUTOFF) { if (d > _DEC_CUTLIM) { return false; } }
+        res = res * 10 + d;
+        it = ty_offset(it, 1);
+    }
+    out.* = res;
+    return true;
+}
+
+fn _parse_u64_hex(s: []u8, out: *u64): bool {
+    if (s.len == 0) { return false; }
+    res : u64 = 0;
+    it := s.ptr;
+    end_ptr := ty_offset(s.ptr, s.len);
+    while (it != end_ptr) {
+        c := it.*.cast(u64);
+        d := #wrap_sub(c, 48);              // '0'..'9' -> 0..9
+        if (d > 9) {
+            d = #wrap_sub(c | 32, 87);      // 'a'..'f' / 'A'..'F' -> 10..15
+            if (d > 15) { return false; }
+            if (d < 10) { return false; }
+        }
+        if (#shr(res, 60) != 0) { return false; }
+        res = #shl(res, 4) | d;
+        it = ty_offset(it, 1);
+    }
+    out.* = res;
+    return true;
+}
+
+// bases 2 and 8: base = 1 << bits
+fn _parse_u64_pow2(s: []u8, out: *u64, bits: u64, base: u64): bool {
+    if (s.len == 0) { return false; }
+    res : u64 = 0;
+    it := s.ptr;
+    end_ptr := ty_offset(s.ptr, s.len);
+    while (it != end_ptr) {
+        d := #wrap_sub(it.*.cast(u64), 48);
+        if (d >= base) { return false; }
+        if (#shr(res, 64 - bits) != 0) { return false; }
+        res = #shl(res, bits) | d;
+        it = ty_offset(it, 1);
+    }
+    out.* = res;
+    return true;
+}
+
+// drop a leading "0<marker>" / "0<MARKER>" (marker is the lowercase letter)
+fn _strip_prefix(s: []u8, marker: u8): []u8 {
+    if (s.len >= 2) {
+        if (s[0] == 48) {
+            if ((s[1] | 32) == marker) { return slice(s, 2); }
+        }
+    }
+    return s;
+}
+
+fn parse_uint(s: []u8, out: *u64, base: u8 = 0): bool {
+    if (base == 0) {
+        if (s.len >= 2) {
+            if (s[0] == 48) {                    // '0'
+                c := s[1] | 32;
+                if (c == 120) { return _parse_u64_hex(slice(s, 2), out); }         // 'x'
+                if (c == 111) { return _parse_u64_pow2(slice(s, 2), out, 3, 8); }  // 'o'
+                if (c == 98)  { return _parse_u64_pow2(slice(s, 2), out, 1, 2); }  // 'b'
+            }
+        }
+        return _parse_u64_dec(s, out);
+    }
+    if (base == 10) { return _parse_u64_dec(s, out); }
+    if (base == 16) { return _parse_u64_hex(_strip_prefix(s, 120), out); }
+    if (base == 8)  { return _parse_u64_pow2(_strip_prefix(s, 111), out, 3, 8); }
+    if (base == 2)  { return _parse_u64_pow2(_strip_prefix(s, 98),  out, 1, 2); }
+    return false;  // unsupported base
+}
+
+fn parse_int(s: []u8, out: *i64, base: u8 = 0): bool {
+    neg := false;
+    if (s.len > 0) {
+        if (s[0] == 45) {                       // '-'
+            neg = true;
+            s = slice(s, 1);
+        } else if (s[0] == 43) {                // '+'
+            s = slice(s, 1);
+        }
+    }
+    u : u64 = 0;
+    if (parse_uint(s, u.^, base) == false) { return false; }
+    if (neg) {
+        if (u > 9223372036854775808) { return false; }  // > 2^63
+        out.* = #wrap_sub(0, u).cast(i64);              // two's-complement negate
+        return true;
+    }
+    if (u > 9223372036854775807) { return false; }      // > i64 max
+    out.* = u.cast(i64);
+    return true;
+}

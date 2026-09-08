@@ -3,12 +3,14 @@ import "./os.mox";
 import "./alloc.mox";
 import "./panic.mox";
 import "./slice.mox";
+import "./format.mox";
+import "./context.mox";
 
 const PATH_SEPARATOR : u8 = char("/");
 
 // "a/b"  -> "a/"
 // "a/b/" -> "a/"
-fn path_parent(path: []u8): []u8 {
+fn fs_path_parent(path: []u8): []u8 {
     end := path.len;
     if ((end > 0) && (path[end - 1] == PATH_SEPARATOR)) { end -= 1; }
     cut := index_of_last(path, PATH_SEPARATOR, end);
@@ -16,9 +18,48 @@ fn path_parent(path: []u8): []u8 {
     return slice(path, 0, cut + 1);
 }
 
+// "a/b.txt" -> "b.txt"; "a/b/" -> ""
+fn fs_path_basename(path: []u8): []u8 {
+    cut := index_of_last(path, PATH_SEPARATOR);
+    return slice(path, cut + 1);
+}
+
+// extension with the dot: "a/b.txt" -> ".txt"; none (or a dotfile like ".gitignore") -> ""
+fn fs_path_ext(path: []u8): []u8 {
+    name := fs_path_basename(path);
+    dot := index_of_last(name, char("."));
+    if (dot <= 0) { return empty_slice(u8); }
+    return slice(name, dot);
+}
+
+// basename without the extension: "a/b.txt" -> "b"
+fn fs_path_stem(path: []u8): []u8 {
+    name := fs_path_basename(path);
+    dot := index_of_last(name, char("."));
+    if (dot <= 0) { return name; }
+    return slice(name, 0, dot);
+}
+
+// "/..." or a windows drive "C:/..."
+fn fs_path_is_abs(path: []u8): bool {
+    if (path.len == 0) { return false; }
+    if (path[0] == PATH_SEPARATOR) { return true; }
+    if ((path.len >= 3) && (path[1] == char(":")) && (path[2] == PATH_SEPARATOR)) {
+        c := path[0];
+        return ((c >= char("a")) && (c <= char("z"))) || ((c >= char("A")) && (c <= char("Z")));
+    }
+    return false;
+}
+
+// "\" separators become "/", returns path
+fn fs_path_normalize_inplace(path: []u8): []u8 {
+    replace_inplace(path, char("\\"), PATH_SEPARATOR);
+    return path;
+}
+
 // dir + "/" + name
 // the separator is added only when dir does not end with one.
-fn path_join(alloc: *Alloc, dir: []u8, name: []u8): []u8 {
+fn fs_path_join(dir: []u8, name: []u8, alloc: *Alloc = get_context_temp_arena_as_alloc()): []u8 {
     has_sep := (name.len > 0) && (dir.len > 0) && (dir[dir.len - 1] != PATH_SEPARATOR);
     out := mem_alloc_slice(alloc, u8, dir.len + has_sep.cast(i64) + name.len);
     mem_copy(out, dir);
@@ -27,7 +68,7 @@ fn path_join(alloc: *Alloc, dir: []u8, name: []u8): []u8 {
     return out;
 }
 
-fn try_read_file_full(alloc: *Alloc, path: []u8): []u8 {
+fn fs_try_read_file_full(path: []u8, alloc: *Alloc = get_context_temp_arena_as_alloc()): []u8 {
     h := os_file_open_read(path);
     if (h == 0) { return empty_slice(u8); }
     defer os_file_close(h);
@@ -53,10 +94,101 @@ fn try_read_file_full(alloc: *Alloc, path: []u8): []u8 {
     return slice(buf, 0, total);
 }
 
-fn read_file_full(alloc: *Alloc, path: []u8): []u8 {
-    out := try_read_file_full(alloc, path);
+fn fs_read_file_full(path: []u8, alloc: *Alloc = get_context_temp_arena_as_alloc()): []u8 {
+    out := fs_try_read_file_full(path, alloc);
     if (out.ptr == nullptr(u8)) {
-        panic("read_file_full failed to read \"{}\"", .{ path; });
+        panic("fs_read_file_full failed to read \"{}\"", .{ path; });
     }
     return out;
+}
+
+fn fs_try_write_file_full(path: []u8, data: []u8): bool {
+    h := os_file_open_write(path);
+    if (h == 0) { return false; }
+    defer os_file_close(h);
+
+    written := os_file_write(h, data);
+    return written == data.len;
+}
+
+fn fs_write_file_full(path: []u8, data: []u8): void {
+    if (!fs_try_write_file_full(path, data)) {
+        panic("fs_write_file_full failed \"{}\"", .{ path; });
+    }
+}
+
+// true when the directory exists afterwards (already existing = success)
+fn fs_make_dir(path: []u8): bool {
+    if (os_dir_exists(path)) { return true; }
+    return os_make_dir(path);
+}
+
+// creates every missing directory on the way
+fn fs_make_dir_all(path: []u8): bool {
+    if (path.len == 0) { return true; }
+    if (os_dir_exists(path)) { return true; }
+    parent := fs_path_parent(path);
+    if (parent.len > 0) {
+        if (!fs_make_dir_all(parent)) { return false; }
+    }
+    return fs_make_dir(path);
+}
+
+// files and directories; an existing `to` file is replaced
+fn fs_rename(from: []u8, to: []u8): bool {
+    return os_rename(from, to);
+}
+
+fn fs_delete_file(path: []u8): bool {
+    return os_file_delete(path);
+}
+
+// the directory must be empty
+fn fs_delete_dir(path: []u8): bool {
+    return os_delete_dir(path);
+}
+
+// copies the whole content through memory; overwrites `to`
+fn fs_copy_file(from: []u8, to: []u8): bool {
+    data := fs_try_read_file_full(from);
+    if (data.ptr == nullptr(u8)) { return false; }
+    return fs_try_write_file_full(to, data);
+}
+
+// the OS temp directory with a trailing "/", on alloc; empty = failed
+fn fs_temp_dir(alloc: *Alloc = get_context_temp_arena_as_alloc()): []u8 {
+    buf: [512]u8 = #memory_garbage;
+    n := os_temp_dir(slice(buf.^));
+    if (n == 0) { return empty_slice(u8); }
+    out := mem_alloc_slice(alloc, u8, n);
+    mem_copy(out, slice(buf.^, 0, n));
+    return out;
+}
+
+_fs_temp_file_counter: i64 = 0;
+
+// creates an empty uniquely-named file in the OS temp directory and returns its path (on alloc)
+// empty = failed. The caller deletes it when done.
+fn fs_temp_file(prefix: []u8 = "mox", alloc: *Alloc = get_context_temp_arena_as_alloc()): []u8 {
+    dir_buf: [512]u8 = #memory_garbage;
+    dir_len := os_temp_dir(slice(dir_buf.^)); // ends with a separator
+    if (dir_len == 0) { return empty_slice(u8); }
+    dir := slice(dir_buf.^, 0, dir_len);
+
+    tries: i64 = 0;
+    while (tries < 1000) {
+        tries += 1;
+        _fs_temp_file_counter += 1;
+        t := os_monotonic_ns();
+        name_len := format_len("{}_{}_{}.tmp", .{ prefix; t; _fs_temp_file_counter; });
+        path := mem_alloc_slice(alloc, u8, dir_len + name_len);
+        mem_copy(path, dir);
+        format(path, dir_len, "{}_{}_{}.tmp", .{ prefix; t; _fs_temp_file_counter; });
+        if (os_path_exists(path)) { continue; }
+        h := os_file_open_write(path);
+        if (h == 0) { return empty_slice(u8); }
+        os_file_close(h);
+        return path;
+    }
+    return empty_slice(u8);
 }

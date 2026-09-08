@@ -271,6 +271,17 @@ struct PROCESS_INFORMATION {
 #linkc("TerminateProcess")   fn TerminateProcess(h: WIN_HANDLE, code: u32): i32;
 #linkc("GetLastError")       fn GetLastError(): u32;
 #linkc("DeleteFileA")        fn DeleteFileA(path: *u8): i32;
+#linkc("CreateDirectoryA")   fn CreateDirectoryA(path: *u8, sec: *u8): i32;
+#linkc("RemoveDirectoryA")   fn RemoveDirectoryA(path: *u8): i32;
+#linkc("MoveFileExA")        fn MoveFileExA(from: *u8, to: *u8, flags: u32): i32;
+#linkc("GetTempPathA")       fn GetTempPathA(cap: u32, buf: *u8): u32;
+#linkc("Sleep")              fn win_Sleep(ms: u32): void;
+#linkc("QueryPerformanceCounter")   fn win_QueryPerformanceCounter(out: *i64): i32;
+#linkc("QueryPerformanceFrequency") fn win_QueryPerformanceFrequency(out: *i64): i32;
+#linkc("GetSystemTimeAsFileTime")   fn win_GetSystemTimeAsFileTime(out: *u64): void; // FILETIME, 100ns ticks since 1601
+
+const MOVEFILE_REPLACE_EXISTING : u32 = 1;
+const MOVEFILE_COPY_ALLOWED     : u32 = 2; // cross-volume moves fall back to copy+delete
 
 struct SECURITY_ATTRIBUTES {
     nLength: u32;
@@ -774,6 +785,21 @@ fn os_file_delete(path: []u8): bool {
     return os_file_delete(#temp_c_string(path));
 }
 
+// one level; false when it already exists or the parent is missing
+fn os_make_dir(path: []u8): bool {
+    return CreateDirectoryA(#temp_c_string(path), nullptr(u8)) != 0;
+}
+
+// the directory must be empty
+fn os_delete_dir(path: []u8): bool {
+    return RemoveDirectoryA(#temp_c_string(path)) != 0;
+}
+
+// files and (same-volume) directories; an existing `to` file is replaced
+fn os_rename(from: []u8, to: []u8): bool {
+    return MoveFileExA(#temp_c_string(from), #temp_c_string(to), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED) != 0;
+}
+
 // "file" means any non-directory entry
 
 fn os_path_exists(path: []u8): bool {
@@ -821,6 +847,42 @@ fn os_exec(cmd: []u8): i32 {
 
 fn os_monotonic_ms(): i64 {
     return GetTickCount64().cast(i64);
+}
+
+_os_qpc_freq: i64 = 0;
+
+fn os_monotonic_ns(): i64 {
+    if (_os_qpc_freq == 0) {
+        win_QueryPerformanceFrequency(_os_qpc_freq.^);
+    }
+    c: i64 = 0;
+    win_QueryPerformanceCounter(c.^);
+    // split so c * 1e9 cannot overflow
+    sec := c / _os_qpc_freq;
+    rem := c - sec * _os_qpc_freq;
+    return sec * 1000000000 + rem * 1000000000 / _os_qpc_freq;
+}
+
+fn os_unix_time_ms(): i64 {
+    ft: u64 = 0; // FILETIME as one u64
+    win_GetSystemTimeAsFileTime(ft.^);
+    return ((ft - 116444736000000000) / 10000).cast(i64); // 1601 -> 1970, 100ns -> ms
+}
+
+fn os_sleep_ms(ms: i64): void {
+    if (ms <= 0) { return; }
+    ms = min(ms, 4294967294); // Sleep takes a u32; INFINITE (max u32) must not be reachable
+    win_Sleep(ms.cast(u32));
+}
+
+// writes the temp directory into buf (with a trailing separator), returns the length, 0 = failed.
+// Separators become "/".
+fn os_temp_dir(buf: *u8, cap: i64): i64 {
+    n := GetTempPathA(cap.cast(u32), buf);
+    // n > cap: buffer too small, GetTempPathA returns the required size
+    if ((n == 0) || (n.cast(i64) > cap)) { return 0; }
+    replace_inplace(slice(buf, n.cast(i64)), char("\\"), char("/"));
+    return n.cast(i64);
 }
 
 enum OsExecStreamMode : u8 {
@@ -1051,6 +1113,7 @@ fn os_stdout_write(buf: []u8): void { os_stdout_write(buf.ptr, buf.len); }
 fn os_file_read(h: OsFile, buf: []u8): i64 { return os_file_read(h, buf.ptr, buf.len); }
 fn os_file_write(h: OsFile, buf: []u8): i64 { return os_file_write(h, buf.ptr, buf.len); }
 fn os_cwd(buf: []u8): i64 { return os_cwd(buf.ptr, buf.len); }
+fn os_temp_dir(buf: []u8): i64 { return os_temp_dir(buf.ptr, buf.len); }
 fn os_clipboard_set(text: []u8): void { os_clipboard_set(text.ptr, 0 .cast(u32), text.len.cast(u32)); }
 fn os_clipboard_get(buf: []u8): u32 { return os_clipboard_get(buf.ptr, buf.len.cast(u32)); }
 

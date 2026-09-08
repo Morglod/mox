@@ -1,0 +1,535 @@
+// fn parse_float(s: []u8, out: *f64): bool
+//
+// Formats:
+//   [+-] digits [. digits] [eE [+-] digits]     decimal
+//   [+-] 0x hex [. hex] pP [+-] digits          hex float, 'p' exponent required
+//   [+-] inf | infinity | nan                   case-insensitive
+// The whole slice must be the number (no partial parse).
+// Returns false on syntax errors.
+// Values beyond f64 range round to +-inf / +-0 with true (IEEE semantics).
+//
+// Pipeline: Clinger exact fast path -> Eisel-Lemire (128-bit pow5 table) ->
+// bigint halfway comparison for the rare inconclusive cases.
+// Base-10 digit runs use the 8-digits-per-u64 SWAR helpers
+
+import "internal.mox";
+import "slice.mox";
+import "math.mox";
+import "panic.mox";
+import "parse_int.mox";
+import "parse_float_table.mox";
+
+const _F64_POW10: [23]f64 = .{
+    1.0; 10.0; 100.0; 1000.0; 10000.0; 100000.0; 1000000.0; 10000000.0;
+    100000000.0; 1000000000.0; 10000000000.0; 100000000000.0; 1000000000000.0;
+    10000000000000.0; 100000000000000.0; 1000000000000000.0; 10000000000000000.0;
+    100000000000000000.0; 1000000000000000000.0; 10000000000000000000.0;
+    100000000000000000000.0; 1000000000000000000000.0; 10000000000000000000000.0;
+};
+
+const _POW10S: [20]u64 = .{
+    1; 10; 100; 1000; 10000; 100000; 1000000; 10000000; 100000000; 1000000000;
+    10000000000; 100000000000; 1000000000000; 10000000000000; 100000000000000;
+    1000000000000000; 10000000000000000; 100000000000000000; 1000000000000000000;
+    10000000000000000000;
+};
+
+const _POW5S: [27]u64 = .{
+    1; 5; 25; 125; 625; 3125; 15625; 78125; 390625; 1953125; 9765625; 48828125;
+    244140625; 1220703125; 6103515625; 30517578125; 152587890625; 762939453125;
+    3814697265625; 19073486328125; 95367431640625; 476837158203125;
+    2384185791015625; 11920928955078125; 59604644775390625; 298023223876953125;
+    1490116119384765625;
+};
+
+fn _is_dig(c: u8): bool {
+    return #wrap_sub(c.cast(u64), 48) <= 9;
+}
+
+fn _hexval(c: u8): u64 {
+    d := #wrap_sub(c.cast(u64), 48);
+    if (d <= 9) { return d; }
+    d = #wrap_sub(c.cast(u64) | 32, 87);
+    if (d >= 10) { if (d <= 15) { return d; } }
+    return 255;
+}
+
+fn _ascii_ieq(s: []u8, lit: []u8): bool {
+    if (s.len != lit.len) { return false; }
+    for (i : it_range(s.len)) {
+        if ((s[i] | 32) != lit[i]) { return false; }
+    }
+    return true;
+}
+
+fn _f64_out(neg: bool, bits: u64, out: *f64): bool {
+    if (neg) { bits = bits | 0x8000000000000000; }
+    out.* = bits.^.cast(*f64).*;
+    return true;
+}
+
+// ---------------- Eisel-Lemire core ----------------
+
+// floor((217706 * q) / 2^16), the binary exponent estimate for 10^q
+fn _el_power(q: i64): i64 {
+    x := 217706 * q;
+    if (x >= 0) { return x / 65536; }
+    return 0 - ((65535 - x) / 65536);
+}
+
+// w * 10^q rounded to f64, w != 0. Writes best-effort (mantissa, biased exp);
+// returns false when the 128-bit product cannot decide the rounding
+// (caller must fall back to the bigint path).
+fn _eisel_lemire(w: u64, q: i64, out_m: *u64, out_p2: *i64): bool {
+    if (q < -342) { out_m.* = 0; out_p2.* = 0; return true; }     // -> 0
+    if (q > 308) { out_m.* = 0; out_p2.* = 2047; return true; }   // -> inf
+    lz := #bit_count_leading_zeroes(w);
+    wsh := #shl(w, lz);
+    idx := q + 342;
+    hi: u64 = #memory_garbage;
+    lo := umul128(wsh, _EL_POW5_HI[idx], hi.^);
+    certain := true;
+    if ((hi & 0x1FF) == 0x1FF) {
+        hi2 := umul128_hi(wsh, _EL_POW5_LO[idx]);
+        lo = #wrap_add(lo, hi2);
+        if (lo < hi2) { hi += 1; }
+        if ((hi & 0x1FF) == 0x1FF) {
+            if (#wrap_add(lo, wsh) < lo) { certain = false; }
+        }
+    }
+    upperbit := #shr(hi, 63);
+    m := #shr(hi, upperbit + 9);
+    p2 := _el_power(q) + 63 + upperbit.cast(i64) - lz.cast(i64) + 1023;
+    if (p2 <= 0) {
+        // subnormal (or underflow to zero)
+        shift := 1 - p2;
+        if (shift >= 64) { out_m.* = 0; out_p2.* = 0; return certain; }
+        m = #shr(m, shift.cast(u64));
+        m += (m & 1);
+        m = #shr(m, 1);
+        p2 = 0;
+        if (m >= 4503599627370496) { p2 = 1; }   // rounded up into 2^-1022
+        out_m.* = m; out_p2.* = p2;
+        return certain;
+    }
+    // exact-halfway product: round to even instead of up
+    if (lo <= 1) { if (q >= -4) { if (q <= 23) { if ((m & 3) == 1) {
+        if (#shl(m, upperbit + 9) == hi) { m = m & 0xFFFFFFFFFFFFFFFE; }
+    } } } }
+    m += (m & 1);
+    m = #shr(m, 1);
+    if (m >= 9007199254740992) { m = 4503599627370496; p2 += 1; }   // 2^53 -> 2^52
+    if (p2 >= 2047) { out_m.* = 0; out_p2.* = 2047; return certain; }  // inf
+    m = m & 4503599627370495;   // strip implicit bit
+    out_m.* = m; out_p2.* = p2;
+    return certain;
+}
+
+// ---------------- bigint slow path ----------------
+
+struct _BigInt {
+    n: i64;
+    limbs: [72]u64;   // little-endian
+};
+
+fn _big_mul_add(b: *_BigInt, mul: u64, add: u64): void {
+    carry := add;
+    for (i : it_range(b.n)) {
+        hi: u64 = #memory_garbage;
+        lo := umul128(b.limbs[i], mul, hi.^);
+        lo = #wrap_add(lo, carry);
+        if (lo < carry) { hi += 1; }
+        b.limbs[i] = lo;
+        carry = hi;
+    }
+    if (carry != 0) {
+        if (b.n >= 72) { panic("parse_float: bigint overflow"); }
+        b.limbs[b.n] = carry;
+        b.n += 1;
+    }
+}
+
+fn _big_mul_pow5(b: *_BigInt, k: i64): void {
+    while (k >= 27) {
+        _big_mul_add(b, 7450580596923828125, 0);   // 5^27
+        k -= 27;
+    }
+    if (k > 0) { _big_mul_add(b, _POW5S[k], 0); }
+}
+
+fn _big_shl(b: *_BigInt, k: i64): void {
+    if (b.n == 0) { return; }
+    if (k <= 0) { return; }
+    bs := k & 63;
+    limbshift := #shr(k.cast(u64), 6).cast(i64);
+    if (bs != 0) {
+        carry: u64 = 0;
+        for (i : it_range(b.n)) {
+            v := b.limbs[i];
+            b.limbs[i] = #shl(v, bs.cast(u64)) | carry;
+            carry = #shr(v, (64 - bs).cast(u64));
+        }
+        if (carry != 0) {
+            if (b.n >= 72) { panic("parse_float: bigint overflow"); }
+            b.limbs[b.n] = carry;
+            b.n += 1;
+        }
+    }
+    if (limbshift > 0) {
+        if (b.n + limbshift > 72) { panic("parse_float: bigint overflow"); }
+        for (i : it_range_reverse(b.n)) {
+            b.limbs[i + limbshift] = b.limbs[i];
+        }
+        for (i : it_range(limbshift)) { b.limbs[i] = 0; }
+        b.n += limbshift;
+    }
+}
+
+fn _big_cmp(a: *_BigInt, b: *_BigInt): i64 {
+    if (a.n != b.n) {
+        if (a.n > b.n) { return 1; }
+        return -1;
+    }
+    for (i : it_range_reverse(a.n)) {
+        av := a.limbs[i];
+        bv := b.limbs[i];
+        if (av != bv) {
+            if (av > bv) { return 1; }
+            return -1;
+        }
+    }
+    return 0;
+}
+
+// compare D * 10^E (digits bigint, extra = nonzero digits dropped past the cap)
+// against the upper halfway point of the positive float `bits`:
+//   H = (2M + 1) * 2^(e-1)  where value(bits) = M * 2^e
+fn _cmp_halfway(src: *_BigInt, E: i64, extra: bool, bits: u64): i64 {
+    p2 := #shr(bits, 52).cast(i64);
+    mf := bits & 4503599627370495;
+    M: u64 = #memory_garbage;
+    e: i64 = #memory_garbage;
+    if (p2 == 0) { M = mf; e = -1074; }
+    else { M = mf | 4503599627370496; e = p2 - 1075; }
+    r0 := 2 * M + 1;
+    h := e - 1;
+    // D*10^E vs r0*2^h  ->  D*5^max(E,0)*2^max(E-h,0)  vs  r0*5^max(-E,0)*2^max(h-E,0)
+    L := src.*;
+    R: _BigInt = #memory_garbage;
+    R.n = 1;
+    R.limbs[0] = r0;
+    if (E >= 0) { _big_mul_pow5(L.^, E); }
+    else { _big_mul_pow5(R.^, 0 - E); }
+    d2 := E - h;
+    if (d2 >= 0) { _big_shl(L.^, d2); }
+    else { _big_shl(R.^, 0 - d2); }
+    c := _big_cmp(L.^, R.^);
+    if (c == 0) {
+        if (extra) { return 1; }
+        return 0;
+    }
+    return c;
+}
+
+// Correctly round via exact bigint comparison.
+// bits1 is a candidate within one ulp of the true value (true value in (prev(bits1), next(bits1))).
+// s = number text after the sign, dp = decimal point position in the
+// significant-digit stream (exponent already folded in). Returns positive bits.
+fn _dec_slow(s: []u8, dp: i64, bits1: u64): u64 {
+    D: _BigInt = #memory_garbage;
+    D.n = 0;
+    stored: i64 = 0;
+    started := false;
+    extra := false;
+    acc: u64 = 0;
+    cnt: i64 = 0;
+    i: i64 = 0;
+    n := s.len;
+    while (i < n) {
+        c := s[i];
+        d := #wrap_sub(c.cast(u64), 48);
+        if (d <= 9) {
+            if (started == false) {
+                if (d == 0) { i += 1; continue; }   // leading zeros
+                started = true;
+            }
+            if (stored < 800) {
+                acc = acc * 10 + d;
+                cnt += 1;
+                stored += 1;
+                if (cnt == 19) {
+                    _big_mul_add(D.^, 10000000000000000000, acc);
+                    acc = 0;
+                    cnt = 0;
+                }
+            } else if (d != 0) {
+                extra = true;
+            }
+            i += 1;
+            continue;
+        }
+        if (c == 46) { i += 1; continue; }   // '.'
+        break;                                // 'e' / 'E'
+    }
+    if (cnt > 0) { _big_mul_add(D.^, _POW10S[cnt], acc); }
+    E := dp - stored;
+    c2 := _cmp_halfway(D.^, E, extra, bits1);
+    if (c2 > 0) { return bits1 + 1; }
+    if (c2 == 0) {
+        if ((bits1 & 1) == 0) { return bits1; }
+        return bits1 + 1;
+    }
+    if (bits1 == 0) { return 0; }
+    c1 := _cmp_halfway(D.^, E, extra, bits1 - 1);
+    if (c1 > 0) { return bits1; }
+    if (c1 == 0) {
+        if (((bits1 - 1) & 1) == 0) { return bits1 - 1; }
+        return bits1;
+    }
+    return bits1 - 1;
+}
+
+// ---------------- decimal ----------------
+
+fn _parse_dec(s: []u8, neg: bool, out: *f64): bool {
+    n := s.len;
+    i: i64 = 0;
+    w: u64 = 0;
+    nd: i64 = 0;        // significant digits seen
+    nd_mant: i64 = 0;   // digits accumulated into w (<= 19)
+    dp: i64 = 0;
+    saw_dot := false;
+    saw_digits := false;
+    trunc := false;
+
+    while (i < n) {
+        c := s[i];
+        d := #wrap_sub(c.cast(u64), 48);
+        if (d <= 9) {
+            saw_digits = true;
+            if (d == 0) { if (nd == 0) {
+                dp -= 1;   // leading zeros (only meaningful after the dot)
+                i += 1;
+                continue;
+            } }
+            nd += 1;
+            if (nd_mant < 19) {
+                w = w * 10 + d;
+                nd_mant += 1;
+            } else if (d != 0) {
+                trunc = true;
+            }
+            i += 1;
+            // SWAR: swallow 8-digit runs while the mantissa has room
+            while (nd_mant <= 11) {
+                if (i + 8 > n) { break; }
+                v8 := ty_offset(s.ptr, i).cast(*u64).*;
+                if (_swar_is_8_digits(v8) == false) { break; }
+                w = w * 100000000 + _swar_parse_8_digits(v8);
+                nd += 8;
+                nd_mant += 8;
+                i += 8;
+            }
+            continue;
+        }
+        if (c == 46) {   // '.'
+            if (saw_dot) { return false; }
+            saw_dot = true;
+            dp = nd;
+            i += 1;
+            continue;
+        }
+        break;
+    }
+    if (saw_digits == false) { return false; }
+    if (saw_dot == false) { dp = nd; }
+
+    if (i < n) {   // exponent
+        if ((s[i] | 32) != 101) { return false; }   // 'e'
+        i += 1;
+        if (i >= n) { return false; }
+        esign: i64 = 1;
+        if (s[i] == 43) { i += 1; }
+        else if (s[i] == 45) { esign = -1; i += 1; }
+        if (i >= n) { return false; }
+        if (_is_dig(s[i]) == false) { return false; }
+        e_acc: i64 = 0;
+        while (i < n) {
+            c2 := s[i];
+            d2 := #wrap_sub(c2.cast(u64), 48);
+            if (d2 <= 9) {
+                if (e_acc < 100000) { e_acc = e_acc * 10 + d2.cast(i64); }
+                i += 1;
+                continue;
+            }
+            return false;
+        }
+        dp += esign * e_acc;
+    }
+
+    if (w == 0) { return _f64_out(neg, 0, out); }   // +-0
+    exp10 := dp - nd_mant;
+
+    // Clinger exact fast path: both w and 10^|e| exact in f64
+    if (trunc == false) { if (w <= 9007199254740991) {   // 2^53 - 1
+        if (exp10 >= 0) {
+            e2 := exp10;
+            w2 := w;
+            while (e2 > 22) {
+                if (w2 > 900719925474099) { break; }   // (2^53-1)/10
+                w2 = w2 * 10;
+                e2 -= 1;
+            }
+            if (e2 <= 22) {
+                f := w2.cast(i64).cast(f64) * _F64_POW10[e2];
+                if (neg) { f = 0 - f; }
+                out.* = f;
+                return true;
+            }
+        } else if (exp10 >= -22) {
+            f := w.cast(i64).cast(f64) / _F64_POW10[0 - exp10];
+            if (neg) { f = 0 - f; }
+            out.* = f;
+            return true;
+        }
+    } }
+
+    // Eisel-Lemire
+    m: u64 = #memory_garbage;
+    p2: i64 = #memory_garbage;
+    certain := _eisel_lemire(w, exp10, m.^, p2.^);
+    if (certain) { if (trunc) {
+        // truncated digits: conclusive only if w and w+1 agree
+        m2: u64 = #memory_garbage;
+        p22: i64 = #memory_garbage;
+        ok2 := _eisel_lemire(w + 1, exp10, m2.^, p22.^);
+        if (ok2 == false) { certain = false; }
+        else if (m2 != m) { certain = false; }
+        else if (p22 != p2) { certain = false; }
+    } }
+    bits := m | #shl(p2.cast(u64), 52);
+    if (certain) { return _f64_out(neg, bits, out); }
+    // keep the slow-path candidate finite (window is {prev, cand, next})
+    if (bits >= 0x7FF0000000000000) { bits = 0x7FEFFFFFFFFFFFFF; }
+    return _f64_out(neg, _dec_slow(s, dp, bits), out);
+}
+
+// ---------------- hex float ----------------
+
+// value = m * 2^e2, m != 0, sticky = dropped nonzero bits below m
+fn _hex_round(neg: bool, m: u64, e2: i64, sticky: bool, out: *f64): bool {
+    lz := #bit_count_leading_zeroes(m).cast(i64);
+    msh := #shl(m, lz.cast(u64));   // [2^63, 2^64)
+    ef := e2 - lz + 63 + 1023;      // tentative biased exponent
+    if (ef >= 2047) { return _f64_out(neg, 0x7FF0000000000000, out); }
+    drop: i64 = 11;
+    if (ef < 1) { drop = 11 + (1 - ef); }   // subnormal
+    if (drop > 64) { return _f64_out(neg, 0, out); }
+    m53: u64 = 0;
+    g: u64 = 0;
+    if (drop == 64) {
+        g = #shr(msh, 63);
+        if ((msh & 0x7FFFFFFFFFFFFFFF) != 0) { sticky = true; }
+    } else {
+        g = #shr(msh, (drop - 1).cast(u64)) & 1;
+        one: u64 = 1;
+        low_mask := #shl(one, (drop - 1).cast(u64)) - 1;
+        if ((msh & low_mask) != 0) { sticky = true; }
+        m53 = #shr(msh, drop.cast(u64));
+    }
+    if (g == 1) {
+        up := sticky;
+        if (up == false) { up = (m53 & 1) == 1; }
+        if (up) { m53 += 1; }
+    }
+    p2: i64 = 0;
+    if (ef >= 1) {
+        p2 = ef;
+        if (m53 >= 9007199254740992) { m53 = #shr(m53, 1); p2 += 1; }
+        if (p2 >= 2047) { return _f64_out(neg, 0x7FF0000000000000, out); }
+        m53 = m53 & 4503599627370495;
+    }
+    return _f64_out(neg, m53 | #shl(p2.cast(u64), 52), out);
+}
+
+fn _parse_hex(s: []u8, neg: bool, out: *f64): bool {
+    n := s.len;
+    i: i64 = 0;
+    m: u64 = 0;
+    e2: i64 = 0;
+    sticky := false;
+    saw_dot := false;
+    saw_digits := false;
+    while (i < n) {
+        c := s[i];
+        hv := _hexval(c);
+        if (hv != 255) {
+            saw_digits = true;
+            if (m < 1152921504606846976) {   // 2^60: room for 4 more bits
+                m = #shl(m, 4) | hv;
+                if (saw_dot) { e2 -= 4; }
+            } else {
+                if (saw_dot == false) { e2 += 4; }
+                if (hv != 0) { sticky = true; }
+            }
+            i += 1;
+            continue;
+        }
+        if (c == 46) {   // '.'
+            if (saw_dot) { return false; }
+            saw_dot = true;
+            i += 1;
+            continue;
+        }
+        break;
+    }
+    if (saw_digits == false) { return false; }
+    if (i >= n) { return false; }
+    if ((s[i] | 32) != 112) { return false; }   // 'p' exponent required
+    i += 1;
+    if (i >= n) { return false; }
+    esign: i64 = 1;
+    if (s[i] == 43) { i += 1; }
+    else if (s[i] == 45) { esign = -1; i += 1; }
+    if (i >= n) { return false; }
+    if (_is_dig(s[i]) == false) { return false; }
+    e_acc: i64 = 0;
+    while (i < n) {
+        c2 := s[i];
+        d2 := #wrap_sub(c2.cast(u64), 48);
+        if (d2 <= 9) {
+            if (e_acc < 100000) { e_acc = e_acc * 10 + d2.cast(i64); }
+            i += 1;
+            continue;
+        }
+        return false;
+    }
+    e2 += esign * e_acc;
+    if (m == 0) { return _f64_out(neg, 0, out); }
+    return _hex_round(neg, m, e2, sticky, out);
+}
+
+// ---------------- entry ----------------
+
+fn parse_float(s: []u8, out: *f64): bool {
+    neg := false;
+    if (s.len > 0) {
+        if (s[0] == 45) { neg = true; s = slice(s, 1); }        // '-'
+        else if (s[0] == 43) { s = slice(s, 1); }               // '+'
+    }
+    if (s.len == 0) { return false; }
+    c0 := s[0] | 32;
+    if (c0 == 105) {   // 'i'
+        if (_ascii_ieq(s, "inf")) { return _f64_out(neg, 0x7FF0000000000000, out); }
+        if (_ascii_ieq(s, "infinity")) { return _f64_out(neg, 0x7FF0000000000000, out); }
+        return false;
+    }
+    if (c0 == 110) {   // 'n'
+        if (_ascii_ieq(s, "nan")) { return _f64_out(neg, 0x7FF8000000000000, out); }
+        return false;
+    }
+    if (s.len >= 2) { if (s[0] == 48) { if ((s[1] | 32) == 120) {
+        return _parse_hex(slice(s, 2), neg, out);
+    } } }
+    return _parse_dec(s, neg, out);
+}

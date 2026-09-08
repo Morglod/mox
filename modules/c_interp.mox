@@ -1,5 +1,6 @@
 import "./internal.mox";
 import "./context.mox";
+import "./slice.mox";
 
 // interoperability layer with C
 
@@ -30,4 +31,8 @@ fn #temp_c_string(str: []u8): *u8 {
     mem_copy(tmp.ptr, str.ptr, str.len);
     tmp[n] = 0;
     return tmp.ptr;
+}
+
+fn from_c_string(str: *u8): []u8 {
+    return slice(str, c_strlen(str));
 }

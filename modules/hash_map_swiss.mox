@@ -1,0 +1,291 @@
+import "./internal.mox";
+import "./alloc.mox";
+import "./simd.mox";
+import "./hash_map.mox";
+
+// SwissMap: flat unordered map in the swisstable design used by absl and boost.
+// One control byte per slot, either EMPTY, DELETED or the top 7 bits of the hash.
+// Slots are probed in aligned groups of 16 through simd_byte_eq_mask16.
+// Entries live in a parallel slot array in the same allocation.
+// Nothing is allocated before the first insert or reserve.
+//
+// Same API and hasher convention as HashMap:
+//     SwissMap([]u8, i32, hash_bytes.^)
+// Compared to HashMap, remove keeps entry slots in place but leaves tombstones, and iteration scans the whole slot array.
+
+const SWISS_EMPTY   : u8 = 0x80;
+const SWISS_DELETED : u8 = 0xFE;
+const SWISS_GROUP   : i64 = 16;
+const SWISS_HEADER_SIZE : i64 = 32;
+const SWISS_MIN_CAP : i64 = 16;
+
+struct SwissStorage($K: __type_ptr, $V: __type_ptr) {
+    len: i64;
+    cap: i64;            // slots, power of two, multiple of 16
+    growth_left: i64;    // EMPTY slots that may still be filled, max load is 7/8
+    entries_offset: i64;
+
+    // here ctrl bytes go (cap of them), then entries
+};
+
+struct SwissMap($K: __type_ptr, $V: __type_ptr, $HASH: *fn(key: *$K): u64) {
+    storage: *SwissStorage($K, $V);
+    alloc: *Alloc;
+
+    #alias len = len(self);
+};
+
+fn _hashmap_swiss_ctrl(st: *SwissStorage($K, $V)): *u8 {
+    return st.cast(*u8) |> byte_offset(SWISS_HEADER_SIZE);
+}
+
+fn _hashmap_swiss_entries_ptr(st: *SwissStorage($K, $V)): *MapEntry($K, $V) {
+    p := st.cast(*u8) |> byte_offset(st.entries_offset);
+    return p.cast(*MapEntry($K, $V));
+}
+
+// top 7 bits of the hash, the group index uses the low bits so the two are independent
+fn _hashmap_swiss_h2(h: u64): u8 {
+    return #shr(h, 57).cast(u8);
+}
+
+fn len(m: *SwissMap($K, $V, $HASH)): i64 {
+    if (m.storage == 0) { return 0; }
+    return m.storage.len;
+}
+
+fn init(m: *SwissMap($K, $V, $HASH), alloc: *Alloc, expected_count: i64 = 0): void {
+    m.alloc = alloc;
+    m.storage = nullptr(#type SwissStorage($K, $V));
+    if (expected_count > 0) { reserve(m, expected_count); }
+}
+
+fn destroy(m: *SwissMap($K, $V, $HASH)): void {
+    if (m.storage == 0) { return; }
+    mem_free(m.alloc, m.storage.cast(*u8));
+    m.storage = nullptr(#type SwissStorage($K, $V));
+}
+
+fn clear(m: *SwissMap($K, $V, $HASH)): void {
+    st := m.storage;
+    if (st == 0) { return; }
+    st.len = 0;
+    st.growth_left = (st.cap * 7) / 8;
+    mem_set(_hashmap_swiss_ctrl(st), SWISS_EMPTY, st.cap);
+}
+
+fn _hashmap_swiss_new_storage(m: *SwissMap($K, $V, $HASH), cap: i64): *SwissStorage($K, $V) {
+    entries_offset := align_up(SWISS_HEADER_SIZE + cap, 16i64);
+    bytes := entries_offset + cap * sizeof_type(#type MapEntry($K, $V));
+    st := mem_alloc(m.alloc, bytes, 16).cast(*SwissStorage($K, $V));
+    st.len = 0;
+    st.cap = cap;
+    st.growth_left = (cap * 7) / 8;
+    st.entries_offset = entries_offset;
+    mem_set(_hashmap_swiss_ctrl(st), SWISS_EMPTY, cap);
+    return st;
+}
+
+fn _hashmap_swiss_next_pow2(v: i64): i64 {
+    out := SWISS_MIN_CAP;
+    while (out < v) { out *= 2; }
+    return out;
+}
+
+// first EMPTY or DELETED slot along the probe sequence of the hash
+fn _hashmap_swiss_find_insert_slot(st: *SwissStorage($K, $V), h: u64): i64 {
+    ctrl := _hashmap_swiss_ctrl(st);
+    gmask := (st.cap / SWISS_GROUP) - 1;
+    g := (h & gmask.cast(u64)).cast(i64);
+    step: i64 = 0;
+    while (true) {
+        base := g * SWISS_GROUP;
+        sp := simd_byte_high_mask16(byte_offset(ctrl, base));
+        if (sp != 0) {
+            return base + #bit_count_trailing_zeroes(sp).cast(i64);
+        }
+        step += 1;
+        g = (g + step) & gmask;
+    }
+    return -1;
+}
+
+fn _hashmap_swiss_grow(m: *SwissMap($K, $V, $HASH), min_cap: i64): void {
+    old := m.storage;
+    nst := _hashmap_swiss_new_storage(m, min_cap);
+    if (old != 0) {
+        ctrl := _hashmap_swiss_ctrl(old);
+        entries := _hashmap_swiss_entries_ptr(old);
+        nctrl := _hashmap_swiss_ctrl(nst);
+        nentries := _hashmap_swiss_entries_ptr(nst);
+        for (i : it_range(old.cap)) {
+            c := byte_offset(ctrl, i).*;
+            if ((c & 0x80) != 0) { continue; } // EMPTY or DELETED
+            e := ty_offset(entries, i);
+            h := $HASH(e.key.^);
+            slot := _hashmap_swiss_find_insert_slot(nst, h);
+            byte_offset(nctrl, slot).* = _hashmap_swiss_h2(h);
+            ty_offset(nentries, slot).* = e.*;
+        }
+        nst.len = old.len;
+        nst.growth_left = (nst.cap * 7) / 8 - old.len;
+        mem_free(m.alloc, old.cast(*u8));
+    }
+    m.storage = nst;
+}
+
+fn reserve(m: *SwissMap($K, $V, $HASH), count: i64): void {
+    need := _hashmap_swiss_next_pow2((count * 8) / 7 + SWISS_GROUP);
+    if ((m.storage != 0) && (m.storage.cap >= need)) { return; }
+    _hashmap_swiss_grow(m, need);
+}
+
+fn get(m: *SwissMap($K, $V, $HASH), key: $K): *$V {
+    st := m.storage;
+    if (st == 0) { return nullptr($V); }
+    ctrl := _hashmap_swiss_ctrl(st);
+    entries := _hashmap_swiss_entries_ptr(st);
+    gmask := (st.cap / SWISS_GROUP) - 1;
+    h := $HASH(key.^);
+    h2 := _hashmap_swiss_h2(h);
+    g := (h & gmask.cast(u64)).cast(i64);
+    step: i64 = 0;
+    while (true) {
+        base := g * SWISS_GROUP;
+        cp := byte_offset(ctrl, base);
+        mm := simd_byte_eq_mask16(cp, h2);
+        while (mm != 0) {
+            s := base + #bit_count_trailing_zeroes(mm).cast(i64);
+            e := ty_offset(entries, s);
+            if (e.key == key) { return e.value.^; }
+            mm = mm & (mm - 1);
+        }
+        if (simd_byte_eq_mask16(cp, SWISS_EMPTY) != 0) {
+            return nullptr($V); // an empty slot in the group ends the probe
+        }
+        step += 1;
+        g = (g + step) & gmask;
+    }
+    return nullptr($V);
+}
+
+fn contains(m: *SwissMap($K, $V, $HASH), key: $K): bool {
+    return get(m, key) != nullptr($V);
+}
+
+fn get_or_insert(m: *SwissMap($K, $V, $HASH), key: $K): MapSlot($V) {
+    out: MapSlot($V) = #memory_garbage;
+    if (m.storage == 0) { _hashmap_swiss_grow(m, SWISS_MIN_CAP); }
+
+    existing := get(m, key);
+    if (existing != nullptr($V)) {
+        out.value = existing;
+        out.found = true;
+        return out;
+    }
+
+    st := m.storage;
+    h := $HASH(key.^);
+    slot := _hashmap_swiss_find_insert_slot(st, h);
+    if (byte_offset(_hashmap_swiss_ctrl(st), slot).* == SWISS_EMPTY) {
+        if (st.growth_left == 0) {
+            // double when really full, same size when most slots are tombstones
+            ncap := st.cap;
+            if ((st.len + 1) * 4 >= st.cap * 3) { ncap = st.cap * 2; }
+            _hashmap_swiss_grow(m, ncap);
+            st = m.storage;
+            slot = _hashmap_swiss_find_insert_slot(st, h);
+        }
+        st.growth_left -= 1;
+    }
+    byte_offset(_hashmap_swiss_ctrl(st), slot).* = _hashmap_swiss_h2(h);
+    e := ty_offset(_hashmap_swiss_entries_ptr(st), slot);
+    e.key = key;
+    e.value = zeroed($V);
+    st.len += 1;
+    out.value = e.value.^;
+    out.found = false;
+    return out;
+}
+
+fn insert(m: *SwissMap($K, $V, $HASH), key: $K, value: $V): *$V {
+    slot := get_or_insert(m, key);
+    slot.value.* = value;
+    return slot.value;
+}
+
+fn remove(m: *SwissMap($K, $V, $HASH), key: $K): bool {
+    st := m.storage;
+    if (st == 0) { return false; }
+    ctrl := _hashmap_swiss_ctrl(st);
+    entries := _hashmap_swiss_entries_ptr(st);
+    gmask := (st.cap / SWISS_GROUP) - 1;
+    h := $HASH(key.^);
+    h2 := _hashmap_swiss_h2(h);
+    g := (h & gmask.cast(u64)).cast(i64);
+    step: i64 = 0;
+    while (true) {
+        base := g * SWISS_GROUP;
+        cp := byte_offset(ctrl, base);
+        mm := simd_byte_eq_mask16(cp, h2);
+        while (mm != 0) {
+            s := base + #bit_count_trailing_zeroes(mm).cast(i64);
+            e := ty_offset(entries, s);
+            if (e.key == key) {
+                // if the group of this slot still has an EMPTY, no probe ever went past it, so the slot can go back to EMPTY instead of DELETED
+                own_base := (s / SWISS_GROUP) * SWISS_GROUP;
+                if (simd_byte_eq_mask16(byte_offset(ctrl, own_base), SWISS_EMPTY) != 0) {
+                    byte_offset(ctrl, s).* = SWISS_EMPTY;
+                    st.growth_left += 1;
+                } else {
+                    byte_offset(ctrl, s).* = SWISS_DELETED;
+                }
+                st.len -= 1;
+                return true;
+            }
+            mm = mm & (mm - 1);
+        }
+        if (simd_byte_eq_mask16(cp, SWISS_EMPTY) != 0) {
+            return false;
+        }
+        step += 1;
+        g = (g + step) & gmask;
+    }
+    return false;
+}
+
+// iteration: for (e : iter(m.^)) { e.key / e.value }
+struct SwissIterator($K: __type_ptr, $V: __type_ptr) {
+    ctrl: *u8;
+    entries: *MapEntry($K, $V);
+    cap: i64;
+    at: i64;
+};
+
+fn iter(m: *SwissMap($K, $V, $HASH)): SwissIterator($K, $V) {
+    it: SwissIterator($K, $V) = #memory_garbage;
+    if (m.storage == 0) {
+        it.ctrl = nullptr(u8);
+        it.cap = 0;
+        it.at = -1;
+        return it;
+    }
+    it.ctrl = _hashmap_swiss_ctrl(m.storage);
+    it.entries = _hashmap_swiss_entries_ptr(m.storage);
+    it.cap = m.storage.cap;
+    it.at = -1;
+    return it;
+}
+
+fn iterator_next(it: *SwissIterator($K, $V)): bool {
+    it.at += 1;
+    while (it.at < it.cap) {
+        if ((byte_offset(it.ctrl, it.at).* & 0x80) == 0) { return true; }
+        it.at += 1;
+    }
+    return false;
+}
+
+fn iterator_current(it: *SwissIterator($K, $V)): *MapEntry($K, $V) {
+    return ty_offset(it.entries, it.at);
+}

@@ -51,18 +51,67 @@ fn index_of_ignore_case(hay: []u8, needle: []u8, from: i64 = 0): i64 {
     return -1;
 }
 
+fn to_lower_inplace(s: []u8): []u8 {
+    for (i : it_range(s.len)) {
+        s[i] = to_lower_char(s[i]);
+    }
+    return s;
+}
+
+fn to_upper_inplace(s: []u8): []u8 {
+    for (i : it_range(s.len)) {
+        s[i] = to_upper_char(s[i]);
+    }
+    return s;
+}
+
+fn copy(s: []$T, alloc: *Alloc = get_context_temp_arena_as_alloc()): []$T {
+    s2 := mem_alloc_slice(alloc, $T, s.len);
+    mem_copy(s2, s);
+    return s2;
+}
+
+fn trim_left(s: []u8): []u8 {
+    start := s.len; // all spaces -> empty
+    for (i : it_range(s.len)) {
+        if (!is_space_char(s[i])) {
+            start = i;
+            break;
+        }
+    }
+    return slice(s, start);
+}
+
+fn trim_right(s: []u8): []u8 {
+    end := 0i64; // all spaces -> empty
+    for (i : it_range_reverse(s.len)) {
+        if (!is_space_char(s[i])) {
+            end = i + 1;
+            break;
+        }
+    }
+    return slice(s, 0, end);
+}
+
+fn trim(s: []u8): []u8 {
+    return s |> trim_left() |> trim_right();
+}
+
+fn equal_ignore_case(s1: []u8, s2: []u8): bool {
+    if (s1.len != s2.len) { return false; }
+    for (i : it_range(s1.len)) {
+        if (to_lower_char(s1[i]) != to_lower_char(s2[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 const String := #type []u8;
 
 fn make_string(s: *u8, len: i64): String {
     return slice(s, len);
 }
-
-fn make_string($s: *u8): String {
-    const len := c_strlen(s);
-    return make_string(s, len);
-}
-
-// TODO: trim_left / trim_right / trim
 
 struct StringBuilder {
     total_size: i64;
@@ -198,7 +247,7 @@ fn push_byte(fb: *FixedBuf, b: u8): void {
     fb.len += 1;
 }
 
-fn push_nul(fb: *FixedBuf): void {
+fn push_null(fb: *FixedBuf): void {
     if (fb.cap == 0) { return; }
     at := min(fb.len, fb.cap - 1);
     ty_offset(fb.ptr, at.cast(u64)).* = 0;

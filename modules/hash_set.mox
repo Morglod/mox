@@ -1,0 +1,840 @@
+import "./internal.mox";
+import "./alloc.mox";
+import "./simd.mox";
+import "./hash_map.mox";
+import "./hash_map_swiss.mox";
+
+// Hash sets: the three map designs with key-only storage.
+//   HashSet($K, $HASH)  - dense robin-hood, fast iteration, no tombstones
+//   SwissSet($K, $HASH) - swisstable ctrl bytes probed in groups of 16
+//   NodeSet($K, $HASH)  - chunked node pool, stable key pointers
+// Same conventions as the maps.
+// The hasher is a baked `*fn(key: *K): u64` param, for example HashSet([]u8, hash_bytes.^).
+// Key equality is structural `==`.
+// Nothing is allocated before the first add.
+//
+// add returns true when the key was new.
+// get returns a pointer to the stored key, null when absent. This is useful for interning.
+
+// ---- HashSet: dense robin-hood ----
+
+struct HashSetStorage($K: __type_ptr) {
+    len: i64;
+    bucket_cap: i64;    // power of two
+    shift: u32;
+    _pad: u32;
+    keys_offset: i64;   // byte offset of the dense key array
+
+    // here buckets go, then keys
+};
+
+struct HashSet($K: __type_ptr, $HASH: *fn(key: *$K): u64) {
+    storage: *HashSetStorage($K);
+    alloc: *Alloc;
+
+    #alias len = len(self);
+};
+
+fn _hashset_buckets(st: *HashSetStorage($K)): *MapBucket {
+    p := st.cast(*u8) |> byte_offset(MAP_HEADER_SIZE);
+    return p.cast(*MapBucket);
+}
+
+fn _hashset_keys(st: *HashSetStorage($K)): *$K {
+    p := st.cast(*u8) |> byte_offset(st.keys_offset);
+    return p.cast(*$K);
+}
+
+fn len(s: *HashSet($K, $HASH)): i64 {
+    if (s.storage == 0) { return 0; }
+    return s.storage.len;
+}
+
+fn init(s: *HashSet($K, $HASH), alloc: *Alloc, expected_count: i64 = 0): void {
+    s.alloc = alloc;
+    s.storage = nullptr(#type HashSetStorage($K));
+    if (expected_count > 0) { reserve(s, expected_count); }
+}
+
+fn destroy(s: *HashSet($K, $HASH)): void {
+    if (s.storage == 0) { return; }
+    mem_free(s.alloc, s.storage.cast(*u8));
+    s.storage = nullptr(#type HashSetStorage($K));
+}
+
+fn clear(s: *HashSet($K, $HASH)): void {
+    st := s.storage;
+    if (st == 0) { return; }
+    st.len = 0;
+    mem_set(_hashset_buckets(st).cast(*u8), 0, st.bucket_cap * sizeof_type(MapBucket));
+}
+
+// live view of the dense key array, invalid after the next growth
+fn entries(s: *HashSet($K, $HASH)): []$K {
+    out: []$K = #memory_garbage;
+    if (s.storage == 0) {
+        out.ptr = nullptr($K);
+        out.len = 0;
+        return out;
+    }
+    out.ptr = _hashset_keys(s.storage);
+    out.len = s.storage.len;
+    return out;
+}
+
+fn _hashset_new_storage(s: *HashSet($K, $HASH), bucket_cap: i64): *HashSetStorage($K) {
+    buckets_bytes := bucket_cap * sizeof_type(MapBucket);
+    keys_offset := align_up(MAP_HEADER_SIZE + buckets_bytes, 16i64);
+    bytes := keys_offset + _hashmap_dense_cap(bucket_cap) * sizeof_type($K);
+    st := mem_alloc(s.alloc, bytes, 16).cast(*HashSetStorage($K));
+    st.len = 0;
+    st.bucket_cap = bucket_cap;
+    st.shift = (64 - ilog2(bucket_cap)).cast(u32);
+    st.keys_offset = keys_offset;
+    mem_set(_hashset_buckets(st).cast(*u8), 0, buckets_bytes);
+    return st;
+}
+
+fn _hashset_place_and_shift(st: *HashSetStorage($K), idx: i64, b: MapBucket): void {
+    buckets := _hashset_buckets(st);
+    mask := st.bucket_cap - 1;
+    while (true) {
+        at := ty_offset(buckets, idx);
+        if (at.dist_and_fp == 0) {
+            at.* = b;
+            return;
+        }
+        tmp := at.*;
+        at.* = b;
+        b = tmp;
+        b.dist_and_fp += 0x100;
+        idx = (idx + 1) & mask;
+    }
+}
+
+fn _hashset_bucket_insert(st: *HashSetStorage($K), h: u64, value_idx: u32): void {
+    buckets := _hashset_buckets(st);
+    mask := st.bucket_cap - 1;
+    idx := #shr(h, st.shift.cast(u64)).cast(i64);
+    dif : u32 = 0x100 | (h & 0xFF).cast(u32);
+    while (dif <= ty_offset(buckets, idx).dist_and_fp) {
+        dif += 0x100;
+        idx = (idx + 1) & mask;
+    }
+    b: MapBucket = #memory_garbage;
+    b.dist_and_fp = dif;
+    b.index = value_idx;
+    _hashset_place_and_shift(st, idx, b);
+}
+
+fn _hashset_grow(s: *HashSet($K, $HASH), min_bucket_cap: i64): void {
+    old := s.storage;
+    nst := _hashset_new_storage(s, min_bucket_cap);
+    if (old != 0) {
+        n := old.len;
+        if (n > 0) {
+            mem_copy(_hashset_keys(nst).cast(*u8), _hashset_keys(old).cast(*u8), n * sizeof_type($K));
+            nst.len = n;
+            keys := _hashset_keys(nst);
+            for (i : it_range(n)) {
+                _hashset_bucket_insert(nst, $HASH(ty_offset(keys, i)), i.cast(u32));
+            }
+        }
+        mem_free(s.alloc, old.cast(*u8));
+    }
+    s.storage = nst;
+}
+
+fn reserve(s: *HashSet($K, $HASH), count: i64): void {
+    need := MAP_MIN_BUCKETS;
+    while (_hashmap_dense_cap(need) < count) { need *= 2; }
+    if ((s.storage != 0) && (s.storage.bucket_cap >= need)) { return; }
+    _hashset_grow(s, need);
+}
+
+// pointer to the stored key, null when absent, valid until the next growth or remove
+fn get(s: *HashSet($K, $HASH), key: $K): *$K {
+    st := s.storage;
+    if (st == 0) { return nullptr($K); }
+    buckets := _hashset_buckets(st);
+    keys := _hashset_keys(st);
+    mask := st.bucket_cap - 1;
+    h := $HASH(key.^);
+    idx := #shr(h, st.shift.cast(u64)).cast(i64);
+    dif : u32 = 0x100 | (h & 0xFF).cast(u32);
+    while (true) {
+        b := ty_offset(buckets, idx).*;
+        if (dif == b.dist_and_fp) {
+            kp := ty_offset(keys, b.index.cast(i64));
+            if (kp.* == key) { return kp; }
+        } else if (dif > b.dist_and_fp) {
+            return nullptr($K);
+        }
+        dif += 0x100;
+        idx = (idx + 1) & mask;
+    }
+    return nullptr($K);
+}
+
+fn contains(s: *HashSet($K, $HASH), key: $K): bool {
+    return get(s, key) != nullptr($K);
+}
+
+// slot of the stored key, on a new key found is false
+fn get_or_add(s: *HashSet($K, $HASH), key: $K): MapSlot($K) {
+    if (s.storage == 0) {
+        _hashset_grow(s, MAP_MIN_BUCKETS);
+    } else if (s.storage.len >= _hashmap_dense_cap(s.storage.bucket_cap)) {
+        _hashset_grow(s, s.storage.bucket_cap * 2);
+    }
+    st := s.storage;
+    buckets := _hashset_buckets(st);
+    keys := _hashset_keys(st);
+    mask := st.bucket_cap - 1;
+    h := $HASH(key.^);
+    idx := #shr(h, st.shift.cast(u64)).cast(i64);
+    dif : u32 = 0x100 | (h & 0xFF).cast(u32);
+    out: MapSlot($K) = #memory_garbage;
+    while (true) {
+        b := ty_offset(buckets, idx).*;
+        if (dif == b.dist_and_fp) {
+            kp := ty_offset(keys, b.index.cast(i64));
+            if (kp.* == key) {
+                out.value = kp;
+                out.found = true;
+                return out;
+            }
+        } else if (dif > b.dist_and_fp) {
+            kp := ty_offset(keys, st.len);
+            kp.* = key;
+            nb: MapBucket = #memory_garbage;
+            nb.dist_and_fp = dif;
+            nb.index = st.len.cast(u32);
+            _hashset_place_and_shift(st, idx, nb);
+            st.len += 1;
+            out.value = kp;
+            out.found = false;
+            return out;
+        }
+        dif += 0x100;
+        idx = (idx + 1) & mask;
+    }
+    return out;
+}
+
+// true when the key was new
+fn add(s: *HashSet($K, $HASH), key: $K): bool {
+    return !get_or_add(s, key).found;
+}
+
+fn remove(s: *HashSet($K, $HASH), key: $K): bool {
+    st := s.storage;
+    if (st == 0) { return false; }
+    buckets := _hashset_buckets(st);
+    keys := _hashset_keys(st);
+    mask := st.bucket_cap - 1;
+    h := $HASH(key.^);
+    idx := #shr(h, st.shift.cast(u64)).cast(i64);
+    dif : u32 = 0x100 | (h & 0xFF).cast(u32);
+
+    value_idx: i64 = -1;
+    while (true) {
+        b := ty_offset(buckets, idx).*;
+        if (dif == b.dist_and_fp) {
+            if (ty_offset(keys, b.index.cast(i64)).* == key) {
+                value_idx = b.index.cast(i64);
+                break;
+            }
+        } else if (dif > b.dist_and_fp) {
+            return false;
+        }
+        dif += 0x100;
+        idx = (idx + 1) & mask;
+    }
+
+    next := (idx + 1) & mask;
+    while (ty_offset(buckets, next).dist_and_fp >= 0x200) {
+        moved := ty_offset(buckets, next).*;
+        moved.dist_and_fp -= 0x100;
+        ty_offset(buckets, idx).* = moved;
+        idx = next;
+        next = (next + 1) & mask;
+    }
+    ty_offset(buckets, idx).* = zeroed(MapBucket);
+
+    last := st.len - 1;
+    if (value_idx != last) {
+        ty_offset(keys, value_idx).* = ty_offset(keys, last).*;
+        mh := $HASH(ty_offset(keys, value_idx));
+        midx := #shr(mh, st.shift.cast(u64)).cast(i64);
+        while (ty_offset(buckets, midx).index.cast(i64) != last) {
+            midx = (midx + 1) & mask;
+        }
+        ty_offset(buckets, midx).index = value_idx.cast(u32);
+    }
+    st.len -= 1;
+    return true;
+}
+
+// ---- SwissSet: swisstable ----
+
+struct SwissSetStorage($K: __type_ptr) {
+    len: i64;
+    cap: i64;
+    growth_left: i64;
+    keys_offset: i64;
+
+    // here ctrl bytes go, then keys
+};
+
+struct SwissSet($K: __type_ptr, $HASH: *fn(key: *$K): u64) {
+    storage: *SwissSetStorage($K);
+    alloc: *Alloc;
+
+    #alias len = len(self);
+};
+
+fn _hashset_swiss_ctrl(st: *SwissSetStorage($K)): *u8 {
+    return st.cast(*u8) |> byte_offset(SWISS_HEADER_SIZE);
+}
+
+fn _hashset_swiss_keys(st: *SwissSetStorage($K)): *$K {
+    p := st.cast(*u8) |> byte_offset(st.keys_offset);
+    return p.cast(*$K);
+}
+
+fn len(s: *SwissSet($K, $HASH)): i64 {
+    if (s.storage == 0) { return 0; }
+    return s.storage.len;
+}
+
+fn init(s: *SwissSet($K, $HASH), alloc: *Alloc, expected_count: i64 = 0): void {
+    s.alloc = alloc;
+    s.storage = nullptr(#type SwissSetStorage($K));
+    if (expected_count > 0) { reserve(s, expected_count); }
+}
+
+fn destroy(s: *SwissSet($K, $HASH)): void {
+    if (s.storage == 0) { return; }
+    mem_free(s.alloc, s.storage.cast(*u8));
+    s.storage = nullptr(#type SwissSetStorage($K));
+}
+
+fn clear(s: *SwissSet($K, $HASH)): void {
+    st := s.storage;
+    if (st == 0) { return; }
+    st.len = 0;
+    st.growth_left = (st.cap * 7) / 8;
+    mem_set(_hashset_swiss_ctrl(st), SWISS_EMPTY, st.cap);
+}
+
+fn _hashset_swiss_new_storage(s: *SwissSet($K, $HASH), cap: i64): *SwissSetStorage($K) {
+    keys_offset := align_up(SWISS_HEADER_SIZE + cap, 16i64);
+    bytes := keys_offset + cap * sizeof_type($K);
+    st := mem_alloc(s.alloc, bytes, 16).cast(*SwissSetStorage($K));
+    st.len = 0;
+    st.cap = cap;
+    st.growth_left = (cap * 7) / 8;
+    st.keys_offset = keys_offset;
+    mem_set(_hashset_swiss_ctrl(st), SWISS_EMPTY, cap);
+    return st;
+}
+
+fn _hashset_swiss_find_insert_slot(st: *SwissSetStorage($K), h: u64): i64 {
+    ctrl := _hashset_swiss_ctrl(st);
+    gmask := (st.cap / SWISS_GROUP) - 1;
+    g := (h & gmask.cast(u64)).cast(i64);
+    step: i64 = 0;
+    while (true) {
+        base := g * SWISS_GROUP;
+        sp := simd_byte_high_mask16(byte_offset(ctrl, base));
+        if (sp != 0) {
+            return base + #bit_count_trailing_zeroes(sp).cast(i64);
+        }
+        step += 1;
+        g = (g + step) & gmask;
+    }
+    return -1;
+}
+
+fn _hashset_swiss_grow(s: *SwissSet($K, $HASH), min_cap: i64): void {
+    old := s.storage;
+    nst := _hashset_swiss_new_storage(s, min_cap);
+    if (old != 0) {
+        ctrl := _hashset_swiss_ctrl(old);
+        keys := _hashset_swiss_keys(old);
+        nctrl := _hashset_swiss_ctrl(nst);
+        nkeys := _hashset_swiss_keys(nst);
+        for (i : it_range(old.cap)) {
+            c := byte_offset(ctrl, i).*;
+            if ((c & 0x80) != 0) { continue; }
+            kp := ty_offset(keys, i);
+            h := $HASH(kp);
+            slot := _hashset_swiss_find_insert_slot(nst, h);
+            byte_offset(nctrl, slot).* = _hashmap_swiss_h2(h);
+            ty_offset(nkeys, slot).* = kp.*;
+        }
+        nst.len = old.len;
+        nst.growth_left = (nst.cap * 7) / 8 - old.len;
+        mem_free(s.alloc, old.cast(*u8));
+    }
+    s.storage = nst;
+}
+
+fn reserve(s: *SwissSet($K, $HASH), count: i64): void {
+    need := _hashmap_swiss_next_pow2((count * 8) / 7 + SWISS_GROUP);
+    if ((s.storage != 0) && (s.storage.cap >= need)) { return; }
+    _hashset_swiss_grow(s, need);
+}
+
+fn get(s: *SwissSet($K, $HASH), key: $K): *$K {
+    st := s.storage;
+    if (st == 0) { return nullptr($K); }
+    ctrl := _hashset_swiss_ctrl(st);
+    keys := _hashset_swiss_keys(st);
+    gmask := (st.cap / SWISS_GROUP) - 1;
+    h := $HASH(key.^);
+    h2 := _hashmap_swiss_h2(h);
+    g := (h & gmask.cast(u64)).cast(i64);
+    step: i64 = 0;
+    while (true) {
+        base := g * SWISS_GROUP;
+        cp := byte_offset(ctrl, base);
+        mm := simd_byte_eq_mask16(cp, h2);
+        while (mm != 0) {
+            slot := base + #bit_count_trailing_zeroes(mm).cast(i64);
+            kp := ty_offset(keys, slot);
+            if (kp.* == key) { return kp; }
+            mm = mm & (mm - 1);
+        }
+        if (simd_byte_eq_mask16(cp, SWISS_EMPTY) != 0) {
+            return nullptr($K);
+        }
+        step += 1;
+        g = (g + step) & gmask;
+    }
+    return nullptr($K);
+}
+
+fn contains(s: *SwissSet($K, $HASH), key: $K): bool {
+    return get(s, key) != nullptr($K);
+}
+
+fn get_or_add(s: *SwissSet($K, $HASH), key: $K): MapSlot($K) {
+    out: MapSlot($K) = #memory_garbage;
+    if (s.storage == 0) { _hashset_swiss_grow(s, SWISS_MIN_CAP); }
+
+    existing := get(s, key);
+    if (existing != nullptr($K)) {
+        out.value = existing;
+        out.found = true;
+        return out;
+    }
+
+    st := s.storage;
+    h := $HASH(key.^);
+    slot := _hashset_swiss_find_insert_slot(st, h);
+    if (byte_offset(_hashset_swiss_ctrl(st), slot).* == SWISS_EMPTY) {
+        if (st.growth_left == 0) {
+            ncap := st.cap;
+            if ((st.len + 1) * 4 >= st.cap * 3) { ncap = st.cap * 2; }
+            _hashset_swiss_grow(s, ncap);
+            st = s.storage;
+            slot = _hashset_swiss_find_insert_slot(st, h);
+        }
+        st.growth_left -= 1;
+    }
+    byte_offset(_hashset_swiss_ctrl(st), slot).* = _hashmap_swiss_h2(h);
+    kp := ty_offset(_hashset_swiss_keys(st), slot);
+    kp.* = key;
+    st.len += 1;
+    out.value = kp;
+    out.found = false;
+    return out;
+}
+
+fn add(s: *SwissSet($K, $HASH), key: $K): bool {
+    return !get_or_add(s, key).found;
+}
+
+fn remove(s: *SwissSet($K, $HASH), key: $K): bool {
+    st := s.storage;
+    if (st == 0) { return false; }
+    ctrl := _hashset_swiss_ctrl(st);
+    keys := _hashset_swiss_keys(st);
+    gmask := (st.cap / SWISS_GROUP) - 1;
+    h := $HASH(key.^);
+    h2 := _hashmap_swiss_h2(h);
+    g := (h & gmask.cast(u64)).cast(i64);
+    step: i64 = 0;
+    while (true) {
+        base := g * SWISS_GROUP;
+        cp := byte_offset(ctrl, base);
+        mm := simd_byte_eq_mask16(cp, h2);
+        while (mm != 0) {
+            slot := base + #bit_count_trailing_zeroes(mm).cast(i64);
+            if (ty_offset(keys, slot).* == key) {
+                own_base := (slot / SWISS_GROUP) * SWISS_GROUP;
+                if (simd_byte_eq_mask16(byte_offset(ctrl, own_base), SWISS_EMPTY) != 0) {
+                    byte_offset(ctrl, slot).* = SWISS_EMPTY;
+                    st.growth_left += 1;
+                } else {
+                    byte_offset(ctrl, slot).* = SWISS_DELETED;
+                }
+                st.len -= 1;
+                return true;
+            }
+            mm = mm & (mm - 1);
+        }
+        if (simd_byte_eq_mask16(cp, SWISS_EMPTY) != 0) {
+            return false;
+        }
+        step += 1;
+        g = (g + step) & gmask;
+    }
+    return false;
+}
+
+struct SwissSetIterator($K: __type_ptr) {
+    ctrl: *u8;
+    keys: *$K;
+    cap: i64;
+    at: i64;
+};
+
+fn iter(s: *SwissSet($K, $HASH)): SwissSetIterator($K) {
+    it: SwissSetIterator($K) = #memory_garbage;
+    if (s.storage == 0) {
+        it.ctrl = nullptr(u8);
+        it.cap = 0;
+        it.at = -1;
+        return it;
+    }
+    it.ctrl = _hashset_swiss_ctrl(s.storage);
+    it.keys = _hashset_swiss_keys(s.storage);
+    it.cap = s.storage.cap;
+    it.at = -1;
+    return it;
+}
+
+fn iterator_next(it: *SwissSetIterator($K)): bool {
+    it.at += 1;
+    while (it.at < it.cap) {
+        if ((byte_offset(it.ctrl, it.at).* & 0x80) == 0) { return true; }
+        it.at += 1;
+    }
+    return false;
+}
+
+fn iterator_current(it: *SwissSetIterator($K)): *$K {
+    return ty_offset(it.keys, it.at);
+}
+
+// ---- NodeSet: chunked pool, stable key pointers ----
+
+struct NodeSetStorage($K: __type_ptr) {
+    len: i64;
+    bucket_cap: i64;
+    shift: u32;
+    free_head: u32;
+    chunk_table: **u8;
+    chunk_count: i64;
+    chunk_table_cap: i64;
+    next_fresh: i64;
+
+    // here buckets go
+};
+
+struct NodeSet($K: __type_ptr, $HASH: *fn(key: *$K): u64) {
+    storage: *NodeSetStorage($K);
+    alloc: *Alloc;
+
+    #alias len = len(self);
+};
+
+const NODESET_HEADER_SIZE : i64 = 64;
+
+fn _hashset_node_buckets(st: *NodeSetStorage($K)): *MapBucket {
+    p := st.cast(*u8) |> byte_offset(NODESET_HEADER_SIZE);
+    return p.cast(*MapBucket);
+}
+
+// a vacant node stores a u32 free-list link
+fn _hashset_node_stride($K: __type_ptr): i64 {
+    return max(sizeof_type($K), 4i64);
+}
+
+fn _hashset_node_at(st: *NodeSetStorage($K), idx: i64): *$K {
+    chunk := ty_offset(st.chunk_table, #shr(idx, 6i64)).*;
+    p := chunk |> byte_offset((idx & 63) * _hashset_node_stride($K));
+    return p.cast(*$K);
+}
+
+fn len(s: *NodeSet($K, $HASH)): i64 {
+    if (s.storage == 0) { return 0; }
+    return s.storage.len;
+}
+
+fn init(s: *NodeSet($K, $HASH), alloc: *Alloc, expected_count: i64 = 0): void {
+    s.alloc = alloc;
+    s.storage = nullptr(#type NodeSetStorage($K));
+    if (expected_count > 0) { reserve(s, expected_count); }
+}
+
+fn destroy(s: *NodeSet($K, $HASH)): void {
+    st := s.storage;
+    if (st == 0) { return; }
+    for (i : it_range(st.chunk_count)) {
+        mem_free(s.alloc, ty_offset(st.chunk_table, i).*);
+    }
+    if (st.chunk_table != 0) { mem_free(s.alloc, st.chunk_table.cast(*u8)); }
+    mem_free(s.alloc, st.cast(*u8));
+    s.storage = nullptr(#type NodeSetStorage($K));
+}
+
+fn clear(s: *NodeSet($K, $HASH)): void {
+    st := s.storage;
+    if (st == 0) { return; }
+    st.len = 0;
+    st.free_head = 0xFFFFFFFF;
+    st.next_fresh = 0;
+    mem_set(_hashset_node_buckets(st).cast(*u8), 0, st.bucket_cap * sizeof_type(MapBucket));
+}
+
+fn _hashset_node_new_storage(s: *NodeSet($K, $HASH), bucket_cap: i64): *NodeSetStorage($K) {
+    bytes := NODESET_HEADER_SIZE + bucket_cap * sizeof_type(MapBucket);
+    st := mem_alloc(s.alloc, bytes, 16).cast(*NodeSetStorage($K));
+    st.len = 0;
+    st.bucket_cap = bucket_cap;
+    st.shift = (64 - ilog2(bucket_cap)).cast(u32);
+    st.free_head = 0xFFFFFFFF;
+    st.chunk_table = nullptr(u8).cast(**u8);
+    st.chunk_count = 0;
+    st.chunk_table_cap = 0;
+    st.next_fresh = 0;
+    mem_set(_hashset_node_buckets(st).cast(*u8), 0, bucket_cap * sizeof_type(MapBucket));
+    return st;
+}
+
+fn _hashset_node_alloc_index(s: *NodeSet($K, $HASH)): i64 {
+    st := s.storage;
+    if (st.free_head != 0xFFFFFFFF) {
+        idx := st.free_head.cast(i64);
+        st.free_head = _hashset_node_at(st, idx).cast(*u32).*;
+        return idx;
+    }
+    if (st.next_fresh == st.chunk_count * 64) {
+        if (st.chunk_count == st.chunk_table_cap) {
+            ncap := max(st.chunk_table_cap * 2, 8i64);
+            st.chunk_table = mem_realloc(s.alloc, st.chunk_table.cast(*u8), ncap * 8, 8).cast(**u8);
+            st.chunk_table_cap = ncap;
+        }
+        chunk := mem_alloc(s.alloc, 64 * _hashset_node_stride($K), 16);
+        ty_offset(st.chunk_table, st.chunk_count).* = chunk;
+        st.chunk_count += 1;
+    }
+    idx := st.next_fresh;
+    st.next_fresh += 1;
+    return idx;
+}
+
+fn _hashset_node_place_and_shift(st: *NodeSetStorage($K), idx: i64, b: MapBucket): void {
+    buckets := _hashset_node_buckets(st);
+    mask := st.bucket_cap - 1;
+    while (true) {
+        at := ty_offset(buckets, idx);
+        if (at.dist_and_fp == 0) {
+            at.* = b;
+            return;
+        }
+        tmp := at.*;
+        at.* = b;
+        b = tmp;
+        b.dist_and_fp += 0x100;
+        idx = (idx + 1) & mask;
+    }
+}
+
+fn _hashset_node_bucket_insert(st: *NodeSetStorage($K), h: u64, node_idx: u32): void {
+    buckets := _hashset_node_buckets(st);
+    mask := st.bucket_cap - 1;
+    idx := #shr(h, st.shift.cast(u64)).cast(i64);
+    dif : u32 = 0x100 | (h & 0xFF).cast(u32);
+    while (dif <= ty_offset(buckets, idx).dist_and_fp) {
+        dif += 0x100;
+        idx = (idx + 1) & mask;
+    }
+    b: MapBucket = #memory_garbage;
+    b.dist_and_fp = dif;
+    b.index = node_idx;
+    _hashset_node_place_and_shift(st, idx, b);
+}
+
+fn _hashset_node_grow(s: *NodeSet($K, $HASH), min_bucket_cap: i64): void {
+    old := s.storage;
+    nst := _hashset_node_new_storage(s, min_bucket_cap);
+    if (old != 0) {
+        nst.len = old.len;
+        nst.free_head = old.free_head;
+        nst.chunk_table = old.chunk_table;
+        nst.chunk_count = old.chunk_count;
+        nst.chunk_table_cap = old.chunk_table_cap;
+        nst.next_fresh = old.next_fresh;
+        buckets := _hashset_node_buckets(old);
+        for (i : it_range(old.bucket_cap)) {
+            b := ty_offset(buckets, i).*;
+            if (b.dist_and_fp == 0) { continue; }
+            kp := _hashset_node_at(nst, b.index.cast(i64));
+            _hashset_node_bucket_insert(nst, $HASH(kp), b.index);
+        }
+        mem_free(s.alloc, old.cast(*u8));
+    }
+    s.storage = nst;
+}
+
+fn reserve(s: *NodeSet($K, $HASH), count: i64): void {
+    need := MAP_MIN_BUCKETS;
+    while (_hashmap_dense_cap(need) < count) { need *= 2; }
+    if ((s.storage != 0) && (s.storage.bucket_cap >= need)) { return; }
+    _hashset_node_grow(s, need);
+}
+
+// pointer to the stored key, stable until remove of that key or destroy
+fn get(s: *NodeSet($K, $HASH), key: $K): *$K {
+    st := s.storage;
+    if (st == 0) { return nullptr($K); }
+    buckets := _hashset_node_buckets(st);
+    mask := st.bucket_cap - 1;
+    h := $HASH(key.^);
+    idx := #shr(h, st.shift.cast(u64)).cast(i64);
+    dif : u32 = 0x100 | (h & 0xFF).cast(u32);
+    while (true) {
+        b := ty_offset(buckets, idx).*;
+        if (dif == b.dist_and_fp) {
+            kp := _hashset_node_at(st, b.index.cast(i64));
+            if (kp.* == key) { return kp; }
+        } else if (dif > b.dist_and_fp) {
+            return nullptr($K);
+        }
+        dif += 0x100;
+        idx = (idx + 1) & mask;
+    }
+    return nullptr($K);
+}
+
+fn contains(s: *NodeSet($K, $HASH), key: $K): bool {
+    return get(s, key) != nullptr($K);
+}
+
+fn get_or_add(s: *NodeSet($K, $HASH), key: $K): MapSlot($K) {
+    if (s.storage == 0) {
+        _hashset_node_grow(s, MAP_MIN_BUCKETS);
+    } else if (s.storage.len >= _hashmap_dense_cap(s.storage.bucket_cap)) {
+        _hashset_node_grow(s, s.storage.bucket_cap * 2);
+    }
+    st := s.storage;
+    buckets := _hashset_node_buckets(st);
+    mask := st.bucket_cap - 1;
+    h := $HASH(key.^);
+    idx := #shr(h, st.shift.cast(u64)).cast(i64);
+    dif : u32 = 0x100 | (h & 0xFF).cast(u32);
+    out: MapSlot($K) = #memory_garbage;
+    while (true) {
+        b := ty_offset(buckets, idx).*;
+        if (dif == b.dist_and_fp) {
+            kp := _hashset_node_at(st, b.index.cast(i64));
+            if (kp.* == key) {
+                out.value = kp;
+                out.found = true;
+                return out;
+            }
+        } else if (dif > b.dist_and_fp) {
+            node_idx := _hashset_node_alloc_index(s);
+            kp := _hashset_node_at(st, node_idx);
+            kp.* = key;
+            nb: MapBucket = #memory_garbage;
+            nb.dist_and_fp = dif;
+            nb.index = node_idx.cast(u32);
+            _hashset_node_place_and_shift(st, idx, nb);
+            st.len += 1;
+            out.value = kp;
+            out.found = false;
+            return out;
+        }
+        dif += 0x100;
+        idx = (idx + 1) & mask;
+    }
+    return out;
+}
+
+fn add(s: *NodeSet($K, $HASH), key: $K): bool {
+    return !get_or_add(s, key).found;
+}
+
+fn remove(s: *NodeSet($K, $HASH), key: $K): bool {
+    st := s.storage;
+    if (st == 0) { return false; }
+    buckets := _hashset_node_buckets(st);
+    mask := st.bucket_cap - 1;
+    h := $HASH(key.^);
+    idx := #shr(h, st.shift.cast(u64)).cast(i64);
+    dif : u32 = 0x100 | (h & 0xFF).cast(u32);
+
+    node_idx: i64 = -1;
+    while (true) {
+        b := ty_offset(buckets, idx).*;
+        if (dif == b.dist_and_fp) {
+            if (_hashset_node_at(st, b.index.cast(i64)).* == key) {
+                node_idx = b.index.cast(i64);
+                break;
+            }
+        } else if (dif > b.dist_and_fp) {
+            return false;
+        }
+        dif += 0x100;
+        idx = (idx + 1) & mask;
+    }
+
+    next := (idx + 1) & mask;
+    while (ty_offset(buckets, next).dist_and_fp >= 0x200) {
+        moved := ty_offset(buckets, next).*;
+        moved.dist_and_fp -= 0x100;
+        ty_offset(buckets, idx).* = moved;
+        idx = next;
+        next = (next + 1) & mask;
+    }
+    ty_offset(buckets, idx).* = zeroed(MapBucket);
+
+    _hashset_node_at(st, node_idx).cast(*u32).* = st.free_head;
+    st.free_head = node_idx.cast(u32);
+    st.len -= 1;
+    return true;
+}
+
+struct NodeSetIterator($K: __type_ptr) {
+    st: *NodeSetStorage($K);
+    at: i64;
+};
+
+fn iter(s: *NodeSet($K, $HASH)): NodeSetIterator($K) {
+    it: NodeSetIterator($K) = #memory_garbage;
+    it.st = s.storage;
+    it.at = -1;
+    return it;
+}
+
+fn iterator_next(it: *NodeSetIterator($K)): bool {
+    if (it.st == 0) { return false; }
+    buckets := _hashset_node_buckets(it.st);
+    it.at += 1;
+    while (it.at < it.st.bucket_cap) {
+        if (ty_offset(buckets, it.at).dist_and_fp != 0) { return true; }
+        it.at += 1;
+    }
+    return false;
+}
+
+fn iterator_current(it: *NodeSetIterator($K)): *$K {
+    b := ty_offset(_hashset_node_buckets(it.st), it.at).*;
+    return _hashset_node_at(it.st, b.index.cast(i64));
+}

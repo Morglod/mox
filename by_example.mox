@@ -30,8 +30,8 @@ fn vars_and_types() {
     // variable declarations should always have default value specified
 
     // basic types:
-    // i8, i16, i32, i64
-    // u8, u16, u32, u64
+    // i8, i16, i32, i64, i128
+    // u8, u16, u32, u64, u128
     // f32, f64
     // bool
     // void
@@ -145,6 +145,7 @@ fn operators() {
     #bit_first_set(10u32);
     #bit_parity(10u32);
     #bit_reverse(10u32);
+    #byte_reverse(10u32); // little endian <-> big endian
 
     // wrapping arithmetics
     // by default +-* assumes that overflow never happens

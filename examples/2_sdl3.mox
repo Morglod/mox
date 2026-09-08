@@ -1,20 +1,15 @@
-import "internal.mox";
+import "std.mox";
 import "vendor/sdl3.mox";
-import "slice.mox";
-import "os.mox";
-import "format.mox";
-import "c_interp.mox";
-import "string.mox";
 
 // mox ./tests/2_sdl3.mox
 #run os_stdout_write("\n\nchange path to libSDL3.dll.a at 10 line of examples/2_sdl3.mox\n\n");
 #run __compiler_append_linker("libSDL3.dll.a");
 
 fn #fail($fmt: []u8, values: $T) {
-    os_stdout_write(#format_temp($fmt, values));
+    println($fmt, values);
     sdl_error_str := SDL_GetError().cast(*u8);
-    sdl_error := slice(sdl_error_str, c_strlen(sdl_error_str));
-    os_stdout_write(sdl_error);
+    sdl_error := from_c_string(sdl_error_str);
+    println(sdl_error);
 
     // returns -1 from main
     `return -1;
@@ -24,7 +19,7 @@ fn #fail($fmt: []u8, values: $T) {
     // 1. Initialize SDL
     init_status := SDL_Init(SDL_INIT_VIDEO);
     if (!init_status) {
-        #fail("sdl init failed with code: {}\n", .{ init_status; });
+        #fail("sdl init failed with code: {}", .{ init_status; });
     }
 
     defer SDL_Quit();
@@ -32,7 +27,7 @@ fn #fail($fmt: []u8, values: $T) {
     // 2. Create Window
     window := SDL_CreateWindow("SDL3 Minimal", 640, 480, 0);
     if (window == 0) {
-        #fail("window creation failed\n", .{});
+        #fail("window creation failed", .{});
     }
     
     defer SDL_DestroyWindow(window);
@@ -40,7 +35,7 @@ fn #fail($fmt: []u8, values: $T) {
     // 3. Create Renderer
     renderer := SDL_CreateRenderer(window, nullptr(i8));
     if (renderer == 0) {
-        #fail("render creation failed\n", .{});
+        #fail("render creation failed", .{});
     }
 
     defer SDL_DestroyRenderer(renderer);

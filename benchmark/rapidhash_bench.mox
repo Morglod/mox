@@ -1,0 +1,74 @@
+// mox backend=llvm -O3 ./rapidhash_bench.mox
+
+import "internal.mox";
+import "alloc.mox";
+import "format.mox";
+import "time.mox";
+import "rapidhash.mox";
+
+const BUF_SIZE : i64 = 16384;
+
+fn _sm64(x: u64): u64 {
+    x = x ^ #shr(x, 30);
+    x = #wrap_mul(x, 0xBF58476D1CE4E5B9);
+    x = x ^ #shr(x, 27);
+    x = #wrap_mul(x, 0x94D049BB133111EB);
+    return x ^ #shr(x, 31);
+}
+
+fn iters_for(len: i64): i64 {
+    n := 400000000 / (len + 32);
+    if (n > 4000000) { n = 4000000; }
+    if (n < 20000) { n = 20000; }
+    return n;
+}
+
+fn _r2(x: f64): f64 {
+    return (x * 100.0 + 0.5).cast(i64).cast(f64) / 100.0;
+}
+
+fn bench_len(name: []u8, buf: []u8, len: i64, $F: *fn(key: *u8, len: i64, seed: u64): u64): void {
+    iters := iters_for(len);
+    h : u64 = 0;
+    w : i64 = 0;
+    while (w < iters / 10 + 1) {
+        h = $F(buf.ptr, len, h);
+        w += 1;
+    }
+    h = 0;
+    t := time_monotonic_ns();
+    i : i64 = 0;
+    while (i < iters) {
+        h = $F(buf.ptr, len, h);
+        i += 1;
+    }
+    dt := time_monotonic_ns() - t;
+    if (dt < 1) { dt = 1; }
+    ns_per := _r2(dt.cast(f64) / iters.cast(f64));
+    mbs := _r2((len * iters).cast(f64) * 1000.0 / dt.cast(f64));
+    print("{} len={}: {} ns/hash, {} MB/s, sink={}\n", .{ name; len; ns_per; mbs; h; });
+}
+
+#linkc fn main(): i32 {
+    al := default_alloc();
+    buf := mem_alloc_slice(al, u8, BUF_SIZE);
+    for (i : it_range(BUF_SIZE)) {
+        b := _sm64(#wrap_add(#wrap_mul(i.cast(u64), 0x9E3779B97F4A7C15), 0x123456789ABCDEF0));
+        buf[i] = b.cast(u8);
+    }
+
+    sizes : [15]i64 = .{ 2; 4; 8; 12; 16; 24; 32; 48; 64; 112; 256; 512; 1024; 4096; 16384; };
+
+    for (i : it_range(15i64)) {
+        bench_len("mox rapidhash     ", buf, sizes[i], #run rapidhash_withSeed.^);
+    }
+    for (i : it_range(15i64)) {
+        bench_len("mox rapidhashMicro", buf, sizes[i], #run rapidhashMicro_withSeed.^);
+    }
+    for (i : it_range(15i64)) {
+        bench_len("mox rapidhashNano ", buf, sizes[i], #run rapidhashNano_withSeed.^);
+    }
+
+    mem_free(al, buf);
+    return 0;
+}

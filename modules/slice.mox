@@ -12,6 +12,41 @@ fn index_of(s: []$T, val: $T, from: i64 = 0): i64 {
     return -1;
 }
 
+fn index_of(s: []$T, val: []$T, from: i64 = 0): i64 {
+    if (val.len == 0) { return -1; }
+    last := s.len - val.len;
+    while (from <= last) {
+        from = index_of(s, val[0], from);
+        if (from < 0) { return -1; }
+        if (from > last) { return -1; }
+        if (slice(s, from, val.len) == val) {
+            return from;
+        }
+        from += 1;
+    }
+    return -1;
+}
+
+fn index_of_not(s: []$T, val: $T, from: i64 = 0): i64 {
+    for (i : it_range(from, s.len)) {
+        if (s[i] != val) { return i; }
+    }
+    return -1;
+}
+
+fn index_of_not(s: []$T, val: []$T, from: i64 = 0): i64 {
+    while (from < s.len) {
+        i := index_of(s, val, from);
+        if (i == -1) { return from; }
+        if (i == from) {
+            from += val.len;
+        } else {
+            return from;
+        }
+    }
+    return -1;
+}
+
 fn index_of_last(s: []$T, val: $T, before: i64): i64 {
     for (i : it_range_reverse(0i64, min(before, s.len))) {
         if (s[i] == val) { return i; }
@@ -23,6 +58,31 @@ fn index_of_last(s: []$T, val: $T): i64 {
     return index_of_last(s, val, s.len);
 }
 
+fn starts_with(s: []$T, x: []$T): bool {
+    if (s.len < x.len) {
+        return false;
+    }
+    for (i : it_range(x.len)) {
+        if (s[i] != x[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+fn ends_with(s: []$T, x: []$T): bool {
+    if (s.len < x.len) {
+        return false;
+    }
+    from := s.len - x.len;
+    for (i : it_range(x.len)) {
+        if (s[i + from] != x[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 fn count_of(s: []$T, val: $T): i64 {
     n: i64 = 0;
     it := s.ptr;
@@ -32,6 +92,14 @@ fn count_of(s: []$T, val: $T): i64 {
         it = ty_offset(it, 1);
     }
     return n;
+}
+
+fn contains(s: []$T, val: $T): bool {
+    return index_of(s, val) != -1;
+}
+
+fn contains(s: []$T, val: []$T): bool {
+    return index_of(s, val) != -1;
 }
 
 fn empty_slice($T: __type_ptr): []$T {
@@ -56,10 +124,11 @@ fn slice(arr: *[$N]$T): []$T {
     return out;
 }
 
-fn slice(s: []$T, from: i64, len: i64): []$T {
+fn slice(s: []$T, from: i64, len: i64 = -1): []$T {
     from = min(from, s.len);
     out: []$T = #memory_garbage;
     out.ptr = ty_offset(s.ptr, from);
+    if (len == -1) { len = s.len; }
     out.len = min(len, s.len - from);
     return out;
 }
@@ -112,4 +181,180 @@ fn cast(slice: []$T, $DST_T: __type_ptr): []$DST_T {
     new_slice.ptr = slice.ptr .cast($DST_T);
     new_slice.len = slice.len;
     return new_slice;
+}
+
+fn sort_bubble(s: []$T): void {
+    n := s.len;
+    swapped := true;
+    while (swapped && (n > 1)) {
+        swapped = false;
+        n -= 1;
+        for (i : it_range(n)) {
+            if (s[i + 1] < s[i]) {
+                tmp := s[i];
+                s[i] = s[i + 1];
+                s[i + 1] = tmp;
+                swapped = true;
+            }
+        }
+    }
+}
+
+// best for small or almost sorted slices
+fn sort_insertion(s: []$T): void {
+    for (i : it_range(1i64, s.len)) {
+        key := s[i];
+        j := i - 1;
+        while ((j >= 0) && (key < s[j])) {
+            s[j + 1] = s[j];
+            j -= 1;
+        }
+        s[j + 1] = key;
+    }
+}
+
+fn sort_insertion(s: []$T, $less: *fn(a: *$T, b: *$T): bool): void {
+    for (i : it_range(1i64, s.len)) {
+        key := s[i];
+        j := i - 1;
+        while ((j >= 0) && $less(key.^, ty_offset(s.ptr, j))) {
+            s[j + 1] = s[j];
+            j -= 1;
+        }
+        s[j + 1] = key;
+    }
+}
+
+fn sort_quick(s: []$T): void {
+    while (s.len > 12) {
+        pivot := s[s.len / 2];
+        i: i64 = 0;
+        j := s.len - 1;
+        while (true) {
+            while (s[i] < pivot) { i += 1; }
+            while (pivot < s[j]) { j -= 1; }
+            if (i >= j) { break; }
+            tmp := s[i];
+            s[i] = s[j];
+            s[j] = tmp;
+            i += 1;
+            j -= 1;
+        }
+        left := slice(s, 0, j + 1);
+        right := slice(s, j + 1);
+        if (left.len < right.len) {
+            sort_quick(left);
+            s = right;
+        } else {
+            sort_quick(right);
+            s = left;
+        }
+    }
+    sort_insertion(s);
+}
+
+fn sort_quick(s: []$T, $less: *fn(a: *$T, b: *$T): bool): void {
+    while (s.len > 12) {
+        pivot := s[s.len / 2];
+        i: i64 = 0;
+        j := s.len - 1;
+        while (true) {
+            while ($less(ty_offset(s.ptr, i), pivot.^)) { i += 1; }
+            while ($less(pivot.^, ty_offset(s.ptr, j))) { j -= 1; }
+            if (i >= j) { break; }
+            tmp := s[i];
+            s[i] = s[j];
+            s[j] = tmp;
+            i += 1;
+            j -= 1;
+        }
+        left := slice(s, 0, j + 1);
+        right := slice(s, j + 1);
+        if (left.len < right.len) {
+            sort_quick(left, $less);
+            s = right;
+        } else {
+            sort_quick(right, $less);
+            s = left;
+        }
+    }
+    sort_insertion(s, $less);
+}
+
+// s must be sorted ascending; returns the index of val, -1 when absent.
+// On duplicates the first occurrence wins (lower bound).
+fn binary_search(s: []$T, val: $T): i64 {
+    lo: i64 = 0;
+    hi := s.len;
+    while (lo < hi) {
+        mid := lo + (hi - lo) / 2;
+        if (s[mid] < val) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    if ((lo < s.len) && (s[lo] == val)) { return lo; }
+    return -1;
+}
+
+// s must be sorted ascending by $less
+fn binary_search(s: []$T, val: $T, $less: *fn(a: *$T, b: *$T): bool): i64 {
+    lo: i64 = 0;
+    hi := s.len;
+    while (lo < hi) {
+        mid := lo + (hi - lo) / 2;
+        if ($less(ty_offset(s.ptr, mid), val.^)) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    // s[lo] is the first element not less than val: equal if val is not less than it either
+    if ((lo < s.len) && (!$less(val.^, ty_offset(s.ptr, lo)))) { return lo; }
+    return -1;
+}
+
+struct SplitIterator($T: __type_ptr) {
+    cur_pos: i64;
+    cur_len: i64;
+    value: []$T;
+    splitter: []$T;
+    started: bool;
+    finished: bool;
+};
+
+// ,a,b,c, -> [], [a], [b], [c], []
+fn split_iterator(value: []$T, splitter: []$T): SplitIterator($T) {
+    return .{
+        cur_pos = 0;
+        cur_len = 0;
+        value = value;
+        splitter = splitter;
+        started = false;
+        finished = false;
+    };
+}
+
+fn iterator_next(it: *SplitIterator($T)): bool {
+    if (it.finished) { return false; }
+    pos: i64 = 0;
+    if (it.started) {
+        pos = it.cur_pos + it.cur_len + it.splitter.len;
+    } else {
+        it.started = true;
+    }
+    it.cur_pos = pos;
+    splitter_ind := index_of(it.value, it.splitter, pos);
+    if (splitter_ind < 0) {
+        it.cur_len = it.value.len - pos;
+        it.finished = true;
+    } else {
+        it.cur_len = splitter_ind - pos;
+    }
+    return true;
+}
+
+fn iterator_current(it: *SplitIterator($T)): []$T {
+    return slice(it.value, it.cur_pos, it.cur_len);
 }

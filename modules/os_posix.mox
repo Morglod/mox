@@ -56,7 +56,7 @@ struct PosixDirent {
 #linkc("grantpt")  fn posix_grantpt(fd: i32): i32;
 #linkc("unlockpt") fn posix_unlockpt(fd: i32): i32;
 #linkc("ptsname")  fn posix_ptsname(fd: i32): *u8;
-#linkc("pipe")     fn posix_pipe(fds: *i32): i32;
+#linkc("pipe")     fn posix_pipe(fds: *i32): i32; // fds: int[2], [0] = read end, [1] = write end
 #linkc("fork")     fn posix_fork(): i32;
 #linkc("setsid")   fn posix_setsid(): i32;
 #linkc("dup2")     fn posix_dup2(oldfd: i32, newfd: i32): i32;
@@ -66,10 +66,13 @@ struct PosixDirent {
 #linkc("waitpid")  fn posix_waitpid(pid: i32, status: *i32, options: i32): i32;
 #linkc("system")   fn posix_system(cmd: *u8): i32; // returns a wait status, not an exit code
 #linkc("chdir")    fn posix_chdir(path: *u8): i32;
-#linkc("signal")   fn posix_signal(sig: i32, handler: *u8): *u8;
+#linkc("signal")   fn posix_signal(sig: i32, handler: *u8): *u8; // returns the previous handler
 
 struct PosixTimespec { tv_sec: i64; tv_nsec: i64; };
 #linkc("clock_gettime") fn posix_clock_gettime(clock_id: i32, ts: *PosixTimespec): i32;
+#linkc("mkdir")    fn posix_mkdir(path: *u8, mode: u32): i32;
+#linkc("rmdir")    fn posix_rmdir(path: *u8): i32;
+#linkc("rename")   fn posix_rename(from: *u8, to: *u8): i32;
 #linkc("getenv")   fn posix_getenv(name: *u8): *u8;
 #linkc("setenv")   fn posix_setenv(name: *u8, value: *u8, overwrite: i32): i32;
 #linkc("unsetenv") fn posix_unsetenv(name: *u8): i32;
@@ -110,6 +113,8 @@ const POSIX_SIGKILL : i32 = 9;
 const POSIX_SIGPIPE : i32 = 13;
 const POSIX_SIG_IGN : u64 = 1;          // (sighandler_t)1
 const POSIX_CLOCK_MONOTONIC : i32 = 1;
+const POSIX_CLOCK_REALTIME  : i32 = 0;
+const POSIX_MODE_0755 : u32 = 493;
 
 const _OS_EXEC_READ_CHUNK      : i64 = 4096;
 const _OS_EXEC_SCRATCH_RESERVE : i64 = GIGABYTE;
@@ -477,6 +482,21 @@ fn os_file_delete(path: []u8): bool {
     return os_file_delete(#temp_c_string(path));
 }
 
+// one level; false when it already exists or the parent is missing
+fn os_make_dir(path: []u8): bool {
+    return posix_mkdir(#temp_c_string(path), POSIX_MODE_0755) == 0;
+}
+
+// the directory must be empty
+fn os_delete_dir(path: []u8): bool {
+    return posix_rmdir(#temp_c_string(path)) == 0;
+}
+
+// files and (same-volume) directories; an existing `to` file is replaced
+fn os_rename(from: []u8, to: []u8): bool {
+    return posix_rename(#temp_c_string(from), #temp_c_string(to)) == 0;
+}
+
 // "file" means any non-directory entry
 
 fn os_path_exists(path: []u8): bool {
@@ -505,6 +525,38 @@ fn os_monotonic_ms(): i64 {
     ts: PosixTimespec = 0;
     posix_clock_gettime(POSIX_CLOCK_MONOTONIC, ts.^);
     return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+fn os_monotonic_ns(): i64 {
+    ts: PosixTimespec = 0;
+    posix_clock_gettime(POSIX_CLOCK_MONOTONIC, ts.^);
+    return ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
+fn os_unix_time_ms(): i64 {
+    ts: PosixTimespec = 0;
+    posix_clock_gettime(POSIX_CLOCK_REALTIME, ts.^);
+    return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+fn os_sleep_ms(ms: i64): void {
+    while (ms > 0) {
+        chunk := min(ms, 2147483647);
+        _posix_sleep_ms(chunk.cast(i32));
+        ms -= chunk;
+    }
+}
+
+// writes the temp directory into buf (with a trailing separator), returns the length, 0 = failed
+fn os_temp_dir(buf: *u8, cap: i64): i64 {
+    dir := os_get_env("TMPDIR");
+    if (dir.len == 0) { dir = "/tmp"; }
+    has_sep := dir[dir.len - 1] == char("/");
+    n := dir.len + (!has_sep).cast(i64);
+    if (n >= cap) { return 0; }
+    mem_copy(buf, dir.ptr, dir.len);
+    if (!has_sep) { ty_offset(buf, dir.len).* = char("/"); }
+    return n;
 }
 
 enum OsExecStreamMode : u8 {
@@ -779,6 +831,7 @@ fn os_stdout_write(buf: []u8): void { os_stdout_write(buf.ptr, buf.len); }
 fn os_file_read(h: OsFile, buf: []u8): i64 { return os_file_read(h, buf.ptr, buf.len); }
 fn os_file_write(h: OsFile, buf: []u8): i64 { return os_file_write(h, buf.ptr, buf.len); }
 fn os_cwd(buf: []u8): i64 { return os_cwd(buf.ptr, buf.len); }
+fn os_temp_dir(buf: []u8): i64 { return os_temp_dir(buf.ptr, buf.len); }
 fn os_clipboard_set(text: []u8): void { os_clipboard_set(text.ptr, 0 .cast(u32), text.len.cast(u32)); }
 fn os_clipboard_get(buf: []u8): u32 { return os_clipboard_get(buf.ptr, buf.len.cast(u32)); }
 

@@ -1,13 +1,10 @@
 import "./internal.mox";
 import "./slice.mox";
 
-#run {
-    import_code : []u8 = "import \"./os_posix.mox\" #export;";
-    if (mox_platform == MoxPlatform.x86_64_win) {
-        import_code = "import \"./os_win.mox\" #export;";
-    }
-
-    #land_ast __compiler_parse(import_code);
+#if (mox_platform == .x86_64_win) {
+    import "./os_win.mox" #export;
+} else {
+    import "./os_posix.mox" #export;
 }
 
 // heap hooks the runtime calls

@@ -78,15 +78,15 @@ fn to_degrees(rad: $T): $T {
     return rad * 180 / pi($T);
 }
 
+fn umul128(a: u64, b: u64, high: *u64): u64 {
+    r := a.cast(u128) * b.cast(u128);
+    high.* = #shr(r, 64).cast(u64);
+    return r.cast(u64);
+}
+
 fn umul128_hi(a: u64, b: u64): u64 {
-    a_lo := a & 4294967295;
-    a_hi := #shr(a, 32);
-    b_lo := b & 4294967295;
-    b_hi := #shr(b, 32);
-    p00 := a_lo * b_lo;
-    mid := a_hi * b_lo + #shr(p00, 32);
-    mid2 := (mid & 4294967295) + a_lo * b_hi;
-    return a_hi * b_hi + #shr(mid, 32) + #shr(mid2, 32);
+    r := a.cast(u128) * b.cast(u128);
+    return #shr(r, 64).cast(u64);
 }
 
 // valid for the full u64 range

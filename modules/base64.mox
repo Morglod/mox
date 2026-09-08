@@ -46,3 +46,62 @@ fn base64_encode(dst: []u8, src: []u8): i64 {
     }
     return o;
 }
+
+fn _b64_val(c: u8): u32 {
+    v := c.cast(u32);
+    if ((v >= 65) && (v <= 90)) { return v - 65; }  // A-Z
+    if ((v >= 97) && (v <= 122)) { return v - 71; } // a-z
+    if ((v >= 48) && (v <= 57)) { return v + 4; }   // 0-9
+    if (v == 43) { return 62; }                     // +
+    if (v == 47) { return 63; }                     // /
+    return 256;
+}
+
+fn base64_decoded_len(encoded_len: i64): i64 {
+    return ((encoded_len + 3) / 4) * 3;
+}
+
+// dst must hold at least base64_decoded_len(src.len) bytes
+// accepts padded and unpadded input
+// return how many bytes were written, or -1 on invalid input
+fn base64_decode(dst: []u8, src: []u8): i64 {
+    len := src.len;
+    if ((len > 0) && (src[len - 1] == char("="))) { len -= 1; }
+    if ((len > 0) && (src[len - 1] == char("="))) { len -= 1; }
+    i: i64 = 0;
+    o: i64 = 0;
+    while ((i + 4) <= len) {
+        a := _b64_val(src[i]);
+        b := _b64_val(src[i + 1]);
+        c := _b64_val(src[i + 2]);
+        d := _b64_val(src[i + 3]);
+        if (((a | b | c | d) & 256) != 0) { return -1; }
+        n: u32 = #shl(a, 18) | #shl(b, 12) | #shl(c, 6) | d;
+        dst[o] = (#shr(n, 16) & 255).cast(u8);
+        dst[o + 1] = (#shr(n, 8) & 255).cast(u8);
+        dst[o + 2] = (n & 255).cast(u8);
+        i += 4;
+        o += 3;
+    }
+    rem := len - i;
+    if (rem == 1) { return -1; }
+    if (rem == 2) {
+        a := _b64_val(src[i]);
+        b := _b64_val(src[i + 1]);
+        if (((a | b) & 256) != 0) { return -1; }
+        n: u32 = #shl(a, 18) | #shl(b, 12);
+        dst[o] = (#shr(n, 16) & 255).cast(u8);
+        o += 1;
+    }
+    if (rem == 3) {
+        a := _b64_val(src[i]);
+        b := _b64_val(src[i + 1]);
+        c := _b64_val(src[i + 2]);
+        if (((a | b | c) & 256) != 0) { return -1; }
+        n: u32 = #shl(a, 18) | #shl(b, 12) | #shl(c, 6);
+        dst[o] = (#shr(n, 16) & 255).cast(u8);
+        dst[o + 1] = (#shr(n, 8) & 255).cast(u8);
+        o += 2;
+    }
+    return o;
+}

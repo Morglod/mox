@@ -1,10 +1,8 @@
 // run: ./mox ./1_hello.mox
 
-import "internal.mox";
-import "format.mox";
-import "os.mox";
+import "std.mox";
 
 #linkc fn main(): i32 {
-    os_stdout_write(#format_temp("hello {}!", .{ "world"; }));
+    println("hello {}!", .{ "world"; });
     return 0;
 }

@@ -1,0 +1,342 @@
+import "./internal.mox";
+import "./alloc.mox";
+import "./rapidhash.mox";
+
+// HashMap: flat unordered map in the style of ankerl::unordered_dense.
+// One allocation holds two regions: a robin-hood bucket index with backward-shift deletion, and a dense entry array.
+// Iteration is a plain scan over the dense array.
+// Nothing is allocated before the first insert or reserve.
+//
+// The hasher is a baked generic param `*fn(key: *K): u64`, so it is written against the key type:
+//     HashMap([]u8, i32, hash_bytes.^)
+//     HashMap(i64, MyStruct, hash_i64.^)
+//     HashMap(Pt, i32, hash_pt.^)          // fn hash_pt(p: *Pt): u64
+// A pointer key `*T` can hash its address:
+//     fn hash_t_ptr(p: **T): u64 { return hash_u64(p.cast(*u64)); }
+// Key equality is structural `==`, so []u8 keys compare by content.
+//
+// Entry pointers and entries() views are invalid after growth.
+// remove swap-removes from the dense array, so entry order is not stable.
+// The bucket index is u32, so the map holds at most ~4.29e9 entries.
+
+// ---- hashers ----
+
+fn _hashmap_mix64(x: u64): u64 {
+    x = x ^ #shr(x, 30);
+    x = #wrap_mul(x, 0xBF58476D1CE4E5B9);
+    x = x ^ #shr(x, 27);
+    x = #wrap_mul(x, 0x94D049BB133111EB);
+    return x ^ #shr(x, 31);
+}
+
+fn hash_u64(p: *u64): u64 { return _hashmap_mix64(p.*); }
+fn hash_i64(p: *i64): u64 { return _hashmap_mix64(p.*.cast(u64)); }
+fn hash_u32(p: *u32): u64 { return _hashmap_mix64(p.*.cast(u64)); }
+fn hash_i32(p: *i32): u64 { return _hashmap_mix64(p.*.cast(i64).cast(u64)); }
+
+// hashes the bytes the slice references
+fn hash_bytes(p: *[]u8): u64 {
+    s := p.*;
+    return rapidhash(s.ptr, s.len);
+}
+
+// ---- container ----
+
+const MAP_HEADER_SIZE : i64 = 32;
+const MAP_MIN_BUCKETS : i64 = 16;
+
+struct MapBucket {
+    dist_and_fp: u32; // (probe_distance + 1) << 8 | low 8 hash bits; 0 = empty
+    index: u32;       // into the dense entry array
+};
+
+struct MapEntry($K: __type_ptr, $V: __type_ptr) {
+    key: $K;
+    value: $V;
+};
+
+struct MapSlot($V: __type_ptr) {
+    value: *$V;
+    found: bool;
+};
+
+struct HashMapStorage($K: __type_ptr, $V: __type_ptr) {
+    len: i64;
+    bucket_cap: i64;    // power of two
+    shift: u32;         // home bucket = hash >> shift
+    _pad: u32;
+    entries_offset: i64; // byte offset of the dense region
+
+    // here buckets go, then entries
+};
+
+struct HashMap($K: __type_ptr, $V: __type_ptr, $HASH: *fn(key: *$K): u64) {
+    storage: *HashMapStorage($K, $V);
+    alloc: *Alloc;
+
+    #alias len = len(self);
+};
+
+fn _hashmap_buckets(st: *HashMapStorage($K, $V)): *MapBucket {
+    p := st.cast(*u8) |> byte_offset(MAP_HEADER_SIZE);
+    return p.cast(*MapBucket);
+}
+
+fn _entries_ptr(st: *HashMapStorage($K, $V)): *MapEntry($K, $V) {
+    p := st.cast(*u8) |> byte_offset(st.entries_offset);
+    return p.cast(*MapEntry($K, $V));
+}
+
+// max load 0.8
+fn _hashmap_dense_cap(bucket_cap: i64): i64 {
+    return (bucket_cap * 4) / 5;
+}
+
+fn _hashmap_next_pow2(v: i64): i64 {
+    out := MAP_MIN_BUCKETS;
+    while (out < v) { out *= 2; }
+    return out;
+}
+
+fn len(m: *HashMap($K, $V, $HASH)): i64 {
+    if (m.storage == 0) { return 0; }
+    return m.storage.len;
+}
+
+fn init(m: *HashMap($K, $V, $HASH), alloc: *Alloc, expected_count: i64 = 0): void {
+    m.alloc = alloc;
+    m.storage = nullptr(#type HashMapStorage($K, $V));
+    if (expected_count > 0) { reserve(m, expected_count); }
+}
+
+fn destroy(m: *HashMap($K, $V, $HASH)): void {
+    if (m.storage == 0) { return; }
+    mem_free(m.alloc, m.storage.cast(*u8));
+    m.storage = nullptr(#type HashMapStorage($K, $V));
+}
+
+// drops the entries, keeps the storage
+fn clear(m: *HashMap($K, $V, $HASH)): void {
+    st := m.storage;
+    if (st == 0) { return; }
+    st.len = 0;
+    mem_set(_hashmap_buckets(st).cast(*u8), 0, st.bucket_cap * sizeof_type(MapBucket));
+}
+
+// live view of the dense entry array, invalid after the next growth
+fn entries(m: *HashMap($K, $V, $HASH)): []MapEntry($K, $V) {
+    out: []MapEntry($K, $V) = #memory_garbage;
+    if (m.storage == 0) {
+        out.ptr = nullptr(#type MapEntry($K, $V));
+        out.len = 0;
+        return out;
+    }
+    out.ptr = _entries_ptr(m.storage);
+    out.len = m.storage.len;
+    return out;
+}
+
+fn _hashmap_new_storage(m: *HashMap($K, $V, $HASH), bucket_cap: i64): *HashMapStorage($K, $V) {
+    buckets_bytes := bucket_cap * sizeof_type(MapBucket);
+    entries_offset := align_up(MAP_HEADER_SIZE + buckets_bytes, 16i64);
+    bytes := entries_offset + _hashmap_dense_cap(bucket_cap) * sizeof_type(#type MapEntry($K, $V));
+    st := mem_alloc(m.alloc, bytes, 16).cast(*HashMapStorage($K, $V));
+    st.len = 0;
+    st.bucket_cap = bucket_cap;
+    st.shift = (64 - ilog2(bucket_cap)).cast(u32);
+    st.entries_offset = entries_offset;
+    mem_set(_hashmap_buckets(st).cast(*u8), 0, buckets_bytes);
+    return st;
+}
+
+// places b at idx and shifts poorer buckets to the right
+fn _hashmap_place_and_shift(st: *HashMapStorage($K, $V), idx: i64, b: MapBucket): void {
+    buckets := _hashmap_buckets(st);
+    mask := st.bucket_cap - 1;
+    while (true) {
+        at := ty_offset(buckets, idx);
+        if (at.dist_and_fp == 0) {
+            at.* = b;
+            return;
+        }
+        tmp := at.*;
+        at.* = b;
+        b = tmp;
+        b.dist_and_fp += 0x100;
+        idx = (idx + 1) & mask;
+    }
+}
+
+// bucket-only insert for a key that is known to be unique, used to rebuild after growth
+fn _hashmap_bucket_insert(st: *HashMapStorage($K, $V), h: u64, value_idx: u32): void {
+    buckets := _hashmap_buckets(st);
+    mask := st.bucket_cap - 1;
+    idx := #shr(h, st.shift.cast(u64)).cast(i64);
+    dif : u32 = 0x100 | (h & 0xFF).cast(u32);
+    while (dif <= ty_offset(buckets, idx).dist_and_fp) {
+        dif += 0x100;
+        idx = (idx + 1) & mask;
+    }
+    b: MapBucket = #memory_garbage;
+    b.dist_and_fp = dif;
+    b.index = value_idx;
+    _hashmap_place_and_shift(st, idx, b);
+}
+
+fn _hashmap_grow(m: *HashMap($K, $V, $HASH), min_bucket_cap: i64): void {
+    old := m.storage;
+    nst := _hashmap_new_storage(m, min_bucket_cap);
+    if (old != 0) {
+        n := old.len;
+        if (n > 0) {
+            mem_copy(_entries_ptr(nst).cast(*u8), _entries_ptr(old).cast(*u8), n * sizeof_type(#type MapEntry($K, $V)));
+            nst.len = n;
+            entries := _entries_ptr(nst);
+            for (i : it_range(n)) {
+                e := ty_offset(entries, i);
+                _hashmap_bucket_insert(nst, $HASH(e.key.^), i.cast(u32));
+            }
+        }
+        mem_free(m.alloc, old.cast(*u8));
+    }
+    m.storage = nst;
+}
+
+// makes room for at least `count` entries up front
+fn reserve(m: *HashMap($K, $V, $HASH), count: i64): void {
+    need := _hashmap_next_pow2((count * 5) / 4 + 1);
+    if ((m.storage != 0) && (m.storage.bucket_cap >= need)) { return; }
+    _hashmap_grow(m, need);
+}
+
+// pointer to the value for key, null when absent, valid until the next growth or remove
+fn get(m: *HashMap($K, $V, $HASH), key: $K): *$V {
+    st := m.storage;
+    if (st == 0) { return nullptr($V); }
+    buckets := _hashmap_buckets(st);
+    entries := _entries_ptr(st);
+    mask := st.bucket_cap - 1;
+    h := $HASH(key.^);
+    idx := #shr(h, st.shift.cast(u64)).cast(i64);
+    dif : u32 = 0x100 | (h & 0xFF).cast(u32);
+    while (true) {
+        b := ty_offset(buckets, idx).*;
+        if (dif == b.dist_and_fp) {
+            e := ty_offset(entries, b.index.cast(i64));
+            if (e.key == key) { return e.value.^; }
+        } else if (dif > b.dist_and_fp) {
+            return nullptr($V); // the key would sit here if it existed
+        }
+        dif += 0x100;
+        idx = (idx + 1) & mask;
+    }
+    return nullptr($V);
+}
+
+fn contains(m: *HashMap($K, $V, $HASH), key: $K): bool {
+    return get(m, key) != nullptr($V);
+}
+
+// returns the value slot, on a new key the value is zeroed and found is false
+fn get_or_insert(m: *HashMap($K, $V, $HASH), key: $K): MapSlot($V) {
+    if (m.storage == 0) {
+        _hashmap_grow(m, MAP_MIN_BUCKETS);
+    } else if (m.storage.len >= _hashmap_dense_cap(m.storage.bucket_cap)) {
+        _hashmap_grow(m, m.storage.bucket_cap * 2);
+    }
+    st := m.storage;
+    buckets := _hashmap_buckets(st);
+    entries := _entries_ptr(st);
+    mask := st.bucket_cap - 1;
+    h := $HASH(key.^);
+    idx := #shr(h, st.shift.cast(u64)).cast(i64);
+    dif : u32 = 0x100 | (h & 0xFF).cast(u32);
+    out: MapSlot($V) = #memory_garbage;
+    while (true) {
+        b := ty_offset(buckets, idx).*;
+        if (dif == b.dist_and_fp) {
+            e := ty_offset(entries, b.index.cast(i64));
+            if (e.key == key) {
+                out.value = e.value.^;
+                out.found = true;
+                return out;
+            }
+        } else if (dif > b.dist_and_fp) {
+            // new key: append the entry and place the bucket here
+            e := ty_offset(entries, st.len);
+            e.key = key;
+            e.value = zeroed($V);
+            nb: MapBucket = #memory_garbage;
+            nb.dist_and_fp = dif;
+            nb.index = st.len.cast(u32);
+            _hashmap_place_and_shift(st, idx, nb);
+            st.len += 1;
+            out.value = e.value.^;
+            out.found = false;
+            return out;
+        }
+        dif += 0x100;
+        idx = (idx + 1) & mask;
+    }
+    return out;
+}
+
+// inserts or overwrites, returns a pointer to the stored value
+fn insert(m: *HashMap($K, $V, $HASH), key: $K, value: $V): *$V {
+    slot := get_or_insert(m, key);
+    slot.value.* = value;
+    return slot.value;
+}
+
+fn remove(m: *HashMap($K, $V, $HASH), key: $K): bool {
+    st := m.storage;
+    if (st == 0) { return false; }
+    buckets := _hashmap_buckets(st);
+    entries := _entries_ptr(st);
+    mask := st.bucket_cap - 1;
+    h := $HASH(key.^);
+    idx := #shr(h, st.shift.cast(u64)).cast(i64);
+    dif : u32 = 0x100 | (h & 0xFF).cast(u32);
+
+    value_idx: i64 = -1;
+    while (true) {
+        b := ty_offset(buckets, idx).*;
+        if (dif == b.dist_and_fp) {
+            e := ty_offset(entries, b.index.cast(i64));
+            if (e.key == key) {
+                value_idx = b.index.cast(i64);
+                break;
+            }
+        } else if (dif > b.dist_and_fp) {
+            return false;
+        }
+        dif += 0x100;
+        idx = (idx + 1) & mask;
+    }
+
+    // shift the bucket run back by one, there are no tombstones
+    next := (idx + 1) & mask;
+    while (ty_offset(buckets, next).dist_and_fp >= 0x200) { // dist >= 2 can move closer
+        moved := ty_offset(buckets, next).*;
+        moved.dist_and_fp -= 0x100;
+        ty_offset(buckets, idx).* = moved;
+        idx = next;
+        next = (next + 1) & mask;
+    }
+    ty_offset(buckets, idx).* = zeroed(MapBucket);
+
+    // swap-remove from the dense array, then repoint the bucket of the moved entry
+    last := st.len - 1;
+    if (value_idx != last) {
+        ty_offset(entries, value_idx).* = ty_offset(entries, last).*;
+        moved_e := ty_offset(entries, value_idx);
+        mh := $HASH(moved_e.key.^);
+        midx := #shr(mh, st.shift.cast(u64)).cast(i64);
+        while (ty_offset(buckets, midx).index.cast(i64) != last) {
+            midx = (midx + 1) & mask;
+        }
+        ty_offset(buckets, midx).index = value_idx.cast(u32);
+    }
+    st.len -= 1;
+    return true;
+}

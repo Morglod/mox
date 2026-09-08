@@ -29,10 +29,12 @@ enum MoxTypeKind : u8 {
     I16;
     I32;
     I64;
+    I128;
     U8;
     U16;
     U32;
     U64;
+    U128;
     F32;
     F64;
     Ptr;
@@ -77,6 +79,8 @@ struct MoxType_StructField {
     ident: __ast_ptr;
     type: *MoxType;
     memory_offset: u32;
+
+    #alias name = __compiler_ast_to_string(self.ident);
 };
 
 struct MoxType_Struct_GenericParams_Item {

@@ -1,0 +1,129 @@
+// HashMap (dense robin-hood) vs SwissMap (swisstable/SWAR) vs NodeMap (node pool):
+//  (JIT): mox backend=jit ./map_bench.mox
+// (LLVM): mox backend=llvm -O3 ./map_bench.mox
+
+import "internal.mox";
+import "alloc.mox";
+import "format.mox";
+import "time.mox";
+import "hash_map.mox";
+import "hash_map_swiss.mox";
+import "hash_map_node.mox";
+
+const N : i64 = 1000000;
+
+fn key_at(i: i64): i64 {
+    return _hashmap_mix64(i.cast(u64) + 0x9E3779B97F4A7C15).cast(i64) & 0x7FFFFFFFFFFFFFFF;
+}
+
+fn report(name: []u8, phase: []u8, t0: i64, ops: i64, sink: i64): void {
+    dt := time_monotonic_ns() - t0;
+    print("{} {}: {} ns/op ({} ms total, sink {})\n", .{ name; phase; dt / ops; dt / 1000000; sink & 1; });
+}
+
+fn bench_dense(al: *Alloc): void {
+    m: HashMap(i64, i64, hash_i64.^) = #memory_garbage;
+    init(m.^, al);
+    t := time_monotonic_ns();
+    for (i : it_range(N)) { put(m.^, key_at(i), i); }
+    report("dense", "insert", t, N, 0);
+
+    sink: i64 = 0;
+    t = time_monotonic_ns();
+    for (i : it_range(N)) { sink += get(m.^, key_at(i)).*; }
+    report("dense", "find-hit", t, N, sink);
+
+    misses: i64 = 0;
+    t = time_monotonic_ns();
+    for (i : it_range(N)) {
+        if (get(m.^, key_at(i + N)) != nullptr(i64)) { misses += 1; }
+    }
+    report("dense", "find-miss", t, N, misses);
+
+    t = time_monotonic_ns();
+    for (i : it_range(0i64, N, 2i64)) { remove(m.^, key_at(i)); }
+    report("dense", "erase-half", t, N / 2, 0);
+
+    sink = 0;
+    t = time_monotonic_ns();
+    for (i : it_range(N)) {
+        v := get(m.^, key_at(i));
+        if (v != nullptr(i64)) { sink += v.*; }
+    }
+    report("dense", "refind", t, N, sink);
+    destroy(m.^);
+}
+
+fn bench_swiss(al: *Alloc): void {
+    m: SwissMap(i64, i64, hash_i64.^) = #memory_garbage;
+    init(m.^, al);
+    t := time_monotonic_ns();
+    for (i : it_range(N)) { put(m.^, key_at(i), i); }
+    report("swiss", "insert", t, N, 0);
+
+    sink: i64 = 0;
+    t = time_monotonic_ns();
+    for (i : it_range(N)) { sink += get(m.^, key_at(i)).*; }
+    report("swiss", "find-hit", t, N, sink);
+
+    misses: i64 = 0;
+    t = time_monotonic_ns();
+    for (i : it_range(N)) {
+        if (get(m.^, key_at(i + N)) != nullptr(i64)) { misses += 1; }
+    }
+    report("swiss", "find-miss", t, N, misses);
+
+    t = time_monotonic_ns();
+    for (i : it_range(0i64, N, 2i64)) { remove(m.^, key_at(i)); }
+    report("swiss", "erase-half", t, N / 2, 0);
+
+    sink = 0;
+    t = time_monotonic_ns();
+    for (i : it_range(N)) {
+        v := get(m.^, key_at(i));
+        if (v != nullptr(i64)) { sink += v.*; }
+    }
+    report("swiss", "refind", t, N, sink);
+    destroy(m.^);
+}
+
+fn bench_node(al: *Alloc): void {
+    m: NodeMap(i64, i64, hash_i64.^) = #memory_garbage;
+    init(m.^, al);
+    t := time_monotonic_ns();
+    for (i : it_range(N)) { put(m.^, key_at(i), i); }
+    report("node ", "insert", t, N, 0);
+
+    sink: i64 = 0;
+    t = time_monotonic_ns();
+    for (i : it_range(N)) { sink += get(m.^, key_at(i)).*; }
+    report("node ", "find-hit", t, N, sink);
+
+    misses: i64 = 0;
+    t = time_monotonic_ns();
+    for (i : it_range(N)) {
+        if (get(m.^, key_at(i + N)) != nullptr(i64)) { misses += 1; }
+    }
+    report("node ", "find-miss", t, N, misses);
+
+    t = time_monotonic_ns();
+    for (i : it_range(0i64, N, 2i64)) { remove(m.^, key_at(i)); }
+    report("node ", "erase-half", t, N / 2, 0);
+
+    sink = 0;
+    t = time_monotonic_ns();
+    for (i : it_range(N)) {
+        v := get(m.^, key_at(i));
+        if (v != nullptr(i64)) { sink += v.*; }
+    }
+    report("node ", "refind", t, N, sink);
+    destroy(m.^);
+}
+
+#linkc fn main(): i32 {
+    al := default_alloc();
+    bench_dense(al);
+    bench_swiss(al);
+    bench_node(al);
+    return 0;
+}

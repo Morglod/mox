@@ -1,0 +1,30 @@
+import "./internal.mox";
+import "./os.mox";
+
+fn time_monotonic_ns(): i64 {
+    return os_monotonic_ns();
+}
+
+fn time_monotonic_us(): i64 {
+    return os_monotonic_ns() / 1000;
+}
+
+fn time_monotonic_ms(): i64 {
+    return os_monotonic_ns() / 1000000;
+}
+
+fn time_monotonic_sec(): f64 {
+    return os_monotonic_ns().cast(f64) / 1000000000.0;
+}
+
+fn time_unix_ms(): i64 {
+    return os_unix_time_ms();
+}
+
+fn time_unix_sec(): i64 {
+    return os_unix_time_ms() / 1000;
+}
+
+fn time_sleep_ms(ms: i64): void {
+    os_sleep_ms(ms);
+}

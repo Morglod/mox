@@ -5,6 +5,8 @@ import "./arena.mox";
 import "./slice.mox";
 import "./context.mox";
 import "./format_float.mox";
+import "./os.mox";
+import "./alloc.mox";
 
 fn _format_push(dst: []u8, offset: i64, value: u8): i64 {
     if (offset < dst.len) {
@@ -72,6 +74,57 @@ fn format_len_i64(value: i64): i64 {
     return 1 + ilog10(neg.cast(u64)).cast(i64) + 1;
 }
 
+const _FORMAT_U128_CHUNK : u128 = 10000000000000000000;
+
+fn _format_u64_padded(dst: []u8, offset: i64, x: u64, width: i64): i64 {
+    const zero_char := char("0").cast(u8);
+    digits := format_len_u64(x);
+    while (digits < width) {
+        offset = _format_push(dst, offset, zero_char);
+        digits += 1;
+    }
+    return format_u64(dst, offset, x);
+}
+
+fn format_u128(dst: []u8, offset: i64, x: u128): i64 {
+    hi := x / _FORMAT_U128_CHUNK;
+    lo := (x % _FORMAT_U128_CHUNK).cast(u64);
+    if (hi != 0) {
+        offset = format_u128(dst, offset, hi);
+        return _format_u64_padded(dst, offset, lo, 19);
+    }
+    return format_u64(dst, offset, lo);
+}
+
+fn format_i128(dst: []u8, offset: i64, x: i128): i64 {
+    if (x < 0) {
+        offset = _format_push(dst, offset, char("-").cast(u8));
+        // negate in the unsigned domain: handles i128::MIN without overflow
+        ux := #wrap_sub(0, x.cast(u128));
+        return format_u128(dst, offset, ux);
+    }
+    return format_u128(dst, offset, x.cast(u128));
+}
+
+fn format_len_u128(value: u128): i64 {
+    if (value < _FORMAT_U128_CHUNK) {
+        return format_len_u64(value.cast(u64));
+    }
+    hi := value / _FORMAT_U128_CHUNK;
+    if (hi < _FORMAT_U128_CHUNK) {
+        return format_len_u64(hi.cast(u64)) + 19;
+    }
+    return format_len_u64((hi / _FORMAT_U128_CHUNK).cast(u64)) + 38;
+}
+
+fn format_len_i128(value: i128): i64 {
+    if (value >= 0) {
+        return format_len_u128(value.cast(u128));
+    }
+    ux := #wrap_sub(0, value.cast(u128));
+    return 1 + format_len_u128(ux);
+}
+
 fn format_f64(dst: []u8, offset: i64, value: f64): i64 {
     buf: [40]u8 = #memory_garbage;
     n := _format_f64_to_buf(buf.^.cast(*u8), value);
@@ -121,6 +174,8 @@ fn format(dst: []u8, offset: i64, type_kind: MoxTypeKind, value: *u8): i64 {
     if (type_kind == .U16) { return format_u64(dst, offset, value.cast(*u16).*.cast(u64)); }
     if (type_kind == .U32) { return format_u64(dst, offset, value.cast(*u32).*.cast(u64)); }
     if (type_kind == .U64) { return format_u64(dst, offset, value.cast(*u64).*.cast(u64)); }
+    if (type_kind == .I128) { return format_i128(dst, offset, value.cast(*i128).*); }
+    if (type_kind == .U128) { return format_u128(dst, offset, value.cast(*u128).*); }
     if (type_kind == .F32) { return format_f32(dst, offset, value.cast(*f32).*); }
     if (type_kind == .F64) { return format_f64(dst, offset, value.cast(*f64).*); }
 
@@ -139,6 +194,8 @@ fn format_len(type_kind: MoxTypeKind, value: *u8): i64 {
     if (type_kind == .U16) { return format_len_u64(value.cast(*u16).*.cast(u64)); }
     if (type_kind == .U32) { return format_len_u64(value.cast(*u32).*.cast(u64)); }
     if (type_kind == .U64) { return format_len_u64(value.cast(*u64).*); }
+    if (type_kind == .I128) { return format_len_i128(value.cast(*i128).*); }
+    if (type_kind == .U128) { return format_len_u128(value.cast(*u128).*); }
     if (type_kind == .F32) { return format_len_f32(value.cast(*f32).*); }
     if (type_kind == .F64) { return format_len_f64(value.cast(*f64).*); }
 
@@ -245,6 +302,13 @@ fn format_len($fmt_str: []u8, values: $T): i64 {
     return total;
 }
 
+fn format(alloc: *Alloc, $fmt_str: []u8, values: $T): []u8 {
+    len := format_len($fmt_str, values);
+    buf := mem_alloc_slice(alloc, u8, len);
+    format(buf, 0, $fmt_str, values);
+    return buf;
+}
+
 fn #format_temp($buf_size: i64, $fmt_str: []u8, values: $T): []u8 {
     buf: [$buf_size]u8 = #memory_garbage;
     buf_slice := buf.^ |> slice();
@@ -260,4 +324,22 @@ fn #format_temp($fmt_str: []u8, values: $T): []u8 {
     buf := #temp_buffer(len);
     format(buf, 0, $fmt_str, values);
     return buf;
+}
+
+fn print($fmt_str: []u8, values: $T): void {
+    os_stdout_write(#format_temp($fmt_str, values));
+}
+
+fn print(str: []u8) {
+    os_stdout_write(str);
+}
+
+fn println($fmt_str: []u8, values: $T): void {
+    os_stdout_write(#format_temp($fmt_str, values));
+    os_stdout_write("\n");
+}
+
+fn println(str: []u8) {
+    os_stdout_write(str);
+    os_stdout_write("\n");
 }

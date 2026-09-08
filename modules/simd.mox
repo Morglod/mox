@@ -1,0 +1,43 @@
+import "./internal.mox";
+
+const _SWAR_LOW_BITS  : u64 = 0x0101010101010101;
+const _SWAR_LOW7_BITS : u64 = 0x7F7F7F7F7F7F7F7F;
+const _SWAR_HIGH_BITS : u64 = 0x8080808080808080;
+const _SWAR_GATHER    : u64 = 0x0102040810204080;
+
+fn _swar_byte_eq_high_bits(word: u64, pattern: u64): u64 {
+    x := word ^ pattern; // matching bytes become 0
+    t := ((x & _SWAR_LOW7_BITS) + _SWAR_LOW7_BITS) | x;
+    return ~t & _SWAR_HIGH_BITS;
+}
+
+// collapses the 0x80 markers into an 8-bit mask, bit i is byte i
+fn _swar_high_bits_to_mask(t: u64): u64 {
+    return #shr(#wrap_mul(#shr(t, 7), _SWAR_GATHER), 56);
+}
+
+// bit i of the result = (p[i] == b), for the 8 bytes at p
+fn simd_byte_eq_mask8(p: *u8, b: u8): u32 {
+    pattern := #wrap_mul(b.cast(u64), _SWAR_LOW_BITS);
+    w := p.cast(*u64).*;
+    return _swar_high_bits_to_mask(_swar_byte_eq_high_bits(w, pattern)).cast(u32);
+}
+
+// bit i of the result = (p[i] == b), for the 16 bytes at p
+fn simd_byte_eq_mask16(p: *u8, b: u8): u32 {
+    pattern := #wrap_mul(b.cast(u64), _SWAR_LOW_BITS);
+    w0 := p.cast(*u64).*;
+    w1 := byte_offset(p, 8).cast(*u64).*;
+    m0 := _swar_high_bits_to_mask(_swar_byte_eq_high_bits(w0, pattern));
+    m1 := _swar_high_bits_to_mask(_swar_byte_eq_high_bits(w1, pattern));
+    return (m0 | #shl(m1, 8)).cast(u32);
+}
+
+// bit i of the result = (p[i] & 0x80) != 0, for the 16 bytes at p
+fn simd_byte_high_mask16(p: *u8): u32 {
+    w0 := p.cast(*u64).* & _SWAR_HIGH_BITS;
+    w1 := (byte_offset(p, 8).cast(*u64).*) & _SWAR_HIGH_BITS;
+    m0 := _swar_high_bits_to_mask(w0);
+    m1 := _swar_high_bits_to_mask(w1);
+    return (m0 | #shl(m1, 8)).cast(u32);
+}
