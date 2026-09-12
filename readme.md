@@ -25,7 +25,7 @@ To know language better, you can read [./by_example.mox](./by_example.mox)
 
 Zip archive already contains both versions of compiler and base modules.  
 
-* [0.1.2 (x86_64 win/linux)](https://github.com/Morglod/mox/releases/download/0.1.2/mox_012_090926.zip)
+* [0.1.3 (x86_64 win/linux)](https://github.com/Morglod/mox/releases/download/0.1.3/mox_013_120926.zip)
 
 *Later smaller version without LLVM backend will be added (few megabytes)*
 
