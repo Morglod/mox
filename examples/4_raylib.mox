@@ -1,0 +1,28 @@
+import "std.mox";
+import "vendor/raylib.mox";
+const raylib_link := import "vendor/raylib/link.mox";
+
+fn show_simple_window(window_title: *u8) {
+    InitWindow(800, 600, window_title.cast(*const i8));
+    defer CloseWindow();
+
+    while (!WindowShouldClose()) {
+        BeginDrawing();
+        ClearBackground(Color.{ 24; 24; 24; 255; });
+        EndDrawing();
+    }
+}
+
+#linkc fn main(): i32 {
+    show_simple_window("runtime hello");
+
+    #run {
+        // here we pass link_comptime=true
+        // which links raylib to compiler's runtime
+        // so now we can run raylib inside compilation itself!
+        raylib_link.link_raylib(true);
+        show_simple_window("comptime hello");
+    };
+
+    return 0;
+}

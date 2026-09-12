@@ -2,21 +2,42 @@ import "./internal.mox";
 import "./alloc.mox";
 import "./arena.mox";
 import "./thread_local.mox";
+import "./panic.mox";
+import "./slice.mox";
+
+// Scratch arenas: SCRATCH_ARENA_COUNT per thread, slot 0 is the context temp arena.
+// scratch_begin(conflict) never hands out the arena the caller's result goes to.
+const SCRATCH_ARENA_COUNT: i64 = 2;
+const SCRATCH_ARENA_RESERVE: i64 = GIGABYTE;
+const SCRATCH_ARENA_COMMIT: i64 = 64 * KILOBYTE;
 
 struct _ArenaContext {
     arena: *Arena;
     arena_as_alloc: *Alloc;
 };
 
+struct _ScratchContext {
+    arenas: [SCRATCH_ARENA_COUNT]_ArenaContext;
+};
+
+struct ScratchTemp {
+    arena: *Arena;
+    alloc: *Alloc;
+    pos: i64;
+};
+
 _context_is_init := create_thread_local(#type *u8);
 _context_alloc := create_thread_local(#type *Alloc);
-_context_temp_arena := create_thread_local(_ArenaContext);
+_context_scratch := create_thread_local(_ScratchContext);
 
 fn init_default_context() {
     thread_local_set(_context_alloc.^, default_alloc());
 
-    temp_arena := arena_create_virtual(1024i64 * 1024i64, 1024i64);
-    set_context_temp_arena(temp_arena);
+    i: i64 = 0;
+    while (i < SCRATCH_ARENA_COUNT) {
+        set_context_scratch_arena(i, arena_create_virtual(SCRATCH_ARENA_RESERVE, SCRATCH_ARENA_COMMIT));
+        i += 1;
+    }
 }
 
 fn _require_context_init() {
@@ -37,49 +58,153 @@ fn get_context_alloc(): *Alloc {
     return thread_local_get(_context_alloc.^);
 }
 
-fn get_context_temp_arena(): *Arena {
+fn _check_scratch_index(i: i64): void {
+    if (i < 0 || i >= SCRATCH_ARENA_COUNT) {
+        panic("scratch arena index {} is out of range (SCRATCH_ARENA_COUNT = {})", .{ i; SCRATCH_ARENA_COUNT; });
+    }
+}
+
+fn get_context_scratch_arena(i: i64): *Arena {
     _require_context_init();
-    return thread_local_get(_context_temp_arena.^).arena;
+    _check_scratch_index(i);
+    return thread_local_get(_context_scratch.^).arenas[i].arena;
 }
 
-fn #temp_arena(): *Arena {
-    arena := get_context_temp_arena();
-    cur_pos := arena_current_pos(arena);
-    defer arena_pop_to(arena, cur_pos);
-    return arena;
-}
-
-fn get_context_temp_arena_as_alloc(): *Alloc {
+fn get_context_scratch_arena_as_alloc(i: i64): *Alloc {
     _require_context_init();
-    return thread_local_get(_context_temp_arena.^).arena_as_alloc;
+    _check_scratch_index(i);
+    return thread_local_get(_context_scratch.^).arenas[i].arena_as_alloc;
 }
 
-fn set_context_temp_arena(arena: *Arena): _ArenaContext {
-    temp_arena_as_alloc := arena_as_allocator(arena);
-    return set_context_temp_arena(arena, temp_arena_as_alloc);
+fn set_context_scratch_arena(i: i64, arena: *Arena): _ArenaContext {
+    return set_context_scratch_arena(i, arena, arena_as_allocator(arena));
 }
 
-fn set_context_temp_arena(arena: *Arena, arena_as_alloc: *Alloc): _ArenaContext {
-    prev := thread_local_get(_context_temp_arena.^).*;
+fn set_context_scratch_arena(i: i64, arena: *Arena, arena_as_alloc: *Alloc): _ArenaContext {
+    _check_scratch_index(i);
+    ctx := thread_local_get(_context_scratch.^);
+    prev := ctx.arenas[i];
     ctx_value: _ArenaContext = .{
         arena = arena;
         arena_as_alloc = arena_as_alloc;
     };
-    thread_local_set(_context_temp_arena.^, ctx_value);
+    ctx.arenas[i] = ctx_value;
     return prev;
 }
 
+fn get_context_temp_arena(): *Arena {
+    return get_context_scratch_arena(0);
+}
+
+fn get_context_temp_arena_as_alloc(): *Alloc {
+    return get_context_scratch_arena_as_alloc(0);
+}
+
+fn set_context_temp_arena(arena: *Arena): _ArenaContext {
+    return set_context_scratch_arena(0, arena);
+}
+
+fn set_context_temp_arena(arena: *Arena, arena_as_alloc: *Alloc): _ArenaContext {
+    return set_context_scratch_arena(0, arena, arena_as_alloc);
+}
+
+fn scratch_begin(conflicts: []*Arena): ScratchTemp {
+    _require_context_init();
+    ctx := thread_local_get(_context_scratch.^);
+    i: i64 = 0;
+    while (i < SCRATCH_ARENA_COUNT) {
+        slot := ctx.arenas[i];
+        if (!contains(conflicts, slot.arena)) {
+            t: ScratchTemp = .{
+                arena = slot.arena;
+                alloc = slot.arena_as_alloc;
+                pos = arena_current_pos(slot.arena);
+            };
+            return t;
+        }
+        i += 1;
+    }
+    panic("scratch_begin: all {} scratch arenas are listed as conflicts", .{ SCRATCH_ARENA_COUNT; });
+    none: ScratchTemp = 0;
+    return none;
+}
+
+fn scratch_begin(): ScratchTemp {
+    conflicts: []*Arena = 0;
+    return scratch_begin(conflicts);
+}
+
+fn scratch_begin(conflict: *Arena): ScratchTemp {
+    c := conflict;
+    conflicts: []*Arena = #memory_garbage;
+    conflicts.ptr = c.^;
+    conflicts.len = 1;
+    return scratch_begin(conflicts);
+}
+
+fn scratch_begin(conflict: *Alloc): ScratchTemp {
+    return scratch_begin(arena_from_allocator(conflict));
+}
+
+fn scratch_end(t: ScratchTemp): void {
+    arena_pop_to(t.arena, t.pos);
+}
+
+// the macro forms pop at the end of the caller's scope
+
+fn #temp_arena(): *Arena {
+    t := scratch_begin();
+    defer scratch_end(t);
+    return t.arena;
+}
+
+fn #temp_arena(conflict: *Alloc): *Arena {
+    t := scratch_begin(conflict);
+    defer scratch_end(t);
+    return t.arena;
+}
+
+fn #temp_arena(conflict: *Arena): *Arena {
+    t := scratch_begin(conflict);
+    defer scratch_end(t);
+    return t.arena;
+}
+
 fn #temp_arena_as_alloc(): *Alloc {
-    arena := get_context_temp_arena();
-    cur_pos := arena_current_pos(arena);
-    defer arena_pop_to(arena, cur_pos);
-    return get_context_temp_arena_as_alloc();
+    t := scratch_begin();
+    defer scratch_end(t);
+    return t.alloc;
+}
+
+fn #temp_arena_as_alloc(conflict: *Alloc): *Alloc {
+    t := scratch_begin(conflict);
+    defer scratch_end(t);
+    return t.alloc;
+}
+
+fn #temp_arena_as_alloc(conflict: *Arena): *Alloc {
+    t := scratch_begin(conflict);
+    defer scratch_end(t);
+    return t.alloc;
 }
 
 fn #temp_buffer(size: i64): []u8 {
-    arena := get_context_temp_arena();
-    cur_pos := arena_current_pos(arena);
-    tmp := arena_push(arena, size);
-    defer arena_pop_to(arena, cur_pos);
+    t := scratch_begin();
+    tmp := arena_push(t.arena, size);
+    defer scratch_end(t);
+    return tmp;
+}
+
+fn #temp_buffer(size: i64, conflict: *Alloc): []u8 {
+    t := scratch_begin(conflict);
+    tmp := arena_push(t.arena, size);
+    defer scratch_end(t);
+    return tmp;
+}
+
+fn #temp_buffer(size: i64, conflict: *Arena): []u8 {
+    t := scratch_begin(conflict);
+    tmp := arena_push(t.arena, size);
+    defer scratch_end(t);
     return tmp;
 }

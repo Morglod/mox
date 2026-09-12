@@ -1,7 +1,7 @@
 import "./internal.mox";
 import "./slice.mox";
 
-#if (mox_platform == .x86_64_win) {
+#if (MOX_OS == .Windows) {
     import "./os_win.mox" #export;
 } else {
     import "./os_posix.mox" #export;

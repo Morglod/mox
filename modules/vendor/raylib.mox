@@ -2,6 +2,7 @@
 // Generator: gen_bindings (c99_parser)
 
 import "internal.mox";
+import "./raylib/link.mox";
 
 // Opaque types (forward-declared structs without definitions)
 const rAudioBuffer := u64;  // opaque type

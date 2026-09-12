@@ -1,5 +1,4 @@
 import "./internal.mox";
-import "./alloc.mox";
 import "./os_posix.mox";
 
 struct Pty {
@@ -19,7 +18,7 @@ fn _pty_set_winsize(fd: i32, cols: u32, rows: u32): void {
 }
 
 // spawn `cmd` (NUL-terminated) as `/bin/sh -c cmd` in a cols x rows pty
-fn pty_spawn(alloc: *Alloc, cmd: *u8, cols: i64, rows: i64, out: *Pty): bool {
+fn pty_spawn(cmd: *u8, cols: i64, rows: i64, out: *Pty): bool {
     out.cols = max(cols, 1).cast(u32);
     out.rows = max(rows, 1).cast(u32);
     out.alive = false;

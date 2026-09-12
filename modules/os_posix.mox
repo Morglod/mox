@@ -117,7 +117,6 @@ const POSIX_CLOCK_REALTIME  : i32 = 0;
 const POSIX_MODE_0755 : u32 = 493;
 
 const _OS_EXEC_READ_CHUNK      : i64 = 4096;
-const _OS_EXEC_SCRATCH_RESERVE : i64 = GIGABYTE;
 const POSIX_DT_DIR  : u8 = 4;
 
 const POSIX_MAP_FAILED : u64 = 18446744073709551615; // (void*)-1
@@ -497,6 +496,36 @@ fn os_rename(from: []u8, to: []u8): bool {
     return posix_rename(#temp_c_string(from), #temp_c_string(to)) == 0;
 }
 
+#if (MOX_OS == .Darwin) {
+    // <copyfile.h>: int copyfile(const char* from, const char* to, copyfile_state_t state, copyfile_flags_t flags)
+    #linkc("copyfile") fn darwin_copyfile(from: *u8, to: *u8, state: *u8, flags: u32): i32;
+    const DARWIN_COPYFILE_ALL: u32 = 15; // COPYFILE_ACL | COPYFILE_STAT | COPYFILE_XATTR | COPYFILE_DATA
+
+    fn os_copy_file(from: []u8, to: []u8): bool {
+        return darwin_copyfile(#temp_c_string(from), #temp_c_string(to), nullptr(u8), DARWIN_COPYFILE_ALL) == 0;
+    }
+} else {
+    // ssize_t copy_file_range(int fd_in, off64_t* off_in, int fd_out, off64_t* off_out, size_t len, unsigned flags)
+    #linkc("copy_file_range") fn posix_copy_file_range(fd_in: i32, off_in: *i64, fd_out: i32, off_out: *i64, len: u64, flags: u32): i64;
+
+    fn os_copy_file(from: []u8, to: []u8): bool {
+        src := os_file_open_read(from);
+        if (src == 0) { return false; }
+        defer os_file_close(src);
+        dst := os_file_open_write(to);
+        if (dst == 0) { return false; }
+        defer os_file_close(dst);
+        fd_in := (src.cast(i64) - 1).cast(i32);
+        fd_out := (dst.cast(i64) - 1).cast(i32);
+        while (true) {
+            r := posix_copy_file_range(fd_in, nullptr(i64), fd_out, nullptr(i64), 1073741824, 0);
+            if (r < 0) { return false; }
+            if (r == 0) { break; }
+        }
+        return true;
+    }
+}
+
 // "file" means any non-directory entry
 
 fn os_path_exists(path: []u8): bool {
@@ -549,7 +578,7 @@ fn os_sleep_ms(ms: i64): void {
 
 // writes the temp directory into buf (with a trailing separator), returns the length, 0 = failed
 fn os_temp_dir(buf: *u8, cap: i64): i64 {
-    dir := os_get_env("TMPDIR");
+    dir := os_get_env("TMPDIR", #temp_arena_as_alloc());
     if (dir.len == 0) { dir = "/tmp"; }
     has_sep := dir[dir.len - 1] == char("/");
     n := dir.len + (!has_sep).cast(i64);
@@ -658,13 +687,12 @@ fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): Exec
     res: ExecResult = 0;
     res.exit_code = -1;
 
-    scratch_arena := arena_create_virtual(_OS_EXEC_SCRATCH_RESERVE, 65536);
-    scratch := arena_as_allocator(scratch_arena);
-    defer arena_destroy(scratch_arena);
+    scratch := scratch_begin(arena);
+    defer scratch_end(scratch);
 
-    cmd_z := arena_push_str_copy_c(scratch_arena,cmd).ptr;
+    cmd_z := arena_push_str_copy_c(scratch.arena, cmd).ptr;
     cwd_z := nullptr(u8);
-    if (opts.cwd.len > 0) { cwd_z = arena_push_str_copy_c(scratch_arena,opts.cwd).ptr; }
+    if (opts.cwd.len > 0) { cwd_z = arena_push_str_copy_c(scratch.arena, opts.cwd).ptr; }
 
     in_child: i32 = POSIX_NO_FD;  in_ours: i32 = POSIX_NO_FD;  in_owned := false;
     out_child: i32 = POSIX_NO_FD; out_ours: i32 = POSIX_NO_FD; out_owned := false;
@@ -731,8 +759,8 @@ fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): Exec
 
     out_sb: StringBuilder = #memory_garbage;
     err_sb: StringBuilder = #memory_garbage;
-    init(out_sb.^, scratch);
-    init(err_sb.^, scratch);
+    init(out_sb.^, scratch.alloc);
+    init(err_sb.^, scratch.alloc);
 
     deadline: i64 = 0;
     if (opts.timeout_ms > 0) { deadline = os_monotonic_ms() + opts.timeout_ms; }
@@ -778,9 +806,9 @@ fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): Exec
                     in_ours = POSIX_NO_FD;
                 }
             } else if (p.fd == out_ours) {
-                _posix_exec_pump(out_ours.^, out_sb.^, scratch);
+                _posix_exec_pump(out_ours.^, out_sb.^, scratch.alloc);
             } else {
-                _posix_exec_pump(err_ours.^, err_sb.^, scratch);
+                _posix_exec_pump(err_ours.^, err_sb.^, scratch.alloc);
             }
         }
     }
@@ -806,7 +834,6 @@ fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): Exec
     }
     res.exit_code = _posix_status_to_exit_code(st);
 
-    // chunks live on scratch (an arena: no free, so no destroy); the joined outputs go to the caller's arena
     out_alloc := arena_as_allocator(arena);
     if (opts.stdout_mode == .buffer) { res.stdout = finalize(out_sb.^, out_alloc, false); }
     if (opts.stderr_mode == .buffer) { res.stderr = finalize(err_sb.^, out_alloc, false); }
@@ -835,15 +862,14 @@ fn os_temp_dir(buf: []u8): i64 { return os_temp_dir(buf.ptr, buf.len); }
 fn os_clipboard_set(text: []u8): void { os_clipboard_set(text.ptr, 0 .cast(u32), text.len.cast(u32)); }
 fn os_clipboard_get(buf: []u8): u32 { return os_clipboard_get(buf.ptr, buf.len.cast(u32)); }
 
-fn os_get_env(name: []u8): []u8 {
-    env := posix_getenv(#temp_c_string(name));
+fn os_get_env(name: []u8, alloc: *Alloc = get_context_temp_arena_as_alloc()): []u8 {
+    env := posix_getenv(#temp_c_string(name, alloc));
     if (env == 0) {
         return empty_slice(u8);
     }
     env_len := c_strlen(env);
-    buf := #temp_buffer(env_len);
+    buf := mem_alloc_slice(alloc, u8, env_len);
     mem_copy(buf.ptr, env, env_len);
-
     return buf;
 }
 

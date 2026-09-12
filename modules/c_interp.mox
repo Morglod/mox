@@ -1,4 +1,6 @@
 import "./internal.mox";
+import "./alloc.mox";
+import "./arena.mox";
 import "./context.mox";
 import "./slice.mox";
 
@@ -21,16 +23,30 @@ fn c_strlen(src: *u8, max_len: i64): i64 {
     return n;
 }
 
-// useful when you need to pass null terminated C string to C api
-fn #temp_c_string(str: []u8): *u8 {
-    tmp := #temp_buffer(str.len + 1);
+fn _c_string_into(tmp: []u8, str: []u8): *u8 {
     n := str.len;
     if (n > 0 && str[n - 1] == 0) {
         return str.ptr;
     }
-    mem_copy(tmp.ptr, str.ptr, str.len);
+    mem_copy(tmp.ptr, str.ptr, n);
     tmp[n] = 0;
     return tmp.ptr;
+}
+
+// useful when you need to pass null terminated C string to C api
+fn #temp_c_string(str: []u8): *u8 {
+    tmp := #temp_buffer(str.len + 1);
+    return _c_string_into(tmp, str);
+}
+
+fn #temp_c_string(str: []u8, conflict: *Alloc): *u8 {
+    tmp := #temp_buffer(str.len + 1, conflict);
+    return _c_string_into(tmp, str);
+}
+
+fn #temp_c_string(str: []u8, conflict: *Arena): *u8 {
+    tmp := #temp_buffer(str.len + 1, conflict);
+    return _c_string_into(tmp, str);
 }
 
 fn from_c_string(str: *u8): []u8 {

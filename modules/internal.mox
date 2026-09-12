@@ -3,8 +3,7 @@
 const usize := u64;
 const isize := i64;
 
-const __mox_slice_length_type := isize;
-const __mox_string_length_type := u32;
+const __mox_slice_length_type := i64;
 
 #linkc fn __mox_mem_alloc(size: i64, align: u32): *u8;
 #linkc fn __mox_mem_realloc(old_mem: *u8, new_size: i64, align: u32): *u8;
@@ -19,6 +18,13 @@ enum MoxPlatform : u8 {
     x86_64_win;
     x86_64_sysv;
     x86_64_macos;
+};
+
+enum MoxOs : u8 {
+    Unknown;
+    Windows;
+    Linux;
+    Darwin;
 };
 
 enum MoxTypeKind : u8 {
@@ -127,6 +133,7 @@ struct MoxSourceLocation {
 // fn __compiler_parse(code: []u8): __ast_ptr
 // fn __compiler_ast_to_string(__ast_ptr): []u8
 // __compiler_module_file_path
+// fn __compiler_output_dir(): []u8   with trailing "/": linked exe's dir, else the `out` file's
 // __compiler_comptime_alloc
 // __compiler_comptime_realloc
 // __compiler_comptime_free
@@ -137,11 +144,26 @@ fn __mox_dangerously_format_to_type_ptr($type_ptr: u64): __type_ptr {
     return $type_ptr.cast(*MoxType).cast(__type_ptr);
 }
 
-const mox_platform: MoxPlatform = __compiler_platform().cast(MoxPlatform);
+const MOX_PLATFORM: MoxPlatform = __compiler_platform().cast(MoxPlatform);
 
-const max_u32: u32 = 4294967295;
+fn _mox_internal_get_os(platform: MoxPlatform): MoxOs {
+    switch (platform) {
+        case .x86_64_win:
+            return .Windows;
+        case .x86_64_sysv:
+            return .Linux;
+        case .x86_64_macos:
+            return .Darwin;
+        case .unknown:
+            return .Unknown;
+    }
+}
 
-const mox_is_debug: bool = false;
+const MOX_OS: MoxOs = _mox_internal_get_os(MOX_PLATFORM);
+
+const MAX_U32: u32 = 4294967295;
+
+const MOX_IS_DEBUG: bool = false;
 
 fn sizeof_type($T: __type_ptr): i64 {
     sz := #run __compiler_sizeof($T);
@@ -463,7 +485,7 @@ struct MoxSourcePathRecord {
 };
 
 // returns empty slice when the path is unavailable
-fn get_source_location_file_path(loc: MoxSourceLocation): []u8 {
+fn get_source_location_file_path(loc: MoxSourceLocation = #caller_location): []u8 {
     if (#is_comptime) {
         return __compiler_module_file_path(loc.module_id);
     } else {
@@ -485,6 +507,10 @@ fn get_source_location_file_path(loc: MoxSourceLocation): []u8 {
         empty.len = 0;
         return empty;
     }
+}
+
+fn current_source_location(loc: MoxSourceLocation = #caller_location): MoxSourceLocation {
+    return loc;
 }
 
 fn zeroed($T: __type_ptr): $T {

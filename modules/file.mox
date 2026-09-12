@@ -148,11 +148,8 @@ fn fs_delete_dir(path: []u8): bool {
     return os_delete_dir(path);
 }
 
-// copies the whole content through memory; overwrites `to`
 fn fs_copy_file(from: []u8, to: []u8): bool {
-    data := fs_try_read_file_full(from);
-    if (data.ptr == nullptr(u8)) { return false; }
-    return fs_try_write_file_full(to, data);
+    return os_copy_file(from, to);
 }
 
 // the OS temp directory with a trailing "/", on alloc; empty = failed

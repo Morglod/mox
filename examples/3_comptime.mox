@@ -1,0 +1,45 @@
+import "std.mox";
+import "build.mox";
+
+// Baking git hash as a constant to binary
+fn print_version() {
+    git_hash := #run os_exec_output("git rev-parse HEAD");
+    println(git_hash);
+}
+
+// Build params from environment variables
+USE_FOO := #run os_get_env("USE_FOO") == "true";
+#run {
+    println("\nUSE_FOO = {}", .{ USE_FOO; });
+}
+
+fn foo() {
+    #if (USE_FOO) {
+        println("foo");
+    } else {
+        println("not foo");
+    }
+}
+
+// Build C lib as dll, link it and make it available in comptime!
+
+// this function will be linked by compiler at comptime in section below
+#linkc fn comptime_example(a: i32, b: i32): i32;
+
+#run {
+    if (MOX_OS == .Windows) {
+        os_exec("echo __declspec(dllexport) int comptime_example(int a, int b) { return a + b; } | clang -x c - -shared -o comptime_example.dll");
+        __compiler_link_lib("comptime_example.dll", true);
+        build_copy_to_output("./comptime_example.dll");
+    } else {
+        os_exec("echo 'int comptime_example(int a, int b) { return a + b; }' | clang -x c - -shared -o comptime_example.so");
+        __compiler_link_lib("comptime_example.so", true);
+        build_copy_to_output("./comptime_example.so");
+    }
+    println("\ncomptime_example(10,20) = {}\n", .{ comptime_example(10, 20); });
+}
+
+#linkc fn main(): i32 {
+    print_version();
+    return 0;
+}

@@ -1,0 +1,42 @@
+import "internal.mox";
+import "build.mox";
+
+fn link_raylib($link_comptime: bool): void {
+    #run {
+        link_path := "";
+        dll_path := "";
+
+        switch (MOX_OS) {
+            case .Windows:
+                link_path = "./win64_mingw/libraylibdll.a";
+                dll_path = "./win64_mingw/raylib.dll";
+            case .Linux:
+                link_path = "./linux64/libraylib.so";
+                dll_path = "./linux64/libraylib.so";
+            case .Darwin:
+                link_path = "./macos64/libraylib.dylib";
+                dll_path = "./macos64/libraylib.dylib";
+            case .Unknown:
+        }
+
+        __compiler_link_lib(build_resolve_path(link_path), false);
+        if ($link_comptime) {
+            __compiler_link_lib(build_resolve_path(dll_path), true);
+        }
+        build_copy_to_output(build_resolve_path(dll_path));
+    };
+}
+
+#run link_raylib(false);
+
+// example of comptime usage:
+// #run {
+//     link_raylib(true);
+//     InitWindow(800, 600, "hello world");
+//     SetTargetFPS(60);
+//     while (!WindowShouldClose()) {
+//         BeginDrawing();
+//         ClearBackground(Color.{ 24; 24; 28; 255; });
+//         EndDrawing();
+//     }
+// }

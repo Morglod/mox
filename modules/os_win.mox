@@ -274,6 +274,7 @@ struct PROCESS_INFORMATION {
 #linkc("CreateDirectoryA")   fn CreateDirectoryA(path: *u8, sec: *u8): i32;
 #linkc("RemoveDirectoryA")   fn RemoveDirectoryA(path: *u8): i32;
 #linkc("MoveFileExA")        fn MoveFileExA(from: *u8, to: *u8, flags: u32): i32;
+#linkc("CopyFileA")          fn CopyFileA(from: *u8, to: *u8, fail_if_exists: i32): i32;
 #linkc("GetTempPathA")       fn GetTempPathA(cap: u32, buf: *u8): u32;
 #linkc("Sleep")              fn win_Sleep(ms: u32): void;
 #linkc("QueryPerformanceCounter")   fn win_QueryPerformanceCounter(out: *i64): i32;
@@ -292,7 +293,6 @@ const STARTF_USESTDHANDLES : u32 = 0x100;
 const HANDLE_FLAG_INHERIT  : u32 = 1;
 const CREATE_NO_WINDOW     : u32 = 0x08000000;
 const _OS_EXEC_READ_CHUNK  : i64 = 4096;
-const _OS_EXEC_SCRATCH_RESERVE : i64 = 1073741824; // 1 GiB of address space for captured output, committed as used
 #linkc("SetHandleInformation") fn SetHandleInformation(h: WIN_HANDLE, mask: u32, flags: u32): i32;
 #linkc("GetTickCount64")       fn GetTickCount64(): u64;
 
@@ -800,6 +800,10 @@ fn os_rename(from: []u8, to: []u8): bool {
     return MoveFileExA(#temp_c_string(from), #temp_c_string(to), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED) != 0;
 }
 
+fn os_copy_file(from: []u8, to: []u8): bool {
+    return CopyFileA(#temp_c_string(from), #temp_c_string(to), 0) != 0;
+}
+
 // "file" means any non-directory entry
 
 fn os_path_exists(path: []u8): bool {
@@ -986,13 +990,12 @@ fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): Exec
     res: ExecResult = 0;
     res.exit_code = -1;
 
-    scratch_arena := arena_create_virtual(_OS_EXEC_SCRATCH_RESERVE, 65536);
-    scratch := arena_as_allocator(scratch_arena);
-    defer arena_destroy(scratch_arena);
+    scratch := scratch_begin(arena);
+    defer scratch_end(scratch);
 
-    full := _win_shell_cmdline(cmd, scratch_arena);
+    full := _win_shell_cmdline(cmd, scratch.arena);
     cwd := nullptr(u8);
-    if (opts.cwd.len > 0) { cwd = arena_push_str_copy_c(scratch_arena,opts.cwd).ptr; }
+    if (opts.cwd.len > 0) { cwd = arena_push_str_copy_c(scratch.arena, opts.cwd).ptr; }
 
     sa: SECURITY_ATTRIBUTES = 0;
     sa.nLength = sizeof_type(SECURITY_ATTRIBUTES).cast(u32);
@@ -1051,8 +1054,8 @@ fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): Exec
 
     out_sb: StringBuilder = #memory_garbage;
     err_sb: StringBuilder = #memory_garbage;
-    init(out_sb.^, scratch);
-    init(err_sb.^, scratch);
+    init(out_sb.^, scratch.alloc);
+    init(err_sb.^, scratch.alloc);
 
     deadline: i64 = 0;
     if (opts.timeout_ms > 0) { deadline = os_monotonic_ms() + opts.timeout_ms; }
@@ -1066,8 +1069,8 @@ fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): Exec
             exited = true;
         }
         progressed := false;
-        if (out_ours != 0) { if (_win_exec_pump(out_ours.^, out_sb.^, scratch)) { progressed = true; } }
-        if (err_ours != 0) { if (_win_exec_pump(err_ours.^, err_sb.^, scratch)) { progressed = true; } }
+        if (out_ours != 0) { if (_win_exec_pump(out_ours.^, out_sb.^, scratch.alloc)) { progressed = true; } }
+        if (err_ours != 0) { if (_win_exec_pump(err_ours.^, err_sb.^, scratch.alloc)) { progressed = true; } }
         if (progressed) { continue; }
         if (exited) { break; } // child is gone and its pipes are drained; whoever still holds a write end is not our child
         if (WaitForSingleObject(pi.hProcess, 10) == 0) { exited = true; }
@@ -1093,7 +1096,6 @@ fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): Exec
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
 
-    // chunks live on scratch (an arena: no free, so no destroy); the joined outputs go to the caller's arena
     out_alloc := arena_as_allocator(arena);
     if (opts.stdout_mode == .buffer) { res.stdout = finalize(out_sb.^, out_alloc, false); }
     if (opts.stderr_mode == .buffer) { res.stderr = finalize(err_sb.^, out_alloc, false); }
@@ -1120,13 +1122,13 @@ fn os_clipboard_get(buf: []u8): u32 { return os_clipboard_get(buf.ptr, buf.len.c
 #linkc("GetEnvironmentVariableA") fn win_GetEnvironmentVariableA(name: *u8, buffer: *u8, size: u32): u32;
 #linkc("SetEnvironmentVariableA") fn win_SetEnvironmentVariableA(name: *u8, value: *u8): i32;
 
-fn os_get_env(name: []u8): []u8 {
-    name_c := #temp_c_string(name);
+fn os_get_env(name: []u8, alloc: *Alloc = get_context_temp_arena_as_alloc()): []u8 {
+    name_c := #temp_c_string(name, alloc);
     len := win_GetEnvironmentVariableA(name_c, nullptr(u8), 0);
     if (len == 0) {
         return empty_slice(u8);
     }
-    buf := #temp_buffer(len);
+    buf := mem_alloc_slice(alloc, u8, len);
     win_GetEnvironmentVariableA(name_c, buf.ptr, len);
     return slice(buf, 0, len - 1);
 }

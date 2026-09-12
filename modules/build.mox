@@ -1,0 +1,20 @@
+// build tools
+
+import "./internal.mox";
+import "./file.mox";
+import "./assert.mox";
+
+fn build_resolve_path(path: []u8, loc: MoxSourceLocation = #caller_location): []u8 {
+    if (fs_path_is_abs(path)) {
+        return path;
+    }
+    caller_file_path := get_source_location_file_path(loc);
+    caller_dir_path := fs_path_parent(caller_file_path);
+    return fs_path_join(caller_dir_path, path);
+}
+
+fn build_copy_to_output(src_path: []u8, loc: MoxSourceLocation = #caller_location): void {
+    const output_dir := __compiler_output_dir();
+    dst_path := fs_path_join(output_dir, fs_path_basename(src_path));
+    assert(fs_copy_file(src_path, dst_path), "build_copy_to_output failed for src=\"{}\" dst=\"{}\"", .{ src_path; dst_path; }, loc);
+}

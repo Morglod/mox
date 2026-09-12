@@ -1,3 +1,37 @@
+## 0.1.3
+
+Better build tools, better temporary memory handling in std  
+Raylib dll now ships inside, so you can just import vendor/raylib.mox and use it.
+
+### Compiler
+
+All paths that comes from compiler (like source location) are with / slashes even on windows.
+
+`fn __compiler_output_dir(): []u8` returns path to output directory at comptime (linker output or obj/asm/ir artifact).
+
+### Modules
+
+`MOX_OS` constant now could be used to distinguish between target OS.
+
+Temporary memory handling in std like `os_get_env` fixed
+
+raylib vendor module now ships with release dlls which are linked and copied automatically by new comptime build tools
+
+`build.mox` module with comptime build helpers
+
+`build_resolve_path(path, loc): []u8` resolves path from specified source location (uses caller location by default).  
+Userful so file path is resolved relative to caller's module path
+
+`build_copy_to_output(src_path)` copies file specified by src_path to output directory
+
+It is used in raylib link module:
+```rust
+#run {
+    __compiler_link_lib(build_resolve_path("./libraylibdll.a"), false);
+    build_copy_to_output(build_resolve_path("./raylib.dll"));
+}
+```
+
 ## 0.1.2
 
 ### Compiler
@@ -34,7 +68,7 @@ Good replacement for "#run { #emit }" pattern
 It is more performant (because avoids code generation and parsing) and is not deferred as #run
 
 ```rust
-#if (mox_platform == .x86_64_win) {
+#if (MOX_PLATFORM == .x86_64_win) {
     import "./win.mox";
 } else {
     import "./not_win.mox";

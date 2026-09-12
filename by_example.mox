@@ -502,6 +502,12 @@ fn useful_things() {
 
     // __type_ptr could be safely casted to *MoxType
     // to inspect type info
+
+    #if (true) {
+        // conditional compilation could be done with #if
+    } else #if (false) {
+
+    }
 }
 
 #linkc fn main(): i32 {

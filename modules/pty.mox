@@ -1,6 +1,6 @@
 import "./internal.mox";
 
-#if (mox_platform == .x86_64_win) {
+#if (MOX_OS == .Windows) {
     import "./pty_win.mox" #export;
 } else {
     import "./pty_posix.mox" #export;

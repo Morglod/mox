@@ -21,6 +21,7 @@ struct Arena {
 };
 
 const ARENA_ALIGN : i64 = 8;
+const ARENA_ZERO_ON_POP : bool = false;
 
 fn arena_ptr_at(arena: *Arena, pos: i64): *u8 {
     return arena.cast(*u8) |> byte_offset(pos);
@@ -130,9 +131,10 @@ fn arena_push_str_copy_c(arena: *Arena, s: []u8): []u8 {
 }
 
 fn arena_pop_to(arena: *Arena, new_pos: i64, size: i64): void {
-    old_pos := arena.pos;
     arena.pos = new_pos;
-    mem_set(arena_ptr_at(arena, new_pos), 0, size);
+    #if (ARENA_ZERO_ON_POP) {
+        mem_set(arena_ptr_at(arena, new_pos), 0, size);
+    }
 }
 
 fn arena_pop_to(arena: *Arena, pos: i64): void {
@@ -163,9 +165,6 @@ fn _arena_alloc_fn(allocator_data: *u8, mode: AllocatorFnMode, size: i64, align:
     if (mode == .realloc) {
         panic("arena realloc is not supported");
     }
-    if (mode == .free) {
-        panic("arena free is not supported");
-    }
     return nullptr(u8);
 }
 
@@ -174,4 +173,11 @@ fn arena_as_allocator(arena: *Arena): *Alloc {
     alloc.func = _arena_alloc_fn.^;
     alloc.data = arena.cast(*u8);
     return alloc;
+}
+
+// the arena behind an allocator made by arena_as_allocator; nullptr for any other allocator
+fn arena_from_allocator(alloc: *Alloc): *Arena {
+    if (alloc == nullptr(Alloc)) { return nullptr(Arena); }
+    if (alloc.func != _arena_alloc_fn.^) { return nullptr(Arena); }
+    return alloc.data.cast(*Arena);
 }

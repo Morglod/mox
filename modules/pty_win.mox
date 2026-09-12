@@ -1,5 +1,5 @@
 import "./internal.mox";
-import "./alloc.mox";
+import "./context.mox";
 import "./os_win.mox";
 
 // CreatePseudoConsole wants a COORD packed in a u32: cols in the low 16 bits, rows in the high 16
@@ -17,17 +17,16 @@ struct Pty {
 };
 
 // close whatever a failed pty_spawn already created; zero handles are skipped
-fn _pty_spawn_cleanup(alloc: *Alloc, in_read: u64, in_write: u64, out_read: u64, out_write: u64, hpc: u64, attr: *u8): void {
+fn _pty_spawn_cleanup(in_read: u64, in_write: u64, out_read: u64, out_write: u64, hpc: u64): void {
     if (hpc != 0)      { ClosePseudoConsole(hpc.cast(*u8)); }
     if (in_read != 0)  { CloseHandle(in_read.cast(*u8)); }
     if (in_write != 0) { CloseHandle(in_write.cast(*u8)); }
     if (out_read != 0) { CloseHandle(out_read.cast(*u8)); }
     if (out_write != 0){ CloseHandle(out_write.cast(*u8)); }
-    if (attr != nullptr(u8)) { mem_free(alloc, attr); }
 }
 
 // spawn `cmd` (CreateProcessA needs it writable and NUL-terminated) in a cols x rows pty
-fn pty_spawn(alloc: *Alloc, cmd: *u8, cols: i64, rows: i64, out: *Pty): bool {
+fn pty_spawn(cmd: *u8, cols: i64, rows: i64, out: *Pty): bool {
     out.cols = max(cols, 1).cast(u32);
     out.rows = max(rows, 1).cast(u32);
     out.alive = false;
@@ -43,30 +42,29 @@ fn pty_spawn(alloc: *Alloc, cmd: *u8, cols: i64, rows: i64, out: *Pty): bool {
     out_read: u64 = 0;
     out_write: u64 = 0;
     hpc: u64 = 0;
-    attr := nullptr(u8);
     if (CreatePipe(in_read.^, in_write.^, nullptr(u8), 0) == 0) { return false; }
     if (CreatePipe(out_read.^, out_write.^, nullptr(u8), 0) == 0) {
-        _pty_spawn_cleanup(alloc, in_read, in_write, 0, 0, 0, attr);
+        _pty_spawn_cleanup(in_read, in_write, 0, 0, 0);
         return false;
     }
 
     hr := CreatePseudoConsole(_pty_pack_size(out.cols, out.rows), in_read.cast(*u8), out_write.cast(*u8), 0, hpc.^);
     if (hr != 0) {
-        _pty_spawn_cleanup(alloc, in_read, in_write, out_read, out_write, 0, attr);
+        _pty_spawn_cleanup(in_read, in_write, out_read, out_write, 0);
         return false;
     }
 
     // attribute list that hands the pseudo-console to the child
     attr_size: u64 = 0;
     InitializeProcThreadAttributeList(nullptr(u8), 1, 0, attr_size.^); // first call always fails, it only fills attr_size
-    attr = mem_alloc(alloc, attr_size.cast(i64), 8);
+    attr := #temp_buffer(attr_size.cast(i64)).ptr;
     if (InitializeProcThreadAttributeList(attr, 1, 0, attr_size.^) == 0) {
-        _pty_spawn_cleanup(alloc, in_read, in_write, out_read, out_write, hpc, attr);
+        _pty_spawn_cleanup(in_read, in_write, out_read, out_write, hpc);
         return false;
     }
     if (UpdateProcThreadAttribute(attr, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, hpc.cast(*u8), 8, nullptr(u8), nullptr(u64)) == 0) {
-        DeleteProcThreadAttributeList(attr); // initialized above, tear down before freeing
-        _pty_spawn_cleanup(alloc, in_read, in_write, out_read, out_write, hpc, attr);
+        DeleteProcThreadAttributeList(attr);
+        _pty_spawn_cleanup(in_read, in_write, out_read, out_write, hpc);
         return false;
     }
 
@@ -79,13 +77,12 @@ fn pty_spawn(alloc: *Alloc, cmd: *u8, cols: i64, rows: i64, out: *Pty): bool {
     ok := CreateProcessA(nullptr(u8), cmd, nullptr(u8), nullptr(u8), 0, EXTENDED_STARTUPINFO_PRESENT, nullptr(u8), nullptr(u8), siex.^, pi.^);
     if (ok == 0) {
         DeleteProcThreadAttributeList(attr);
-        _pty_spawn_cleanup(alloc, in_read, in_write, out_read, out_write, hpc, attr);
+        _pty_spawn_cleanup(in_read, in_write, out_read, out_write, hpc);
         return false;
     }
 
     // the child holds its own reference to hpc once CreateProcess returns, the attribute list can go
     DeleteProcThreadAttributeList(attr);
-    mem_free(alloc, attr);
 
     // the child ends belong to the pty now
     CloseHandle(in_read.cast(*u8));
