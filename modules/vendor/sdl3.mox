@@ -3,6 +3,7 @@
 // Prefix filter: SDL_
 
 import "internal.mox";
+import "./sdl3/link.mox";
 
 // Opaque types (forward-declared structs without definitions)
 const SDL_Environment := u64;  // opaque type

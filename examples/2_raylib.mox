@@ -1,6 +1,8 @@
 import "std.mox";
 import "vendor/raylib.mox";
-const raylib_link := import "vendor/raylib/link.mox";
+
+// mox ./examples/2_raylib.mox -o=./build/raylib_example
+// raylib dlls will be copied to output directory
 
 fn show_simple_window(window_title: *u8) {
     InitWindow(800, 600, window_title.cast(*const i8));
@@ -20,6 +22,7 @@ fn show_simple_window(window_title: *u8) {
         // here we pass link_comptime=true
         // which links raylib to compiler's runtime
         // so now we can run raylib inside compilation itself!
+        const raylib_link := import "vendor/raylib/link.mox";
         raylib_link.link_raylib(true);
         show_simple_window("comptime hello");
     };

@@ -863,7 +863,8 @@ fn os_clipboard_set(text: []u8): void { os_clipboard_set(text.ptr, 0 .cast(u32),
 fn os_clipboard_get(buf: []u8): u32 { return os_clipboard_get(buf.ptr, buf.len.cast(u32)); }
 
 fn os_get_env(name: []u8, alloc: *Alloc = get_context_temp_arena_as_alloc()): []u8 {
-    env := posix_getenv(#temp_c_string(name, alloc));
+    name_c := #temp_c_string(name, alloc);
+    env := posix_getenv(name_c);
     if (env == 0) {
         return empty_slice(u8);
     }

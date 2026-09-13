@@ -3,6 +3,14 @@
 import "./internal.mox";
 import "./file.mox";
 import "./assert.mox";
+import "./format.mox";
+import "./os.mox";
+import "./string.mox";
+import "./slice.mox";
+import "./parse_float.mox";
+
+const MOX_BUILD_INSTALL_DEPS_STRING := #run os_get_env("MOX_INSTALL_DEPS");
+const MOX_BUILD_INSTALL_DEPS := MOX_BUILD_INSTALL_DEPS_STRING.len != 0 && MOX_BUILD_INSTALL_DEPS_STRING != "false";
 
 fn build_resolve_path(path: []u8, loc: MoxSourceLocation = #caller_location): []u8 {
     if (fs_path_is_abs(path)) {
@@ -17,4 +25,46 @@ fn build_copy_to_output(src_path: []u8, loc: MoxSourceLocation = #caller_locatio
     const output_dir := __compiler_output_dir();
     dst_path := fs_path_join(output_dir, fs_path_basename(src_path));
     assert(fs_copy_file(src_path, dst_path), "build_copy_to_output failed for src=\"{}\" dst=\"{}\"", .{ src_path; dst_path; }, loc);
+}
+
+// eg build_linux_check_glibc_version("2.39")
+fn build_linux_check_glibc_version(version: []u8): bool {
+    ver1 := 0.0f64; parse_float(version, ver1.^);
+    ver2s := os_exec_output("getconf GNU_LIBC_VERSION | cut -d' ' -f2") |> trim();
+    ver2 := 0.0f64; parse_float(ver2s, ver2.^);
+    return ver1 <= ver2;
+}
+
+enum BuildUnixPackageManager : u8 {
+    None;
+    AptGet;
+    Dnf;
+    Yum;
+    Pacman;
+    Zypper;
+    Apk;
+    Brew;
+};
+
+fn build_unix_get_package_manager(): BuildUnixPackageManager {
+    name := os_exec_output("for pm in apt-get dnf yum pacman zypper apk brew; do command -v $pm >/dev/null && echo $pm && break; done") |> trim();
+    if (name == "apt-get") { return .AptGet; }
+    if (name == "dnf") { return .Dnf; }
+    if (name == "yum") { return .Yum; }
+    if (name == "pacman") { return .Pacman; }
+    if (name == "Zypper") { return .Zypper; }
+    if (name == "apk") { return .Apk; }
+    if (name == "brew") { return .Brew; }
+    return .None;
+}
+
+fn build_unix_dll_available(name: []u8): bool {
+    return os_exec_output(#format_temp("ldconfig -p | grep -q {} && echo 1 || echo 0", .{ name; })) == "1";
+}
+
+fn build_contains_install_deps(name: []u8): bool {
+    if (!MOX_BUILD_INSTALL_DEPS) {
+        return false;
+    }
+    return MOX_BUILD_INSTALL_DEPS_STRING == "all" || MOX_BUILD_INSTALL_DEPS_STRING == "true" || contains(MOX_BUILD_INSTALL_DEPS_STRING, name);
 }

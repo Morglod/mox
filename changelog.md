@@ -1,3 +1,19 @@
+## 0.1.4
+
+### Compiler
+
+Fixed interpreter `defer` that directly calls a function and poisons original returned value.
+
+Fixed comptime function pointers taken in one module and used from another.
+
+### Modules
+
+Raylib link.mox autodiscovering on Linux
+
+SDL3 prebuild shipped
+
+Unix build tools updated
+
 ## 0.1.3
 
 Better build tools, better temporary memory handling in std  

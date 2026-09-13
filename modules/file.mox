@@ -60,6 +60,7 @@ fn fs_path_normalize_inplace(path: []u8): []u8 {
 // dir + "/" + name
 // the separator is added only when dir does not end with one.
 fn fs_path_join(dir: []u8, name: []u8, alloc: *Alloc = get_context_temp_arena_as_alloc()): []u8 {
+    name = trim_left(name, "./");
     has_sep := (name.len > 0) && (dir.len > 0) && (dir[dir.len - 1] != PATH_SEPARATOR);
     out := mem_alloc_slice(alloc, u8, dir.len + has_sep.cast(i64) + name.len);
     mem_copy(out, dir);

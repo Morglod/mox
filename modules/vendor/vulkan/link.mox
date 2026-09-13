@@ -1,0 +1,36 @@
+import "internal.mox";
+import "build.mox";
+import "format.mox";
+
+fn link_vulkan($link_comptime: bool): void {
+    #run {
+        link_path := "";
+        dll_path := "";
+
+        switch (MOX_OS) {
+            case .Windows:
+                link_path = build_resolve_path("./vulkan-1.lib");
+                dll_path = "vulkan-1.dll";
+            case .Linux:
+                link_path = "libvulkan.so.1";
+                dll_path = "libvulkan.so.1";
+            case .Darwin:
+                println("\n\nvulkan binaries on Darwin is not shipped yet, link it manually\n\n");
+                return;
+            case .Unknown:
+        }
+
+        __compiler_link_lib(link_path, false);
+        if ($link_comptime) {
+            __compiler_link_lib(dll_path, true);
+        }
+    };
+}
+
+#run link_vulkan(false);
+
+// example of comptime usage:
+// #run {
+//     link_vulkan(true);
+//     use vulkan here
+// }

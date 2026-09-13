@@ -2,8 +2,7 @@ import "std.mox";
 import "vendor/sdl3.mox";
 
 // mox ./tests/2_sdl3.mox
-#run os_stdout_write("\n\nchange path to libSDL3.dll.a at 10 line of examples/2_sdl3.mox\n\n");
-#run __compiler_append_linker("libSDL3.dll.a");
+// sdl3 dlls will be copied to output directory
 
 fn #fail($fmt: []u8, values: $T) {
     println($fmt, values);

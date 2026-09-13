@@ -102,6 +102,12 @@ fn contains(s: []$T, val: []$T): bool {
     return index_of(s, val) != -1;
 }
 
+fn trim_left(s: []$T, strip: []$T): []$T {
+    start_from := index_of_not(s, strip);
+    if (start_from == -1) { return s; }
+    return slice(s, start_from);
+}
+
 fn empty_slice($T: __type_ptr): []$T {
     out: []$T = #memory_garbage;
     out.ptr = nullptr($T);
