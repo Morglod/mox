@@ -42,7 +42,7 @@ Compiler emits obj file on JIT and LLVM backends, but by default runs external l
 mox help
 mox ./hello.mox
 mox compile="./hello.mox" backend=llvm
-mox ./hello.mox -O3 -o ./hello
+mox ./hello.mox -O3 -o=./hello
 ```
 
 ## Some feature highlights
