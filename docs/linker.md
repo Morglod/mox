@@ -104,7 +104,7 @@ If msvc clang can not find system libraries:
 
     - run `x64 Native Tools Command Prompt for VS20..`
 
-    - or run `vcvarsall.bat x64` in cmd
+    - or run `vcvarsall.bat x64` in cmd, somewhere from `C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\`
 
     - or use "Developer Profile" in Windows Terminal
 
