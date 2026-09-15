@@ -23,13 +23,15 @@ To know language better, you can read [./by_example.mox](./by_example.mox)
 
 ## Download link
 
+[Prerequisites](./docs/1_prerequisites.md)
+
 Zip archive already contains both versions of compiler and base modules.  
 
-* [0.1.4 (x86_64 win/linux)](https://github.com/Morglod/mox/releases/download/0.1.4/mox_014_140926.zip)
-
-*Later smaller version without LLVM backend will be added (few megabytes)*
+* [0.1.4 (x86_64 Windows/Linux)](https://github.com/Morglod/mox/releases/download/0.1.4/mox_014_140926.zip)
 
 *For highlighting you can use C or Go or Rust for now*
+
+*Later smaller version without LLVM backend will be added (few megabytes)*
 
 ## CLI
 
@@ -43,6 +45,8 @@ mox help
 mox ./hello.mox
 mox compile="./hello.mox" backend=llvm
 mox ./hello.mox -O3 -o=./hello
+mox ./hello.mox linker=false
+mox ./hello.mox linker="g++ -o :MOX_LINKER_OUT:"
 ```
 
 ## Some feature highlights

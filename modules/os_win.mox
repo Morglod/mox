@@ -7,6 +7,8 @@ import "./arena.mox";
 import "./alloc.mox";
 import "./string.mox";
 
+#run __compiler_link_lib("user32", false);
+
 // Wrapper over HANDLE
 const OsFile := #type u64;
 

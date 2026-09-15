@@ -18,14 +18,16 @@ fn show_simple_window(window_title: *u8) {
 #linkc fn main(): i32 {
     show_simple_window("runtime hello");
 
-    #run {
-        // here we pass link_comptime=true
-        // which links raylib to compiler's runtime
-        // so now we can run raylib inside compilation itself!
-        const raylib_link := import "vendor/raylib/link.mox";
-        raylib_link.link_raylib(true);
-        show_simple_window("comptime hello");
-    };
+    // try uncommenting this to see raylib window at comptime!
+    
+    // #run {
+    //     // here we pass link_comptime=true
+    //     // which links raylib to compiler's runtime
+    //     // so now we can run raylib inside compilation itself!
+    //     const raylib_link := import "vendor/raylib/link.mox";
+    //     raylib_link.link_raylib(true);
+    //     show_simple_window("comptime hello");
+    // };
 
     return 0;
 }

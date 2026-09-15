@@ -1,3 +1,19 @@
+## 0.1.5
+
+Added documentation and tooling for setup
+
+Added clang install scripts for Windows
+
+### Compiler
+
+Args parsing fixed, now escaped \" and \\ inside string args works properly
+
+`$LINKER_OUT` substitutions and other, rewritten to `:MOX_LINKER_OUT:` form
+
+Now `mox help` prints all available substitutions
+
+If substitution is misspelled, but starts with `:MOX_`, error is printed and compiler panics
+
 ## 0.1.4
 
 ### Compiler
