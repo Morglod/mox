@@ -1,7 +1,7 @@
 Windows 11 x86_64  
 Intel Ultra 9 185H, laptop
 
-## Compilation speed
+## Compilation speed of simple 200k funcs
 
 |                  | emit exe  | vs mox | emit obj  | vs mox |
 |------------------|-----------|--------|-----------|--------|
@@ -31,6 +31,21 @@ time RUST_MIN_STACK=2147483648 rustc -C debuginfo=0 -C opt-level=0 ./200k.rs --e
 time odin build ./200k.odin -file -opt:0 -build-mode:obj
 ```
 
+## Compilation speed of 25k generics over 8 types
+
+|                  | emit exe  | vs mox |
+|------------------|-----------|--------|
+| mox 0.1.6 jit    | 1.24 sec  |   1.0x |
+| mox 0.1.6 llvm   | 15.48 sec |  12.5x |
+| rustc 1.96.1     | 43.56 sec |  35.1x |
+| clang++ 19.1.3   | 39.64 sec |  32.0x |
+| odin dev-2026-08 | 59.09 sec |  47.7x |
+
+```bash
+node ./generate_generics.js
+bash ./run_generics.sh
+```
+
 ## Rapidhash
 
 MB/s, higher is better
@@ -41,7 +56,7 @@ MB/s, higher is better
 
 ns/op, less is better
 
-mox HashMap vs robin_hood::unordered_flat_map
+mox HashMap vs robin_hood::unordered_flat_map  
 mox SwissMap vs phmap::flat_hash_map
 
 ![](./map_bench.png)
