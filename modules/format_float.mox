@@ -378,7 +378,7 @@ fn _div100_u32(x: u64): u64 {
 // store the two ascii chars of nn (0..99) at address p. dt is _FMT_DIGITS2.ptr,
 // hoisted by the caller so the global is not reloaded on every store.
 fn _fmt_store_pair(p: u64, dt: u64, nn: u64): void {
-    if (#is_comptime) {
+    if (#is_interp) {
         p.cast(*u8).* = (dt + nn * 2).cast(*u8).*;
         (p + 1).cast(*u8).* = (dt + nn * 2 + 1).cast(*u8).*;
     } else {
@@ -456,7 +456,7 @@ fn _fmt_digits_backward(endp: u64, v: u64): u64 {
 // >= 7 bytes of slack past the true end). Returns p + n.
 fn _fmt_fill_zeros(p: u64, n: u64): u64 {
     end := p + n;
-    if (#is_comptime) {
+    if (#is_interp) {
         while (p < end) {
             p.cast(*u8).* = 48;
             p += 1;
@@ -474,7 +474,7 @@ fn _fmt_fill_zeros(p: u64, n: u64): u64 {
 // buffers). Returns dst + n.
 fn _fmt_copy_digits(dst: u64, src: u64, n: u64): u64 {
     out := dst + n;
-    if (#is_comptime) {
+    if (#is_interp) {
         mem_copy(dst.cast(*u8), src.cast(*u8), n.cast(i64));
     } else {
         end := src + n;

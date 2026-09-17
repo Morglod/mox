@@ -86,7 +86,7 @@ fn _dynarr_grow(arr: *DynArr($T), add: i64): void {
     _dynarr_realloc(arr, newcap);
 }
 
-fn dynarr_init(arr: *DynArr($T), alloc: *Alloc, cap: i64): void {
+fn dynarr_init(arr: *DynArr($T), alloc: *Alloc, cap: i64 = 0): void {
     arr.alloc = alloc;
     arr.storage = nullptr(#type DynArrStorage($T));
     if (cap > 0) {

@@ -4,65 +4,65 @@ import "format.mox";
 import "os.mox";
 
 fn link_raylib($link_comptime: bool): void {
-    #run {
-        link_path := "";
-        dll_path := "";
+    if (!#is_comptime) { return; }
 
-        switch (MOX_OS) {
-            case .Windows:
-                link_path = build_resolve_path("./win64_mingw/libraylibdll.a");
-                dll_path = build_resolve_path("./win64_mingw/raylib.dll");
-            case .Linux:
-                __compiler_append_linker("-Wl,-rpath,'$ORIGIN'");
-                __compiler_link_lib("m", false);
-                if (build_linux_check_glibc_version("2.39")) {
-                    link_path = build_resolve_path("./linux64/libraylib.so.600");
-                    dll_path = build_resolve_path("./linux64/libraylib.so.600");
-                } else {
-                    if (build_unix_dll_available("libraylib.so")) {
-                        link_path = "libraylib.so";
-                        dll_path = "libraylib.so";
-                    }
-                    // else if (build_contains_install_deps("raylib")) {
-                    //     cmd := "";
-                    //     switch (build_unix_get_package_manager()) {
-                    //         case .AptGet: cmd = "sudo apt-get install -y libraylib-dev";
-                    //         case .Dnf: cmd = "sudo dnf install -y raylib-devel";
-                    //         case .Pacman: cmd = "sudo pacman -S --noconfirm raylib";
-                    //         case .Zypper: cmd = "sudo zypper install -y raylib-devel";
-                    //         case .Apk: cmd = "sudo apk add raylib-dev";
-                    //         case .Brew: cmd = "brew install raylib";
-                    //         case:
-                    //     }
-                    //     if (cmd.len == 0) {
-                    //         println("\nunsupported package manager to install raylib at {}\n", .{ build_resolve_path("./link.mox"); });
-                    //         return;
-                    //     }
-                    //     if (os_exec(cmd) != 0) {
-                    //         println("\nfailed to install package with \"{}\" at {}\n", .{ cmd; build_resolve_path("./link.mox"); });
-                    //         return;
-                    //     }
-                    //     link_path = "libraylib.so";
-                    //     dll_path = "libraylib.so";
-                    // }
-                    else {
-                        println("\nprecompiled raylib are only for 2.39 glibc, install and link raylib manually or specify it in {}\nor run compiler with MOX_INSTALL_DEPS=true\n", .{ build_resolve_path("./link.mox"); });
-                    }
-                    return;
+    link_path := "";
+    dll_path := "";
+
+    switch (MOX_OS) {
+        case .Windows:
+            link_path = build_resolve_path("./win64_mingw/libraylibdll.a");
+            dll_path = build_resolve_path("./win64_mingw/raylib.dll");
+        case .Linux:
+            __compiler_append_linker("-Wl,-rpath,'$ORIGIN'");
+            __compiler_link_lib("m", false);
+            if (build_linux_check_glibc_version("2.39")) {
+                link_path = build_resolve_path("./linux64/libraylib.so.600");
+                dll_path = build_resolve_path("./linux64/libraylib.so.600");
+            } else {
+                if (build_unix_dll_available("libraylib.so")) {
+                    link_path = "libraylib.so";
+                    dll_path = "libraylib.so";
                 }
-            case .Darwin:
-                link_path = build_resolve_path("./macos64/libraylib.dylib");
-                dll_path = build_resolve_path("./macos64/libraylib.dylib");
-                __compiler_append_linker("-Wl,-rpath,@executable_path");
-            case .Unknown:
-        }
+                // else if (build_contains_install_deps("raylib")) {
+                //     cmd := "";
+                //     switch (build_unix_get_package_manager()) {
+                //         case .AptGet: cmd = "sudo apt-get install -y libraylib-dev";
+                //         case .Dnf: cmd = "sudo dnf install -y raylib-devel";
+                //         case .Pacman: cmd = "sudo pacman -S --noconfirm raylib";
+                //         case .Zypper: cmd = "sudo zypper install -y raylib-devel";
+                //         case .Apk: cmd = "sudo apk add raylib-dev";
+                //         case .Brew: cmd = "brew install raylib";
+                //         case:
+                //     }
+                //     if (cmd.len == 0) {
+                //         println("\nunsupported package manager to install raylib at {}\n", .{ build_resolve_path("./link.mox"); });
+                //         return;
+                //     }
+                //     if (os_exec(cmd) != 0) {
+                //         println("\nfailed to install package with \"{}\" at {}\n", .{ cmd; build_resolve_path("./link.mox"); });
+                //         return;
+                //     }
+                //     link_path = "libraylib.so";
+                //     dll_path = "libraylib.so";
+                // }
+                else {
+                    println("\nprecompiled raylib are only for 2.39 glibc, install and link raylib manually or specify it in {}\nor run compiler with MOX_INSTALL_DEPS=true\n", .{ build_resolve_path("./link.mox"); });
+                }
+                return;
+            }
+        case .Darwin:
+            link_path = build_resolve_path("./macos64/libraylib.dylib");
+            dll_path = build_resolve_path("./macos64/libraylib.dylib");
+            __compiler_append_linker("-Wl,-rpath,@executable_path");
+        case .Unknown:
+    }
 
-        __compiler_link_lib(link_path, false);
-        if ($link_comptime) {
-            __compiler_link_lib(dll_path, true);
-        }
-        build_copy_to_output(dll_path);
-    };
+    __compiler_link_lib(link_path, false);
+    if ($link_comptime) {
+        __compiler_link_lib(dll_path, true);
+    }
+    build_copy_to_output(dll_path);
 }
 
 #run link_raylib(false);

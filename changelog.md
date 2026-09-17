@@ -1,3 +1,25 @@
+## 0.1.6
+
+Docs on how to work with memory
+
+### Compiler
+
+Removed comptime builtins that duplicated `*MoxType` reflection:
+`__compiler_sizeof`, `__compiler_members_count`, `__compiler_member_type`, `__compiler_member_offset`, `__compiler_type_kind`, `__compiler_comptime_alloc` / `*_realloc` / `*_free` (use allocators), `__compiler_print`, `__compiler_print_i32`, `__interp_break`, `__compiler_assert_known_type`, `__compiler_get_type_of_value`, `__compiler_comptime_ptr_to_runtime_const_slice`, `__mox_jit_load_symbol`
+
+`__type_equal` now takes `(__type_ptr, __type_ptr)` instead of "unknown" value type
+
+`#is_interp` builtin added to check if current place is running inside interpreter (useful for loop and recursion, where compiler stack could exceed)
+
+### Modules
+
+`internal.mox`:
+`sizeof_type` now just reads `MoxType.size`  
+`mox_struct_fields`, `mox_struct_field_type` as a replacement for removed __compiler_* builtins.  
+`__compiler_member_index_of_type` renamed to `mox_struct_field_index_of_type`.
+
+`#is_comptime` is now fully in mox, so now exactly same code could run in comptime and runtime with this check
+
 ## 0.1.5
 
 Added documentation and tooling for setup

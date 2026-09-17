@@ -208,7 +208,8 @@ fn format(dst: []u8, offset: i64, $fmt_str: []u8, values: $T): i64 {
     #run {
         i : i64 = 0;
         value_index : i64 = 0;
-        members_count := __compiler_members_count($T);
+        fields := mox_struct_fields($T);
+        members_count := fields.len;
 
         while (i < $fmt_str.len) {
             if ($fmt_str[i] == char("\\")) {
@@ -225,9 +226,9 @@ fn format(dst: []u8, offset: i64, $fmt_str: []u8, values: $T): i64 {
                     panic("format(\"{}\") expected to have more values", .{ $fmt_str; });
                 }
 
-                member_offset := __compiler_member_offset($T, value_index);
-                member_type := __compiler_member_type($T, value_index);
-                member_type_kind := __compiler_type_kind(member_type).cast(MoxTypeKind);
+                member_offset := fields[value_index].memory_offset.cast(u64);
+                member_type := fields[value_index].type.cast(__type_ptr);
+                member_type_kind := fields[value_index].type.kind;
 
                 if (is_string_type(member_type)) {
                     #emit {
@@ -260,7 +261,8 @@ fn format_len($fmt_str: []u8, values: $T): i64 {
     #run {
         i : i64 = 0;
         value_index : i64 = 0;
-        members_count := __compiler_members_count($T);
+        fields := mox_struct_fields($T);
+        members_count := fields.len;
 
         while (i < $fmt_str.len) {
             if ($fmt_str[i] == char("\\")) {
@@ -275,9 +277,9 @@ fn format_len($fmt_str: []u8, values: $T): i64 {
                 if (value_index >= members_count) {
                     panic("format_len(\"{}\") expected to have more values", .{ $fmt_str; });
                 }
-                member_offset := __compiler_member_offset($T, value_index);
-                member_type := __compiler_member_type($T, value_index);
-                member_type_kind := __compiler_type_kind(member_type).cast(MoxTypeKind);
+                member_offset := fields[value_index].memory_offset.cast(u64);
+                member_type := fields[value_index].type.cast(__type_ptr);
+                member_type_kind := fields[value_index].type.kind;
 
                 if (is_string_type(member_type)) {
                     #emit {

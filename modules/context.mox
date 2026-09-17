@@ -58,6 +58,11 @@ fn get_context_alloc(): *Alloc {
     return thread_local_get(_context_alloc.^);
 }
 
+fn set_context_alloc(alloc: *Alloc): *Alloc {
+    _require_context_init();
+    return thread_local_swap(_context_alloc.^, alloc);
+}
+
 fn _check_scratch_index(i: i64): void {
     if (i < 0 || i >= SCRATCH_ARENA_COUNT) {
         panic("scratch arena index {} is out of range (SCRATCH_ARENA_COUNT = {})", .{ i; SCRATCH_ARENA_COUNT; });

@@ -1,10 +1,14 @@
 // compiler internals and base utils
 
+#is_comptime: bool = false;
+#run #is_comptime = true;
+
 const usize := u64;
 const isize := i64;
 
 const __mox_slice_length_type := i64;
 
+// weak reference hooks to os.mox
 #linkc fn __mox_mem_alloc(size: i64, align: u32): *u8;
 #linkc fn __mox_mem_realloc(old_mem: *u8, new_size: i64, align: u32): *u8;
 #linkc fn __mox_mem_free(mem: *u8): void;
@@ -112,33 +116,59 @@ struct MoxSourceLocation {
     line: u64;
 };
 
-// compiler builtins, always available, no declaration needed:
-// fn __mox_jit_load_symbol(dll_path: *u8, func_name: *u8): *u8
-// fn __compiler_comptime_ptr_to_runtime_const_slice($ptr: *u8, $size: u32): []u8
-// fn __compiler_sizeof($type): i64
-// fn __compiler_print_i32(str: *u8, value: i32): void
-// fn __compiler_assert_known_type($type): void
-// fn __compiler_print_type($type): void
-// fn __compiler_print($str: *u8): void
-// fn __type_equal($type1, $type2): bool
-// fn __interp_break(): void
-// fn __compiler_get_type_of_value(value): Type
-// fn __compiler_platform(): MoxPlatform;
-// fn __compiler_members_count($type): i64;
-// fn __compiler_member_type($type, index: i64): Type;
-// fn __compiler_type_kind($type): u8 // cast to MoxTypeKind;
-// fn __compiler_member_offset($type, index: i64): *MEMBER_TYPE;
-// fn __compiler_link_lib(path: []u8, load_in_comptime: bool): void
-// fn __compiler_append_linker(str: []u8): void
-// fn __compiler_parse(code: []u8): __ast_ptr
-// fn __compiler_ast_to_string(__ast_ptr): []u8
-// __compiler_module_file_path
+// fn __type_equal(a: __type_ptr, b: __type_ptr): bool
+// fn __compiler_print_type(t: __type_ptr): void
+// fn __compiler_platform(): u8   cast to MoxPlatform
+// fn __compiler_parse(code: []u8): __ast_ptr   parses in the CALLER module
+// fn __compiler_ast_to_string(ast: __ast_ptr): []u8
 // fn __compiler_output_dir(): []u8   with trailing "/": linked exe's dir, else the `out` file's
-// __compiler_comptime_alloc
-// __compiler_comptime_realloc
-// __compiler_comptime_free
+// fn __compiler_internal_module_file_path(module_id: u64): []u8
+// fn __compiler_internal_link_lib(path: []u8, load_in_comptime: bool): void
+// fn __compiler_internal_append_linker(str: []u8): void
 // __mox_source_path_table
 // __mox_source_path_count
+
+const _MoxHookModuleFilePath: __type_ptr = #type fn(module_id: u64): []u8;
+const _MoxHookLinkLib: __type_ptr = #type fn(path: []u8, comptime_too: bool): void;
+const _MoxHookAppendLinker: __type_ptr = #type fn(args: []u8): void;
+
+struct _MoxCompilerHooks {
+    module_file_path: *_MoxHookModuleFilePath;
+    link_lib: *_MoxHookLinkLib;
+    append_linker: *_MoxHookAppendLinker;
+};
+
+_mox_comptime_hooks: _MoxCompilerHooks = 0;
+#run {
+    _mox_comptime_hooks.module_file_path = __compiler_internal_module_file_path.^;
+    _mox_comptime_hooks.link_lib = __compiler_internal_link_lib.^;
+    _mox_comptime_hooks.append_linker = __compiler_internal_append_linker.^;
+}
+
+// source file path of a module by id at comptime; empty slice at runtime
+// use get_source_location_file_path
+fn __compiler_module_file_path(module_id: u64): []u8 {
+    if (_mox_comptime_hooks.module_file_path != nullptr(_MoxHookModuleFilePath)) {
+        return _mox_comptime_hooks.module_file_path(module_id);
+    }
+    out: []u8 = 0;
+    return out;
+}
+
+// when comptime_too=true, dynamically loads library by specified path to comptime context
+// when comptime_too=false, add library to linker 
+fn __compiler_link_lib(path: []u8, comptime_too: bool): void {
+    if (_mox_comptime_hooks.link_lib != nullptr(_MoxHookLinkLib)) {
+        _mox_comptime_hooks.link_lib(path, comptime_too);
+    }
+}
+
+// appends " " + args to the external linker command
+fn __compiler_append_linker(args: []u8): void {
+    if (_mox_comptime_hooks.append_linker != nullptr(_MoxHookAppendLinker)) {
+        _mox_comptime_hooks.append_linker(args);
+    }
+}
 
 fn __mox_dangerously_format_to_type_ptr($type_ptr: u64): __type_ptr {
     return $type_ptr.cast(*MoxType).cast(__type_ptr);
@@ -166,8 +196,16 @@ const MAX_U32: u32 = 4294967295;
 const MOX_IS_DEBUG: bool = false;
 
 fn sizeof_type($T: __type_ptr): i64 {
-    sz := #run __compiler_sizeof($T);
-    return sz;
+    const sz := $T.cast(*MoxType).size;
+    return sz.cast(i64);
+}
+
+fn mox_struct_fields($T: __type_ptr): []MoxType_StructField {
+    return $T.cast(*MoxType).cast(*MoxType_Struct).fields;
+}
+
+fn mox_struct_field_type($T: __type_ptr, i: i64): __type_ptr {
+    return $T.cast(*MoxType).cast(*MoxType_Struct).fields[i].type.cast(__type_ptr);
 }
 
 fn type_union($T1: __type_ptr, $T2: __type_ptr): __type_ptr {
@@ -467,11 +505,11 @@ fn is_string_type($T: __type_ptr): bool {
 }
 
 // index of the first member of struct $S whose type is $T, -1 if there is none.
-fn __compiler_member_index_of_type($S: __type_ptr, $T: __type_ptr): i64 {
+fn mox_struct_field_index_of_type($S: __type_ptr, $T: __type_ptr): i64 {
     target := $T.cast(*MoxType).cast(u64);
-    n := __compiler_members_count($S);
-    for (i : it_range(n)) {
-        if (__compiler_member_type($S, i).cast(*MoxType).cast(u64) == target) {
+    fields := mox_struct_fields($S);
+    for (i : it_range(fields.len)) {
+        if (fields[i].type.cast(u64) == target) {
             return i;
         }
     }

@@ -63,7 +63,13 @@ fn thread_local_set(storage: *ThreadLocalStorage($T), value: $T): bool {
 }
 
 fn thread_local_swap(storage: *ThreadLocalStorage($T), value: $T): $T {
-    prev_value := thread_local_get(storage).*;
-    thread_local_set(storage, value);
-    return prev_value;
+    #if ($T.cast(*MoxType).kind == .Ptr) {
+        prev_value := thread_local_get(storage);
+        thread_local_set(storage, value);
+        return prev_value;
+    } else {
+        prev_value := thread_local_get(storage).*;
+        thread_local_set(storage, value);
+        return prev_value;
+    }
 }
