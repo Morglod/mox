@@ -60,6 +60,27 @@ c_str := #temp_c_string("hello world");
 c_str := #temp_c_string("hello world", conflict_arena);
 ```
 
+## Pointer arithmetics
+
+Currently there is no pointer arithmetics at all (later maybe it could be enabled for scope).  
+But there are byte_offset and ty_offset utils that could be used to do same thing:
+
+```rust
+ptr : *i32 = ...;
+
+// ptr + 8 bytes
+ptr2 := byte_offset(ptr, 8);
+
+// same with pipe operator
+ptr2 = ptr |> byte_offset(10);
+
+// ptr + 2 * 4 bytes
+ptr3 := ty_offset(ptr, 2);
+ptr3 = ptr |> ty_offset(2);
+
+ptr2 == ptr3;
+```
+
 ## Current allocator
 
 To get current (thread local) allocator, use `fn get_context_alloc(): *Alloc`.
