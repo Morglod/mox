@@ -1,0 +1,265 @@
+import "std.mox";
+import "vendor/raylib.mox";
+
+struct Asteroid {
+    points: [6]Vector2;
+    points_count: i32;
+    pos: Vector2;
+    vel: Vector2;
+    dead: bool;
+}
+
+struct Bullet {
+    pos: Vector2;
+    vel: Vector2;
+    dead: bool;
+}
+
+struct Player {
+    pos: Vector2;
+    vel: Vector2;
+
+    hp: i32;
+    rot: f32;
+    score: i32;
+
+    // triangle describing visuals of Player
+    p1: Vector2;
+    p2: Vector2;
+    p3: Vector2;
+}
+
+const PLAYER_INITIAL_HP : i32 = 3;
+
+fn game() {
+    alloc := get_context_alloc();
+
+    asteroids := mem_alloc(alloc, DynArr(Asteroid));
+    defer mem_free(alloc, asteroids);
+
+    dynarr_init(asteroids, alloc);
+    defer dynarr_free(asteroids);
+
+    bullets := mem_alloc(alloc, DynArr(Bullet));
+    defer mem_free(alloc, bullets);
+
+    dynarr_init(bullets, alloc);
+    defer dynarr_free(bullets);
+
+    player := mem_alloc(alloc, Player);
+    defer mem_free(alloc, player);
+    player.* = 0;
+    player.pos = .{ 300; 300; };
+    player.hp = PLAYER_INITIAL_HP;
+
+    const WINDOW_W := 1200;
+    const WINDOW_H := 1200;
+
+    InitWindow(WINDOW_W, WINDOW_H, "mox asteroids");
+
+    window_a := [2]f32.{ 0; 0; };
+    window_b := [2]f32.{ WINDOW_W; WINDOW_H; };
+
+    ast_spawn_timer := 0.0f;
+
+    while (!WindowShouldClose()) {
+        BeginDrawing();
+        defer EndDrawing();
+        ClearBackground(COLOR_BLACK);
+
+        dt := GetFrameTime();
+
+        // death screen
+        if (player.hp <= 0) {
+            DrawText("DEAD", WINDOW_W / 2, WINDOW_H / 2 - 40, 40, COLOR_RED);
+
+            text := #format_temp("SCORE: {}\0", .{ player.score; });
+            DrawText(text.ptr, WINDOW_W / 2, WINDOW_H / 2, 40, COLOR_YELLOW);
+
+            DrawText("PRESS SPACE", WINDOW_W / 2, WINDOW_H / 2 + 40, 40, COLOR_WHITE);
+
+            if (IsKeyReleased(KEY_SPACE)) {
+                player.hp = PLAYER_INITIAL_HP;
+                player.score = 0;
+                player.vel = 0;
+                dynarr_reset(asteroids);
+                dynarr_reset(bullets);
+            }
+            continue;
+        }
+
+        ast_spawn_timer += dt;
+
+        // spawn asteroids
+        if (ast_spawn_timer >= 1.0f) {
+            spawn_border := GetRandomValue(0, 3);
+            border : [4][2]f32 = .{
+                .{ GetRandomValue(0, WINDOW_W).cast(f32); 0; };
+                .{ GetRandomValue(0, WINDOW_W).cast(f32); WINDOW_H; };
+                .{ 0; GetRandomValue(0, WINDOW_H).cast(f32); };
+                .{ WINDOW_W; GetRandomValue(0, WINDOW_H).cast(f32); };
+            };
+            ast: Asteroid = #memory_garbage;
+            spawn_pos := border[spawn_border];
+            point_count := GetRandomValue(3, 6);
+            for (ip : it_range(point_count)) {
+                ast.points[ip] = .{
+                    GetRandomValue(-20, 20).cast(f32);
+                    GetRandomValue(-20, 20).cast(f32);
+                };
+            }
+
+            fn sort_counter_clock_wise(a_: *Vector2, b_: *Vector2): bool {
+                a := a_.*;
+                b := b_.*;
+                ha := a.y < 0 || (a.y == 0 && a.x < 0);
+                hb := b.y < 0 || (b.y == 0 && b.x < 0);
+                if (ha != hb) { return ha < hb; }
+                c := cross(a, b);
+                if (c != 0) { return c > 0; }
+                return length_sq(a) < length_sq(b);
+            }
+            slice(ast.points.^, 0, point_count) |> sort_quick(#run sort_counter_clock_wise.^);
+
+            ast.points_count = point_count;
+            ast.pos = spawn_pos;
+            ast.vel = .{
+                GetRandomValue(-100, 100).cast(f32);
+                GetRandomValue(-100, 100).cast(f32);
+            };
+            ast.dead = false;
+
+            push(asteroids, ast);
+
+            ast_spawn_timer = 0;
+        }
+
+        // draw and update asteroids
+        for (i : it_range(asteroids.len)) {
+            #alias ast = asteroids.items[i];
+            if (ast.dead) {
+                continue;
+            }
+            ast.pos += ast.vel * dt;
+            ast.pos = wrap_in_rect(ast.pos, window_a, window_b);
+
+            points := ast.points;
+
+            for (ip : it_range(ast.points_count)) {
+                points[ip] += ast.pos;
+            }
+
+            DrawLineStrip(points.ptr, ast.points_count, COLOR_WHITE);
+            DrawLineV(points[0], points[ast.points_count - 1], COLOR_WHITE);
+
+            // collide with player
+            if (CheckCollisionPointPoly(player.p1, points.ptr, ast.points_count)) {
+                player.hp -= 1;
+                ast.dead = true;
+            }
+            else if (CheckCollisionPointPoly(player.p2, points.ptr, ast.points_count)) {
+                player.hp -= 1;
+                ast.dead = true;
+            }
+            else if (CheckCollisionPointPoly(player.p3, points.ptr, ast.points_count)) {
+                player.hp -= 1;
+                ast.dead = true;
+            }
+            
+            // collide with bullet
+            for (ib : it_range(bullets.len)) {
+                #alias bullet = bullets.items[ib];
+                if (bullet.dead) {
+                    continue;
+                }
+
+                if (CheckCollisionPointPoly(bullet.pos, points.ptr, ast.points_count)) {
+                    ast.dead = true;
+                    bullet.dead = true;
+                    player.score += 1;
+                }
+            }
+        }
+
+        // draw and update player
+        player_look_dir := angle_degree_to_direction(player.rot);
+
+        if (IsKeyDown(KEY_W) || IsKeyDown(KEY_UP)) {
+            player.vel += player_look_dir * 50.0f * dt;
+        }
+        if (IsKeyDown(KEY_S) || IsKeyDown(KEY_DOWN)) {
+            player.vel -= player_look_dir * 50.0f * dt;
+        }
+        if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT)) {
+            player.rot -= 180.0f * dt;
+        }
+        if (IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT)) {
+            player.rot += 180.0f * dt;
+        }
+        const player_size := 20.0f;
+
+        player.pos += player.vel * dt;
+        player.pos = wrap_in_rect(player.pos, window_a, window_b);
+
+        {
+            p1 := player_look_dir * player_size + player.pos;
+            p2 := angle_degree_to_direction(player.rot - 160.0f) * player_size + player.pos;
+            p3 := angle_degree_to_direction(player.rot + 160.0f) * player_size + player.pos;
+
+            player.p1 = p1;
+            player.p2 = p2;
+            player.p3 = p3;
+
+            DrawLineV(p1, p2, COLOR_GREEN);
+            DrawLineV(p2, p3, COLOR_GREEN);
+            DrawLineV(p3, p1, COLOR_GREEN);
+
+            hp_text := #format_temp("HP: {}\0", .{ player.hp; });
+            DrawText(hp_text.ptr, 0, 5, 40, COLOR_RED);
+
+            hp_text := #format_temp("SCORE: {}\0", .{ player.score; });
+            DrawText(hp_text.ptr, 0, 45, 40, COLOR_YELLOW);
+        }
+
+        // shoot
+        if (IsKeyReleased(KEY_SPACE)) {
+            spawn_pos := player_look_dir * player_size + player.pos;
+            push(bullets, Bullet.{
+                pos = spawn_pos;
+                vel = player_look_dir * 400.0f;
+                dead = false;
+            });
+        }
+
+        // draw and update bullets
+        for (ib : it_range(bullets.len)) {
+            #alias bullet = bullets.items[ib];
+
+            if (bullet.dead) {
+                continue;
+            }
+            bullet.pos += bullet.vel * dt;
+
+            bullet.pos = wrap_in_rect(bullet.pos, window_a, window_b);
+
+            DrawCircleV(bullet.pos, 5.0f, COLOR_RED);
+        }
+
+        // remove all dead
+        fn remove_dead_asteroids(a: *Asteroid): bool { return a.dead; }
+        remove_if(asteroids, remove_dead_asteroids);
+
+        fn remove_dead_bullets(a: *Bullet): bool { return a.dead; }
+        remove_if(bullets, remove_dead_bullets);
+    }
+}
+
+#linkc fn main(): i32 {
+    // #run {
+    //     const link := import "vendor/raylib/link.mox";
+    //     link.link_raylib(true);
+    //     game();
+    // };
+    game();
+    return 0;
+}

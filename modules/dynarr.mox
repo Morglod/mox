@@ -135,3 +135,30 @@ fn pop_back(arr: *DynArr($T)): void {
         arr.storage.len -= 1;
     }
 }
+
+fn remove_if(arr: *DynArr($T), pred: *fn (x: *$T): bool): void {
+    if (arr.storage == 0) { return; }
+    w := 0i64;
+    for (i : it_range(arr.storage.len)) {
+        item_ptr := dynarr_at(arr, i);
+        if (!pred(item_ptr)) {
+            dynarr_at(arr, w).* = item_ptr.*;
+            w += 1;
+        }
+    }
+    arr.storage.len = w;
+}
+
+fn remove_at(arr: *DynArr($T), i: i64): void {
+    if (arr.storage == 0) { return; }
+    len := arr.storage.len;
+    if (i < 0 || i >= len) { return; }
+
+    tail := len - i - 1;
+    if (tail > 0) {
+        dst := dynarr_at(arr, i);
+        src := dynarr_at(arr, i + 1);
+        mem_copy(dst.cast(*u8), src.cast(*u8), sizeof_type($T) * tail);
+    }
+    arr.storage.len -= 1;
+}

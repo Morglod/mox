@@ -2891,9 +2891,9 @@ struct VkAllocationCallbacks {
 struct VkApplicationInfo {
     sType: VkStructureType;
     pNext: *const u8;
-    pApplicationName: *const i8;
+    pApplicationName: *const u8;
     applicationVersion: u32;
-    pEngineName: *const i8;
+    pEngineName: *const u8;
     engineVersion: u32;
     apiVersion: u32;
 };
@@ -2918,9 +2918,9 @@ struct VkInstanceCreateInfo {
     flags: VkInstanceCreateFlags;
     pApplicationInfo: *const VkApplicationInfo;
     enabledLayerCount: u32;
-    ppEnabledLayerNames: *const *const i8;
+    ppEnabledLayerNames: *const *const u8;
     enabledExtensionCount: u32;
-    ppEnabledExtensionNames: *const *const i8;
+    ppEnabledExtensionNames: *const *const u8;
 };
 
 struct VkMemoryHeap {
@@ -3150,9 +3150,9 @@ struct VkDeviceCreateInfo {
     queueCreateInfoCount: u32;
     pQueueCreateInfos: *const VkDeviceQueueCreateInfo;
     enabledLayerCount: u32;
-    ppEnabledLayerNames: *const *const i8;
+    ppEnabledLayerNames: *const *const u8;
     enabledExtensionCount: u32;
-    ppEnabledExtensionNames: *const *const i8;
+    ppEnabledExtensionNames: *const *const u8;
     pEnabledFeatures: *const VkPhysicalDeviceFeatures;
 };
 
@@ -3475,7 +3475,7 @@ struct VkPipelineShaderStageCreateInfo {
     flags: VkPipelineShaderStageCreateFlags;
     stage: VkShaderStageFlagBits;
     module: VkShaderModule;
-    pName: *const i8;
+    pName: *const u8;
     pSpecializationInfo: *const VkSpecializationInfo;
 };
 
@@ -3899,12 +3899,12 @@ const PFN_vkGetPhysicalDeviceImageFormatProperties : __type_ptr = #type *fn(_arg
 const PFN_vkGetPhysicalDeviceProperties : __type_ptr = #type *fn(_arg0: VkPhysicalDevice, _arg1: *VkPhysicalDeviceProperties): void;
 const PFN_vkGetPhysicalDeviceQueueFamilyProperties : __type_ptr = #type *fn(_arg0: VkPhysicalDevice, _arg1: *u32, _arg2: *VkQueueFamilyProperties): void;
 const PFN_vkGetPhysicalDeviceMemoryProperties : __type_ptr = #type *fn(_arg0: VkPhysicalDevice, _arg1: *VkPhysicalDeviceMemoryProperties): void;
-const PFN_vkGetInstanceProcAddr : __type_ptr = #type *fn(_arg0: VkInstance, _arg1: *const i8): PFN_vkVoidFunction;
-const PFN_vkGetDeviceProcAddr : __type_ptr = #type *fn(_arg0: VkDevice, _arg1: *const i8): PFN_vkVoidFunction;
+const PFN_vkGetInstanceProcAddr : __type_ptr = #type *fn(_arg0: VkInstance, _arg1: *const u8): PFN_vkVoidFunction;
+const PFN_vkGetDeviceProcAddr : __type_ptr = #type *fn(_arg0: VkDevice, _arg1: *const u8): PFN_vkVoidFunction;
 const PFN_vkCreateDevice : __type_ptr = #type *fn(_arg0: VkPhysicalDevice, _arg1: *const VkDeviceCreateInfo, _arg2: *const VkAllocationCallbacks, _arg3: *VkDevice): VkResult;
 const PFN_vkDestroyDevice : __type_ptr = #type *fn(_arg0: VkDevice, _arg1: *const VkAllocationCallbacks): void;
-const PFN_vkEnumerateInstanceExtensionProperties : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *u32, _arg2: *VkExtensionProperties): VkResult;
-const PFN_vkEnumerateDeviceExtensionProperties : __type_ptr = #type *fn(_arg0: VkPhysicalDevice, _arg1: *const i8, _arg2: *u32, _arg3: *VkExtensionProperties): VkResult;
+const PFN_vkEnumerateInstanceExtensionProperties : __type_ptr = #type *fn(_arg0: *const u8, _arg1: *u32, _arg2: *VkExtensionProperties): VkResult;
+const PFN_vkEnumerateDeviceExtensionProperties : __type_ptr = #type *fn(_arg0: VkPhysicalDevice, _arg1: *const u8, _arg2: *u32, _arg3: *VkExtensionProperties): VkResult;
 const PFN_vkEnumerateInstanceLayerProperties : __type_ptr = #type *fn(_arg0: *u32, _arg1: *VkLayerProperties): VkResult;
 const PFN_vkEnumerateDeviceLayerProperties : __type_ptr = #type *fn(_arg0: VkPhysicalDevice, _arg1: *u32, _arg2: *VkLayerProperties): VkResult;
 const PFN_vkGetDeviceQueue : __type_ptr = #type *fn(_arg0: VkDevice, _arg1: u32, _arg2: u32, _arg3: *VkQueue): void;
@@ -4036,12 +4036,12 @@ const PFN_vkCmdEndRenderPass : __type_ptr = #type *fn(_arg0: VkCommandBuffer): v
 #linkc fn vkGetPhysicalDeviceProperties(physicalDevice: VkPhysicalDevice, pProperties: *VkPhysicalDeviceProperties): void;
 #linkc fn vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice: VkPhysicalDevice, pQueueFamilyPropertyCount: *u32, pQueueFamilyProperties: *VkQueueFamilyProperties): void;
 #linkc fn vkGetPhysicalDeviceMemoryProperties(physicalDevice: VkPhysicalDevice, pMemoryProperties: *VkPhysicalDeviceMemoryProperties): void;
-#linkc fn vkGetInstanceProcAddr(instance: VkInstance, pName: *const i8): PFN_vkVoidFunction;
-#linkc fn vkGetDeviceProcAddr(device: VkDevice, pName: *const i8): PFN_vkVoidFunction;
+#linkc fn vkGetInstanceProcAddr(instance: VkInstance, pName: *const u8): PFN_vkVoidFunction;
+#linkc fn vkGetDeviceProcAddr(device: VkDevice, pName: *const u8): PFN_vkVoidFunction;
 #linkc fn vkCreateDevice(physicalDevice: VkPhysicalDevice, pCreateInfo: *const VkDeviceCreateInfo, pAllocator: *const VkAllocationCallbacks, pDevice: *VkDevice): VkResult;
 #linkc fn vkDestroyDevice(device: VkDevice, pAllocator: *const VkAllocationCallbacks): void;
-#linkc fn vkEnumerateInstanceExtensionProperties(pLayerName: *const i8, pPropertyCount: *u32, pProperties: *VkExtensionProperties): VkResult;
-#linkc fn vkEnumerateDeviceExtensionProperties(physicalDevice: VkPhysicalDevice, pLayerName: *const i8, pPropertyCount: *u32, pProperties: *VkExtensionProperties): VkResult;
+#linkc fn vkEnumerateInstanceExtensionProperties(pLayerName: *const u8, pPropertyCount: *u32, pProperties: *VkExtensionProperties): VkResult;
+#linkc fn vkEnumerateDeviceExtensionProperties(physicalDevice: VkPhysicalDevice, pLayerName: *const u8, pPropertyCount: *u32, pProperties: *VkExtensionProperties): VkResult;
 #linkc fn vkEnumerateInstanceLayerProperties(pPropertyCount: *u32, pProperties: *VkLayerProperties): VkResult;
 #linkc fn vkEnumerateDeviceLayerProperties(physicalDevice: VkPhysicalDevice, pPropertyCount: *u32, pProperties: *VkLayerProperties): VkResult;
 #linkc fn vkGetDeviceQueue(device: VkDevice, queueFamilyIndex: u32, queueIndex: u32, pQueue: *VkQueue): void;
@@ -7404,7 +7404,7 @@ struct VkDisplayPlanePropertiesKHR {
 
 struct VkDisplayPropertiesKHR {
     display: VkDisplayKHR;
-    displayName: *const i8;
+    displayName: *const u8;
     physicalDimensions: VkExtent2D;
     physicalResolution: VkExtent2D;
     supportedTransforms: VkSurfaceTransformFlagsKHR;
@@ -12032,7 +12032,7 @@ enum VkDebugReportFlagBitsEXT : i32 {
 };
 
 const VkDebugReportFlagsEXT : __type_ptr = #type VkFlags;
-const PFN_vkDebugReportCallbackEXT : __type_ptr = #type *fn(_arg0: VkDebugReportFlagsEXT, _arg1: VkDebugReportObjectTypeEXT, _arg2: u64, _arg3: usize, _arg4: i32, _arg5: *const i8, _arg6: *const i8, _arg7: *u8): VkBool32;
+const PFN_vkDebugReportCallbackEXT : __type_ptr = #type *fn(_arg0: VkDebugReportFlagsEXT, _arg1: VkDebugReportObjectTypeEXT, _arg2: u64, _arg3: usize, _arg4: i32, _arg5: *const u8, _arg6: *const u8, _arg7: *u8): VkBool32;
 struct VkDebugReportCallbackCreateInfoEXT {
     sType: VkStructureType;
     pNext: *const u8;
@@ -12043,10 +12043,10 @@ struct VkDebugReportCallbackCreateInfoEXT {
 
 const PFN_vkCreateDebugReportCallbackEXT : __type_ptr = #type *fn(_arg0: VkInstance, _arg1: *const VkDebugReportCallbackCreateInfoEXT, _arg2: *const VkAllocationCallbacks, _arg3: *VkDebugReportCallbackEXT): VkResult;
 const PFN_vkDestroyDebugReportCallbackEXT : __type_ptr = #type *fn(_arg0: VkInstance, _arg1: VkDebugReportCallbackEXT, _arg2: *const VkAllocationCallbacks): void;
-const PFN_vkDebugReportMessageEXT : __type_ptr = #type *fn(_arg0: VkInstance, _arg1: VkDebugReportFlagsEXT, _arg2: VkDebugReportObjectTypeEXT, _arg3: u64, _arg4: usize, _arg5: i32, _arg6: *const i8, _arg7: *const i8): void;
+const PFN_vkDebugReportMessageEXT : __type_ptr = #type *fn(_arg0: VkInstance, _arg1: VkDebugReportFlagsEXT, _arg2: VkDebugReportObjectTypeEXT, _arg3: u64, _arg4: usize, _arg5: i32, _arg6: *const u8, _arg7: *const u8): void;
 #linkc fn vkCreateDebugReportCallbackEXT(instance: VkInstance, pCreateInfo: *const VkDebugReportCallbackCreateInfoEXT, pAllocator: *const VkAllocationCallbacks, pCallback: *VkDebugReportCallbackEXT): VkResult;
 #linkc fn vkDestroyDebugReportCallbackEXT(instance: VkInstance, callback: VkDebugReportCallbackEXT, pAllocator: *const VkAllocationCallbacks): void;
-#linkc fn vkDebugReportMessageEXT(instance: VkInstance, flags: VkDebugReportFlagsEXT, objectType: VkDebugReportObjectTypeEXT, object: u64, location: usize, messageCode: i32, pLayerPrefix: *const i8, pMessage: *const i8): void;
+#linkc fn vkDebugReportMessageEXT(instance: VkInstance, flags: VkDebugReportFlagsEXT, objectType: VkDebugReportObjectTypeEXT, object: u64, location: usize, messageCode: i32, pLayerPrefix: *const u8, pMessage: *const u8): void;
 enum VkRasterizationOrderAMD : i32 {
     VK_RASTERIZATION_ORDER_STRICT_AMD := 0;
     VK_RASTERIZATION_ORDER_RELAXED_AMD := 1;
@@ -12064,7 +12064,7 @@ struct VkDebugMarkerObjectNameInfoEXT {
     pNext: *const u8;
     objectType: VkDebugReportObjectTypeEXT;
     object: u64;
-    pObjectName: *const i8;
+    pObjectName: *const u8;
 };
 
 struct VkDebugMarkerObjectTagInfoEXT {
@@ -12080,7 +12080,7 @@ struct VkDebugMarkerObjectTagInfoEXT {
 struct VkDebugMarkerMarkerInfoEXT {
     sType: VkStructureType;
     pNext: *const u8;
-    pMarkerName: *const i8;
+    pMarkerName: *const u8;
     color: [4]f32;
 };
 
@@ -12174,7 +12174,7 @@ struct VkCuFunctionCreateInfoNVX {
     sType: VkStructureType;
     pNext: *const u8;
     module: VkCuModuleNVX;
-    pName: *const i8;
+    pName: *const u8;
 };
 
 struct VkCuLaunchInfoNVX {
@@ -12652,7 +12652,7 @@ const VkDebugUtilsMessengerCreateFlagsEXT : __type_ptr = #type VkFlags;
 struct VkDebugUtilsLabelEXT {
     sType: VkStructureType;
     pNext: *const u8;
-    pLabelName: *const i8;
+    pLabelName: *const u8;
     color: [4]f32;
 };
 
@@ -12661,16 +12661,16 @@ struct VkDebugUtilsObjectNameInfoEXT {
     pNext: *const u8;
     objectType: VkObjectType;
     objectHandle: u64;
-    pObjectName: *const i8;
+    pObjectName: *const u8;
 };
 
 struct VkDebugUtilsMessengerCallbackDataEXT {
     sType: VkStructureType;
     pNext: *const u8;
     flags: VkDebugUtilsMessengerCallbackDataFlagsEXT;
-    pMessageIdName: *const i8;
+    pMessageIdName: *const u8;
     messageIdNumber: i32;
-    pMessage: *const i8;
+    pMessage: *const u8;
     queueLabelCount: u32;
     pQueueLabels: *const VkDebugUtilsLabelEXT;
     cmdBufLabelCount: u32;
@@ -13976,7 +13976,7 @@ enum VkPerformanceValueTypeINTEL : i32 {
 };
 
 // Union VkPerformanceValueDataINTEL
-const VkPerformanceValueDataINTEL := #run u32 |> type_union(u64) |> type_union(f32) |> type_union(VkBool32) |> type_union(*const i8);
+const VkPerformanceValueDataINTEL := #run u32 |> type_union(u64) |> type_union(f32) |> type_union(VkBool32) |> type_union(*const u8);
 
 struct VkPerformanceValueINTEL {
     type: VkPerformanceValueTypeINTEL;
@@ -16454,7 +16454,7 @@ enum VkDirectDriverLoadingModeLUNARG : i32 {
 };
 
 const VkDirectDriverLoadingFlagsLUNARG : __type_ptr = #type VkFlags;
-const PFN_vkGetInstanceProcAddrLUNARG : __type_ptr = #type *fn(_arg0: VkInstance, _arg1: *const i8): PFN_vkVoidFunction;
+const PFN_vkGetInstanceProcAddrLUNARG : __type_ptr = #type *fn(_arg0: VkInstance, _arg1: *const u8): PFN_vkVoidFunction;
 struct VkDirectDriverLoadingInfoLUNARG {
     sType: VkStructureType;
     pNext: *u8;
@@ -16954,7 +16954,7 @@ struct VkShaderCreateInfoEXT {
     codeType: VkShaderCodeTypeEXT;
     codeSize: usize;
     pCode: *const u8;
-    pName: *const i8;
+    pName: *const u8;
     setLayoutCount: u32;
     pSetLayouts: *const VkDescriptorSetLayout;
     pushConstantRangeCount: u32;
@@ -17133,8 +17133,8 @@ enum VkLayerSettingTypeEXT : i32 {
 };
 
 struct VkLayerSettingEXT {
-    pLayerName: *const i8;
-    pSettingName: *const i8;
+    pLayerName: *const u8;
+    pSettingName: *const u8;
     type: VkLayerSettingTypeEXT;
     valueCount: u32;
     pValues: *const u8;
@@ -17342,7 +17342,7 @@ struct VkDataGraphPipelineResourceInfoARM {
 struct VkDataGraphPipelineCompilerControlCreateInfoARM {
     sType: VkStructureType;
     pNext: *const u8;
-    pVendorOptions: *const i8;
+    pVendorOptions: *const u8;
 };
 
 struct VkDataGraphPipelineCreateInfoARM {
@@ -17358,7 +17358,7 @@ struct VkDataGraphPipelineShaderModuleCreateInfoARM {
     sType: VkStructureType;
     pNext: *const u8;
     module: VkShaderModule;
-    pName: *const i8;
+    pName: *const u8;
     pSpecializationInfo: *const VkSpecializationInfo;
     constantCount: u32;
     pConstants: *const VkDataGraphPipelineConstantARM;

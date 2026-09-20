@@ -260,24 +260,29 @@ fn ptr_ty_diff(base: *$T, x: *$T): i64 {
 }
 
 fn mem_copy(dst: *u8, src: *u8, size: i64): void {
-    end := src |> byte_offset(size);
-    while (src != end) {
-        dst.* = src.*;
-        src = src |> byte_offset(1);
-        dst = dst |> byte_offset(1);
+    if (dst == src || size <= 0) { return; }
+
+    if (dst.cast(u64) < src.cast(u64) || dst.cast(u64) >= (src |> byte_offset(size)).cast(u64)) {
+        end := src |> byte_offset(size);
+        while (src != end) {
+            dst.* = src.*;
+            src = src |> byte_offset(1);
+            dst = dst |> byte_offset(1);
+        }
+    } else {
+        s := src |> byte_offset(size);
+        d := dst |> byte_offset(size);
+        while (s != src) {
+            s = s |> byte_offset(-1);
+            d = d |> byte_offset(-1);
+            d.* = s.*;
+        }
     }
 }
 
 fn mem_copy(dst: []$T, src: []$T): void {
     len := min(dst.len, src.len);
-    src_ptr := src.ptr;
-    dst_ptr := dst.ptr;
-    end := src_ptr |> ty_offset(len);
-    while (src_ptr != end) {
-        dst_ptr.* = src_ptr.*;
-        src_ptr = src_ptr |> ty_offset(1);
-        dst_ptr = dst_ptr |> ty_offset(1);
-    }
+    mem_copy(dst.ptr, src.ptr, len);
 }
 
 fn mem_set(dst: *u8, value: u8, size: i64): void {

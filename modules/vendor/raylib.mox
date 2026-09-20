@@ -9,23 +9,11 @@ const rAudioBuffer := u64;  // opaque type
 const rAudioProcessor := u64;  // opaque type
 const va_list := u64;  // opaque type
 
-struct Vector2 {
-    x: f32;
-    y: f32;
-};
+const Vector2 := #type [2]f32;
 
-struct Vector3 {
-    x: f32;
-    y: f32;
-    z: f32;
-};
+const Vector3 := #type [3]f32;
 
-struct Vector4 {
-    x: f32;
-    y: f32;
-    z: f32;
-    w: f32;
-};
+const Vector4 := #type [4]f32;
 
 const Quaternion : __type_ptr = #type Vector4;
 struct Matrix {
@@ -47,12 +35,7 @@ struct Matrix {
     m15: f32;
 };
 
-struct Color {
-    r: u8;
-    g: u8;
-    b: u8;
-    a: u8;
-};
+const Color := #type [4]u8;
 
 struct Rectangle {
     x: f32;
@@ -308,12 +291,12 @@ const Gesture : __type_ptr = #type i32;
 const CameraMode : __type_ptr = #type i32;
 const CameraProjection : __type_ptr = #type i32;
 const NPatchLayout : __type_ptr = #type i32;
-const TraceLogCallback : __type_ptr = #type *fn(_arg0: i32, _arg1: *const i8, _arg2: va_list): void;
-const LoadFileDataCallback : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *i32): *u8;
-const SaveFileDataCallback : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *u8, _arg2: i32): bool;
-const LoadFileTextCallback : __type_ptr = #type *fn(_arg0: *const i8): *i8;
-const SaveFileTextCallback : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *const i8): bool;
-#linkc fn InitWindow(width: i32, height: i32, title: *const i8): void;
+const TraceLogCallback : __type_ptr = #type *fn(_arg0: i32, _arg1: *const u8, _arg2: va_list): void;
+const LoadFileDataCallback : __type_ptr = #type *fn(_arg0: *const u8, _arg1: *i32): *u8;
+const SaveFileDataCallback : __type_ptr = #type *fn(_arg0: *const u8, _arg1: *u8, _arg2: i32): bool;
+const LoadFileTextCallback : __type_ptr = #type *fn(_arg0: *const u8): *i8;
+const SaveFileTextCallback : __type_ptr = #type *fn(_arg0: *const u8, _arg1: *const u8): bool;
+#linkc fn InitWindow(width: i32, height: i32, title: *const u8): void;
 #linkc fn CloseWindow(): void;
 #linkc fn WindowShouldClose(): bool;
 #linkc fn IsWindowReady(): bool;
@@ -333,7 +316,7 @@ const SaveFileTextCallback : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *co
 #linkc fn RestoreWindow(): void;
 #linkc fn SetWindowIcon(image: Image): void;
 #linkc fn SetWindowIcons(images: *Image, count: i32): void;
-#linkc fn SetWindowTitle(title: *const i8): void;
+#linkc fn SetWindowTitle(title: *const u8): void;
 #linkc fn SetWindowPosition(x: i32, y: i32): void;
 #linkc fn SetWindowMonitor(monitor: i32): void;
 #linkc fn SetWindowMinSize(width: i32, height: i32): void;
@@ -356,9 +339,9 @@ const SaveFileTextCallback : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *co
 #linkc fn GetMonitorRefreshRate(monitor: i32): i32;
 #linkc fn GetWindowPosition(): Vector2;
 #linkc fn GetWindowScaleDPI(): Vector2;
-#linkc fn GetMonitorName(monitor: i32): *const i8;
-#linkc fn SetClipboardText(text: *const i8): void;
-#linkc fn GetClipboardText(): *const i8;
+#linkc fn GetMonitorName(monitor: i32): *const u8;
+#linkc fn SetClipboardText(text: *const u8): void;
+#linkc fn GetClipboardText(): *const u8;
 #linkc fn GetClipboardImage(): Image;
 #linkc fn EnableEventWaiting(): void;
 #linkc fn DisableEventWaiting(): void;
@@ -387,11 +370,11 @@ const SaveFileTextCallback : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *co
 #linkc fn EndVrStereoMode(): void;
 #linkc fn LoadVrStereoConfig(device: VrDeviceInfo): VrStereoConfig;
 #linkc fn UnloadVrStereoConfig(config: VrStereoConfig): void;
-#linkc fn LoadShader(vsFileName: *const i8, fsFileName: *const i8): Shader;
-#linkc fn LoadShaderFromMemory(vsCode: *const i8, fsCode: *const i8): Shader;
+#linkc fn LoadShader(vsFileName: *const u8, fsFileName: *const u8): Shader;
+#linkc fn LoadShaderFromMemory(vsCode: *const u8, fsCode: *const u8): Shader;
 #linkc fn IsShaderValid(shader: Shader): bool;
-#linkc fn GetShaderLocation(shader: Shader, uniformName: *const i8): i32;
-#linkc fn GetShaderLocationAttrib(shader: Shader, attribName: *const i8): i32;
+#linkc fn GetShaderLocation(shader: Shader, uniformName: *const u8): i32;
+#linkc fn GetShaderLocationAttrib(shader: Shader, attribName: *const u8): i32;
 #linkc fn SetShaderValue(shader: Shader, locIndex: i32, value: *const u8, uniformType: i32): void;
 #linkc fn SetShaderValueV(shader: Shader, locIndex: i32, value: *const u8, uniformType: i32, count: i32): void;
 #linkc fn SetShaderValueMatrix(shader: Shader, locIndex: i32, mat: Matrix): void;
@@ -416,67 +399,67 @@ const SaveFileTextCallback : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *co
 #linkc fn GetRandomValue(min: i32, max: i32): i32;
 #linkc fn LoadRandomSequence(count: u32, min: i32, max: i32): *i32;
 #linkc fn UnloadRandomSequence(sequence: *i32): void;
-#linkc fn TakeScreenshot(fileName: *const i8): void;
+#linkc fn TakeScreenshot(fileName: *const u8): void;
 #linkc fn SetConfigFlags(flags: u32): void;
-#linkc fn OpenURL(url: *const i8): void;
+#linkc fn OpenURL(url: *const u8): void;
 #linkc fn SetTraceLogLevel(logLevel: i32): void;
-#linkc fn TraceLog(logLevel: i32, text: *const i8, _variadic_args: *u8): void;
+#linkc fn TraceLog(logLevel: i32, text: *const u8, _variadic_args: *u8): void;
 #linkc fn SetTraceLogCallback(callback: TraceLogCallback): void;
 #linkc fn MemAlloc(size: u32): *u8;
 #linkc fn MemRealloc(ptr: *i32, size: u32): *u8;
 #linkc fn MemFree(ptr: *i32): void;
-#linkc fn LoadFileData(fileName: *const i8, dataSize: *i32): *u8;
+#linkc fn LoadFileData(fileName: *const u8, dataSize: *i32): *u8;
 #linkc fn UnloadFileData(data: *u8): void;
-#linkc fn SaveFileData(fileName: *const i8, data: *u8, dataSize: i32): bool;
-#linkc fn ExportDataAsCode(data: *const u8, dataSize: i32, fileName: *const i8): bool;
-#linkc fn LoadFileText(fileName: *const i8): *i8;
+#linkc fn SaveFileData(fileName: *const u8, data: *u8, dataSize: i32): bool;
+#linkc fn ExportDataAsCode(data: *const u8, dataSize: i32, fileName: *const u8): bool;
+#linkc fn LoadFileText(fileName: *const u8): *i8;
 #linkc fn UnloadFileText(text: *i8): void;
-#linkc fn SaveFileText(fileName: *const i8, text: *const i8): bool;
+#linkc fn SaveFileText(fileName: *const u8, text: *const u8): bool;
 #linkc fn SetLoadFileDataCallback(callback: LoadFileDataCallback): void;
 #linkc fn SetSaveFileDataCallback(callback: SaveFileDataCallback): void;
 #linkc fn SetLoadFileTextCallback(callback: LoadFileTextCallback): void;
 #linkc fn SetSaveFileTextCallback(callback: SaveFileTextCallback): void;
-#linkc fn FileRename(fileName: *const i8, fileRename: *const i8): i32;
-#linkc fn FileRemove(fileName: *const i8): i32;
-#linkc fn FileCopy(srcPath: *const i8, dstPath: *const i8): i32;
-#linkc fn FileMove(srcPath: *const i8, dstPath: *const i8): i32;
-#linkc fn FileTextReplace(fileName: *const i8, search: *const i8, replacement: *const i8): i32;
-#linkc fn FileTextFindIndex(fileName: *const i8, search: *const i8): i32;
-#linkc fn FileExists(fileName: *const i8): bool;
-#linkc fn DirectoryExists(dirPath: *const i8): bool;
-#linkc fn IsFileExtension(fileName: *const i8, ext: *const i8): bool;
-#linkc fn GetFileLength(fileName: *const i8): i32;
-#linkc fn GetFileModTime(fileName: *const i8): i32;
-#linkc fn GetFileExtension(fileName: *const i8): *const i8;
-#linkc fn GetFileName(filePath: *const i8): *const i8;
-#linkc fn GetFileNameWithoutExt(filePath: *const i8): *const i8;
-#linkc fn GetDirectoryPath(filePath: *const i8): *const i8;
-#linkc fn GetPrevDirectoryPath(dirPath: *const i8): *const i8;
-#linkc fn GetWorkingDirectory(): *const i8;
-#linkc fn GetApplicationDirectory(): *const i8;
-#linkc fn MakeDirectory(dirPath: *const i8): i32;
-#linkc fn ChangeDirectory(dirPath: *const i8): bool;
-#linkc fn IsPathFile(path: *const i8): bool;
-#linkc fn IsFileNameValid(fileName: *const i8): bool;
-#linkc fn LoadDirectoryFiles(dirPath: *const i8): FilePathList;
-#linkc fn LoadDirectoryFilesEx(basePath: *const i8, filter: *const i8, scanSubdirs: bool): FilePathList;
+#linkc fn FileRename(fileName: *const u8, fileRename: *const u8): i32;
+#linkc fn FileRemove(fileName: *const u8): i32;
+#linkc fn FileCopy(srcPath: *const u8, dstPath: *const u8): i32;
+#linkc fn FileMove(srcPath: *const u8, dstPath: *const u8): i32;
+#linkc fn FileTextReplace(fileName: *const u8, search: *const u8, replacement: *const u8): i32;
+#linkc fn FileTextFindIndex(fileName: *const u8, search: *const u8): i32;
+#linkc fn FileExists(fileName: *const u8): bool;
+#linkc fn DirectoryExists(dirPath: *const u8): bool;
+#linkc fn IsFileExtension(fileName: *const u8, ext: *const u8): bool;
+#linkc fn GetFileLength(fileName: *const u8): i32;
+#linkc fn GetFileModTime(fileName: *const u8): i32;
+#linkc fn GetFileExtension(fileName: *const u8): *const u8;
+#linkc fn GetFileName(filePath: *const u8): *const u8;
+#linkc fn GetFileNameWithoutExt(filePath: *const u8): *const u8;
+#linkc fn GetDirectoryPath(filePath: *const u8): *const u8;
+#linkc fn GetPrevDirectoryPath(dirPath: *const u8): *const u8;
+#linkc fn GetWorkingDirectory(): *const u8;
+#linkc fn GetApplicationDirectory(): *const u8;
+#linkc fn MakeDirectory(dirPath: *const u8): i32;
+#linkc fn ChangeDirectory(dirPath: *const u8): bool;
+#linkc fn IsPathFile(path: *const u8): bool;
+#linkc fn IsFileNameValid(fileName: *const u8): bool;
+#linkc fn LoadDirectoryFiles(dirPath: *const u8): FilePathList;
+#linkc fn LoadDirectoryFilesEx(basePath: *const u8, filter: *const u8, scanSubdirs: bool): FilePathList;
 #linkc fn UnloadDirectoryFiles(files: FilePathList): void;
 #linkc fn IsFileDropped(): bool;
 #linkc fn LoadDroppedFiles(): FilePathList;
 #linkc fn UnloadDroppedFiles(files: FilePathList): void;
-#linkc fn GetDirectoryFileCount(dirPath: *const i8): u32;
-#linkc fn GetDirectoryFileCountEx(basePath: *const i8, filter: *const i8, scanSubdirs: bool): u32;
+#linkc fn GetDirectoryFileCount(dirPath: *const u8): u32;
+#linkc fn GetDirectoryFileCountEx(basePath: *const u8, filter: *const u8, scanSubdirs: bool): u32;
 #linkc fn CompressData(data: *const u8, dataSize: i32, compDataSize: *i32): *u8;
 #linkc fn DecompressData(compData: *const u8, compDataSize: i32, dataSize: *i32): *u8;
 #linkc fn EncodeDataBase64(data: *const u8, dataSize: i32, outputSize: *i32): *i8;
-#linkc fn DecodeDataBase64(text: *const i8, outputSize: *i32): *u8;
+#linkc fn DecodeDataBase64(text: *const u8, outputSize: *i32): *u8;
 #linkc fn ComputeCRC32(data: *u8, dataSize: i32): u32;
 #linkc fn ComputeMD5(data: *u8, dataSize: i32): *u32;
 #linkc fn ComputeSHA1(data: *u8, dataSize: i32): *u32;
 #linkc fn ComputeSHA256(data: *u8, dataSize: i32): *u32;
-#linkc fn LoadAutomationEventList(fileName: *const i8): AutomationEventList;
+#linkc fn LoadAutomationEventList(fileName: *const u8): AutomationEventList;
 #linkc fn UnloadAutomationEventList(list: AutomationEventList): void;
-#linkc fn ExportAutomationEventList(list: AutomationEventList, fileName: *const i8): bool;
+#linkc fn ExportAutomationEventList(list: AutomationEventList, fileName: *const u8): bool;
 #linkc fn SetAutomationEventList(list: *AutomationEventList): void;
 #linkc fn SetAutomationEventBaseFrame(frame: i32): void;
 #linkc fn StartAutomationEventRecording(): void;
@@ -489,10 +472,10 @@ const SaveFileTextCallback : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *co
 #linkc fn IsKeyUp(key: i32): bool;
 #linkc fn GetKeyPressed(): i32;
 #linkc fn GetCharPressed(): i32;
-#linkc fn GetKeyName(key: i32): *const i8;
+#linkc fn GetKeyName(key: i32): *const u8;
 #linkc fn SetExitKey(key: i32): void;
 #linkc fn IsGamepadAvailable(gamepad: i32): bool;
-#linkc fn GetGamepadName(gamepad: i32): *const i8;
+#linkc fn GetGamepadName(gamepad: i32): *const u8;
 #linkc fn IsGamepadButtonPressed(gamepad: i32, button: i32): bool;
 #linkc fn IsGamepadButtonDown(gamepad: i32, button: i32): bool;
 #linkc fn IsGamepadButtonReleased(gamepad: i32, button: i32): bool;
@@ -500,7 +483,7 @@ const SaveFileTextCallback : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *co
 #linkc fn GetGamepadButtonPressed(): i32;
 #linkc fn GetGamepadAxisCount(gamepad: i32): i32;
 #linkc fn GetGamepadAxisMovement(gamepad: i32, axis: i32): f32;
-#linkc fn SetGamepadMappings(mappings: *const i8): i32;
+#linkc fn SetGamepadMappings(mappings: *const u8): i32;
 #linkc fn SetGamepadVibration(gamepad: i32, leftMotor: f32, rightMotor: f32, duration: f32): void;
 #linkc fn IsMouseButtonPressed(button: i32): bool;
 #linkc fn IsMouseButtonDown(button: i32): bool;
@@ -600,18 +583,18 @@ const SaveFileTextCallback : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *co
 #linkc fn CheckCollisionPointPoly(point: Vector2, points: *const Vector2, pointCount: i32): bool;
 #linkc fn CheckCollisionLines(startPos1: Vector2, endPos1: Vector2, startPos2: Vector2, endPos2: Vector2, collisionPoint: *Vector2): bool;
 #linkc fn GetCollisionRec(rec1: Rectangle, rec2: Rectangle): Rectangle;
-#linkc fn LoadImage(fileName: *const i8): Image;
-#linkc fn LoadImageRaw(fileName: *const i8, width: i32, height: i32, format: i32, headerSize: i32): Image;
-#linkc fn LoadImageAnim(fileName: *const i8, frames: *i32): Image;
-#linkc fn LoadImageAnimFromMemory(fileType: *const i8, fileData: *const u8, dataSize: i32, frames: *i32): Image;
-#linkc fn LoadImageFromMemory(fileType: *const i8, fileData: *const u8, dataSize: i32): Image;
+#linkc fn LoadImage(fileName: *const u8): Image;
+#linkc fn LoadImageRaw(fileName: *const u8, width: i32, height: i32, format: i32, headerSize: i32): Image;
+#linkc fn LoadImageAnim(fileName: *const u8, frames: *i32): Image;
+#linkc fn LoadImageAnimFromMemory(fileType: *const u8, fileData: *const u8, dataSize: i32, frames: *i32): Image;
+#linkc fn LoadImageFromMemory(fileType: *const u8, fileData: *const u8, dataSize: i32): Image;
 #linkc fn LoadImageFromTexture(texture: Texture2D): Image;
 #linkc fn LoadImageFromScreen(): Image;
 #linkc fn IsImageValid(image: Image): bool;
 #linkc fn UnloadImage(image: Image): void;
-#linkc fn ExportImage(image: Image, fileName: *const i8): bool;
-#linkc fn ExportImageToMemory(image: Image, fileType: *const i8, fileSize: *i32): *u8;
-#linkc fn ExportImageAsCode(image: Image, fileName: *const i8): bool;
+#linkc fn ExportImage(image: Image, fileName: *const u8): bool;
+#linkc fn ExportImageToMemory(image: Image, fileType: *const u8, fileSize: *i32): *u8;
+#linkc fn ExportImageAsCode(image: Image, fileName: *const u8): bool;
 #linkc fn GenImageColor(width: i32, height: i32, color: Color): Image;
 #linkc fn GenImageGradientLinear(width: i32, height: i32, direction: i32, start: Color, end: Color): Image;
 #linkc fn GenImageGradientRadial(width: i32, height: i32, density: f32, inner: Color, outer: Color): Image;
@@ -620,12 +603,12 @@ const SaveFileTextCallback : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *co
 #linkc fn GenImageWhiteNoise(width: i32, height: i32, factor: f32): Image;
 #linkc fn GenImagePerlinNoise(width: i32, height: i32, offsetX: i32, offsetY: i32, scale: f32): Image;
 #linkc fn GenImageCellular(width: i32, height: i32, tileSize: i32): Image;
-#linkc fn GenImageText(width: i32, height: i32, text: *const i8): Image;
+#linkc fn GenImageText(width: i32, height: i32, text: *const u8): Image;
 #linkc fn ImageCopy(image: Image): Image;
 #linkc fn ImageFromImage(image: Image, rec: Rectangle): Image;
 #linkc fn ImageFromChannel(image: Image, selectedChannel: i32): Image;
-#linkc fn ImageText(text: *const i8, fontSize: i32, color: Color): Image;
-#linkc fn ImageTextEx(font: Font, text: *const i8, fontSize: f32, spacing: f32, tint: Color): Image;
+#linkc fn ImageText(text: *const u8, fontSize: i32, color: Color): Image;
+#linkc fn ImageTextEx(font: Font, text: *const u8, fontSize: f32, spacing: f32, tint: Color): Image;
 #linkc fn ImageFormat(image: *Image, newFormat: i32): void;
 #linkc fn ImageToPOT(image: *Image, fill: Color): void;
 #linkc fn ImageCrop(image: *Image, crop: Rectangle): void;
@@ -677,9 +660,9 @@ const SaveFileTextCallback : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *co
 #linkc fn ImageDrawTriangleFan(dst: *Image, points: *const Vector2, pointCount: i32, color: Color): void;
 #linkc fn ImageDrawTriangleStrip(dst: *Image, points: *const Vector2, pointCount: i32, color: Color): void;
 #linkc fn ImageDraw(dst: *Image, src: Image, srcRec: Rectangle, dstRec: Rectangle, tint: Color): void;
-#linkc fn ImageDrawText(dst: *Image, text: *const i8, posX: i32, posY: i32, fontSize: i32, color: Color): void;
-#linkc fn ImageDrawTextEx(dst: *Image, font: Font, text: *const i8, position: Vector2, fontSize: f32, spacing: f32, tint: Color): void;
-#linkc fn LoadTexture(fileName: *const i8): Texture2D;
+#linkc fn ImageDrawText(dst: *Image, text: *const u8, posX: i32, posY: i32, fontSize: i32, color: Color): void;
+#linkc fn ImageDrawTextEx(dst: *Image, font: Font, text: *const u8, position: Vector2, fontSize: f32, spacing: f32, tint: Color): void;
+#linkc fn LoadTexture(fileName: *const u8): Texture2D;
 #linkc fn LoadTextureFromImage(image: Image): Texture2D;
 #linkc fn LoadTextureCubemap(image: Image, layout: i32): TextureCubemap;
 #linkc fn LoadRenderTexture(width: i32, height: i32): RenderTexture2D;
@@ -716,64 +699,64 @@ const SaveFileTextCallback : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *co
 #linkc fn SetPixelColor(dstPtr: *i32, color: Color, format: i32): void;
 #linkc fn GetPixelDataSize(width: i32, height: i32, format: i32): i32;
 #linkc fn GetFontDefault(): Font;
-#linkc fn LoadFont(fileName: *const i8): Font;
-#linkc fn LoadFontEx(fileName: *const i8, fontSize: i32, codepoints: *const i32, codepointCount: i32): Font;
+#linkc fn LoadFont(fileName: *const u8): Font;
+#linkc fn LoadFontEx(fileName: *const u8, fontSize: i32, codepoints: *const i32, codepointCount: i32): Font;
 #linkc fn LoadFontFromImage(image: Image, key: Color, firstChar: i32): Font;
-#linkc fn LoadFontFromMemory(fileType: *const i8, fileData: *const u8, dataSize: i32, fontSize: i32, codepoints: *const i32, codepointCount: i32): Font;
+#linkc fn LoadFontFromMemory(fileType: *const u8, fileData: *const u8, dataSize: i32, fontSize: i32, codepoints: *const i32, codepointCount: i32): Font;
 #linkc fn IsFontValid(font: Font): bool;
 #linkc fn LoadFontData(fileData: *const u8, dataSize: i32, fontSize: i32, codepoints: *const i32, codepointCount: i32, type: i32, glyphCount: *i32): *GlyphInfo;
 #linkc fn GenImageFontAtlas(glyphs: *const GlyphInfo, glyphRecs: **Rectangle, glyphCount: i32, fontSize: i32, padding: i32, packMethod: i32): Image;
 #linkc fn UnloadFontData(glyphs: *GlyphInfo, glyphCount: i32): void;
 #linkc fn UnloadFont(font: Font): void;
-#linkc fn ExportFontAsCode(font: Font, fileName: *const i8): bool;
+#linkc fn ExportFontAsCode(font: Font, fileName: *const u8): bool;
 #linkc fn DrawFPS(posX: i32, posY: i32): void;
-#linkc fn DrawText(text: *const i8, posX: i32, posY: i32, fontSize: i32, color: Color): void;
-#linkc fn DrawTextEx(font: Font, text: *const i8, position: Vector2, fontSize: f32, spacing: f32, tint: Color): void;
-#linkc fn DrawTextPro(font: Font, text: *const i8, position: Vector2, origin: Vector2, rotation: f32, fontSize: f32, spacing: f32, tint: Color): void;
+#linkc fn DrawText(text: *const u8, posX: i32, posY: i32, fontSize: i32, color: Color): void;
+#linkc fn DrawTextEx(font: Font, text: *const u8, position: Vector2, fontSize: f32, spacing: f32, tint: Color): void;
+#linkc fn DrawTextPro(font: Font, text: *const u8, position: Vector2, origin: Vector2, rotation: f32, fontSize: f32, spacing: f32, tint: Color): void;
 #linkc fn DrawTextCodepoint(font: Font, codepoint: i32, position: Vector2, fontSize: f32, tint: Color): void;
 #linkc fn DrawTextCodepoints(font: Font, codepoints: *const i32, codepointCount: i32, position: Vector2, fontSize: f32, spacing: f32, tint: Color): void;
 #linkc fn SetTextLineSpacing(spacing: i32): void;
-#linkc fn MeasureText(text: *const i8, fontSize: i32): i32;
-#linkc fn MeasureTextEx(font: Font, text: *const i8, fontSize: f32, spacing: f32): Vector2;
+#linkc fn MeasureText(text: *const u8, fontSize: i32): i32;
+#linkc fn MeasureTextEx(font: Font, text: *const u8, fontSize: f32, spacing: f32): Vector2;
 #linkc fn MeasureTextCodepoints(font: Font, codepoints: *const i32, length: i32, fontSize: f32, spacing: f32): Vector2;
 #linkc fn GetGlyphIndex(font: Font, codepoint: i32): i32;
 #linkc fn GetGlyphInfo(font: Font, codepoint: i32): GlyphInfo;
 #linkc fn GetGlyphAtlasRec(font: Font, codepoint: i32): Rectangle;
 #linkc fn LoadUTF8(codepoints: *const i32, length: i32): *i8;
 #linkc fn UnloadUTF8(text: *i8): void;
-#linkc fn LoadCodepoints(text: *const i8, count: *i32): *i32;
+#linkc fn LoadCodepoints(text: *const u8, count: *i32): *i32;
 #linkc fn UnloadCodepoints(codepoints: *i32): void;
-#linkc fn GetCodepointCount(text: *const i8): i32;
-#linkc fn GetCodepoint(text: *const i8, codepointSize: *i32): i32;
-#linkc fn GetCodepointNext(text: *const i8, codepointSize: *i32): i32;
-#linkc fn GetCodepointPrevious(text: *const i8, codepointSize: *i32): i32;
-#linkc fn CodepointToUTF8(codepoint: i32, utf8Size: *i32): *const i8;
-#linkc fn LoadTextLines(text: *const i8, count: *i32): **i8;
+#linkc fn GetCodepointCount(text: *const u8): i32;
+#linkc fn GetCodepoint(text: *const u8, codepointSize: *i32): i32;
+#linkc fn GetCodepointNext(text: *const u8, codepointSize: *i32): i32;
+#linkc fn GetCodepointPrevious(text: *const u8, codepointSize: *i32): i32;
+#linkc fn CodepointToUTF8(codepoint: i32, utf8Size: *i32): *const u8;
+#linkc fn LoadTextLines(text: *const u8, count: *i32): **i8;
 #linkc fn UnloadTextLines(text: **i8, lineCount: i32): void;
-#linkc fn TextCopy(dst: *i8, src: *const i8): i32;
-#linkc fn TextIsEqual(text1: *const i8, text2: *const i8): bool;
-#linkc fn TextLength(text: *const i8): u32;
-#linkc fn TextFormat(text: *const i8, _variadic_args: *u8): *const i8;
-#linkc fn TextSubtext(text: *const i8, position: i32, length: i32): *const i8;
-#linkc fn TextRemoveSpaces(text: *const i8): *const i8;
-#linkc fn GetTextBetween(text: *const i8, begin: *const i8, end: *const i8): *i8;
-#linkc fn TextReplace(text: *const i8, search: *const i8, replacement: *const i8): *i8;
-#linkc fn TextReplaceAlloc(text: *const i8, search: *const i8, replacement: *const i8): *i8;
-#linkc fn TextReplaceBetween(text: *const i8, begin: *const i8, end: *const i8, replacement: *const i8): *i8;
-#linkc fn TextReplaceBetweenAlloc(text: *const i8, begin: *const i8, end: *const i8, replacement: *const i8): *i8;
-#linkc fn TextInsert(text: *const i8, insert: *const i8, position: i32): *i8;
-#linkc fn TextInsertAlloc(text: *const i8, insert: *const i8, position: i32): *i8;
-#linkc fn TextJoin(textList: **i8, count: i32, delimiter: *const i8): *i8;
-#linkc fn TextSplit(text: *const i8, delimiter: i8, count: *i32): **i8;
-#linkc fn TextAppend(text: *i8, append: *const i8, position: *i32): void;
-#linkc fn TextFindIndex(text: *const i8, search: *const i8): i32;
-#linkc fn TextToUpper(text: *const i8): *i8;
-#linkc fn TextToLower(text: *const i8): *i8;
-#linkc fn TextToPascal(text: *const i8): *i8;
-#linkc fn TextToSnake(text: *const i8): *i8;
-#linkc fn TextToCamel(text: *const i8): *i8;
-#linkc fn TextToInteger(text: *const i8): i32;
-#linkc fn TextToFloat(text: *const i8): f32;
+#linkc fn TextCopy(dst: *i8, src: *const u8): i32;
+#linkc fn TextIsEqual(text1: *const u8, text2: *const u8): bool;
+#linkc fn TextLength(text: *const u8): u32;
+#linkc fn TextFormat(text: *const u8, _variadic_args: *u8): *const u8;
+#linkc fn TextSubtext(text: *const u8, position: i32, length: i32): *const u8;
+#linkc fn TextRemoveSpaces(text: *const u8): *const u8;
+#linkc fn GetTextBetween(text: *const u8, begin: *const u8, end: *const u8): *i8;
+#linkc fn TextReplace(text: *const u8, search: *const u8, replacement: *const u8): *i8;
+#linkc fn TextReplaceAlloc(text: *const u8, search: *const u8, replacement: *const u8): *i8;
+#linkc fn TextReplaceBetween(text: *const u8, begin: *const u8, end: *const u8, replacement: *const u8): *i8;
+#linkc fn TextReplaceBetweenAlloc(text: *const u8, begin: *const u8, end: *const u8, replacement: *const u8): *i8;
+#linkc fn TextInsert(text: *const u8, insert: *const u8, position: i32): *i8;
+#linkc fn TextInsertAlloc(text: *const u8, insert: *const u8, position: i32): *i8;
+#linkc fn TextJoin(textList: **i8, count: i32, delimiter: *const u8): *i8;
+#linkc fn TextSplit(text: *const u8, delimiter: i8, count: *i32): **i8;
+#linkc fn TextAppend(text: *i8, append: *const u8, position: *i32): void;
+#linkc fn TextFindIndex(text: *const u8, search: *const u8): i32;
+#linkc fn TextToUpper(text: *const u8): *i8;
+#linkc fn TextToLower(text: *const u8): *i8;
+#linkc fn TextToPascal(text: *const u8): *i8;
+#linkc fn TextToSnake(text: *const u8): *i8;
+#linkc fn TextToCamel(text: *const u8): *i8;
+#linkc fn TextToInteger(text: *const u8): i32;
+#linkc fn TextToFloat(text: *const u8): f32;
 #linkc fn DrawLine3D(startPos: Vector3, endPos: Vector3, color: Color): void;
 #linkc fn DrawPoint3D(position: Vector3, color: Color): void;
 #linkc fn DrawCircle3D(center: Vector3, radius: f32, rotationAxis: Vector3, rotationAngle: f32, color: Color): void;
@@ -795,7 +778,7 @@ const SaveFileTextCallback : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *co
 #linkc fn DrawPlane(centerPos: Vector3, size: Vector2, color: Color): void;
 #linkc fn DrawRay(ray: Ray, color: Color): void;
 #linkc fn DrawGrid(slices: i32, spacing: f32): void;
-#linkc fn LoadModel(fileName: *const i8): Model;
+#linkc fn LoadModel(fileName: *const u8): Model;
 #linkc fn LoadModelFromMesh(mesh: Mesh): Model;
 #linkc fn IsModelValid(model: Model): bool;
 #linkc fn UnloadModel(model: Model): void;
@@ -815,8 +798,8 @@ const SaveFileTextCallback : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *co
 #linkc fn DrawMeshInstanced(mesh: Mesh, material: Material, transforms: *const Matrix, instances: i32): void;
 #linkc fn GetMeshBoundingBox(mesh: Mesh): BoundingBox;
 #linkc fn GenMeshTangents(mesh: *Mesh): void;
-#linkc fn ExportMesh(mesh: Mesh, fileName: *const i8): bool;
-#linkc fn ExportMeshAsCode(mesh: Mesh, fileName: *const i8): bool;
+#linkc fn ExportMesh(mesh: Mesh, fileName: *const u8): bool;
+#linkc fn ExportMeshAsCode(mesh: Mesh, fileName: *const u8): bool;
 #linkc fn GenMeshPoly(sides: i32, radius: f32): Mesh;
 #linkc fn GenMeshPlane(width: f32, length: f32, resX: i32, resZ: i32): Mesh;
 #linkc fn GenMeshCube(width: f32, height: f32, length: f32): Mesh;
@@ -828,13 +811,13 @@ const SaveFileTextCallback : __type_ptr = #type *fn(_arg0: *const i8, _arg1: *co
 #linkc fn GenMeshKnot(radius: f32, size: f32, radSeg: i32, sides: i32): Mesh;
 #linkc fn GenMeshHeightmap(heightmap: Image, size: Vector3): Mesh;
 #linkc fn GenMeshCubicmap(cubicmap: Image, cubeSize: Vector3): Mesh;
-#linkc fn LoadMaterials(fileName: *const i8, materialCount: *i32): *Material;
+#linkc fn LoadMaterials(fileName: *const u8, materialCount: *i32): *Material;
 #linkc fn LoadMaterialDefault(): Material;
 #linkc fn IsMaterialValid(material: Material): bool;
 #linkc fn UnloadMaterial(material: Material): void;
 #linkc fn SetMaterialTexture(material: *Material, mapType: i32, texture: Texture2D): void;
 #linkc fn SetModelMeshMaterial(model: *Model, meshId: i32, materialId: i32): void;
-#linkc fn LoadModelAnimations(fileName: *const i8, animCount: *i32): *ModelAnimation;
+#linkc fn LoadModelAnimations(fileName: *const u8, animCount: *i32): *ModelAnimation;
 #linkc fn UpdateModelAnimation(model: Model, anim: ModelAnimation, frame: f32): void;
 #linkc fn UpdateModelAnimationEx(model: Model, animA: ModelAnimation, frameA: f32, animB: ModelAnimation, frameB: f32, blend: f32): void;
 #linkc fn UnloadModelAnimations(animations: *ModelAnimation, animCount: i32): void;
@@ -853,10 +836,10 @@ const AudioCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: u32): void;
 #linkc fn IsAudioDeviceReady(): bool;
 #linkc fn SetMasterVolume(volume: f32): void;
 #linkc fn GetMasterVolume(): f32;
-#linkc fn LoadWave(fileName: *const i8): Wave;
-#linkc fn LoadWaveFromMemory(fileType: *const i8, fileData: *const u8, dataSize: i32): Wave;
+#linkc fn LoadWave(fileName: *const u8): Wave;
+#linkc fn LoadWaveFromMemory(fileType: *const u8, fileData: *const u8, dataSize: i32): Wave;
 #linkc fn IsWaveValid(wave: Wave): bool;
-#linkc fn LoadSound(fileName: *const i8): Sound;
+#linkc fn LoadSound(fileName: *const u8): Sound;
 #linkc fn LoadSoundFromWave(wave: Wave): Sound;
 #linkc fn LoadSoundAlias(source: Sound): Sound;
 #linkc fn IsSoundValid(sound: Sound): bool;
@@ -864,8 +847,8 @@ const AudioCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: u32): void;
 #linkc fn UnloadWave(wave: Wave): void;
 #linkc fn UnloadSound(sound: Sound): void;
 #linkc fn UnloadSoundAlias(alias: Sound): void;
-#linkc fn ExportWave(wave: Wave, fileName: *const i8): bool;
-#linkc fn ExportWaveAsCode(wave: Wave, fileName: *const i8): bool;
+#linkc fn ExportWave(wave: Wave, fileName: *const u8): bool;
+#linkc fn ExportWaveAsCode(wave: Wave, fileName: *const u8): bool;
 #linkc fn PlaySound(sound: Sound): void;
 #linkc fn StopSound(sound: Sound): void;
 #linkc fn PauseSound(sound: Sound): void;
@@ -879,8 +862,8 @@ const AudioCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: u32): void;
 #linkc fn WaveFormat(wave: *Wave, sampleRate: i32, sampleSize: i32, channels: i32): void;
 #linkc fn LoadWaveSamples(wave: Wave): *f32;
 #linkc fn UnloadWaveSamples(samples: *f32): void;
-#linkc fn LoadMusicStream(fileName: *const i8): Music;
-#linkc fn LoadMusicStreamFromMemory(fileType: *const i8, data: *const u8, dataSize: i32): Music;
+#linkc fn LoadMusicStream(fileName: *const u8): Music;
+#linkc fn LoadMusicStreamFromMemory(fileType: *const u8, data: *const u8, dataSize: i32): Music;
 #linkc fn IsMusicValid(music: Music): bool;
 #linkc fn UnloadMusicStream(music: Music): void;
 #linkc fn PlayMusicStream(music: Music): void;
@@ -921,3 +904,146 @@ const RAYLIB_VERSION_MINOR : i32 = 0;
 const RAYLIB_VERSION_PATCH : i32 = 0;
 const RAYLIB_VERSION : f64 = 6.0;
 const PI : f32 = 3.14159265358979323846f;
+
+const KEY_NULL            : i32 = 0;        // Key: NULL, used for no key pressed
+    // Alphanumeric keys
+const KEY_APOSTROPHE      : i32 = 39;       // Key: '
+const KEY_COMMA           : i32 = 44;       // Key: ,
+const KEY_MINUS           : i32 = 45;       // Key: -
+const KEY_PERIOD          : i32 = 46;       // Key: .
+const KEY_SLASH           : i32 = 47;       // Key: /
+const KEY_ZERO            : i32 = 48;       // Key: 0
+const KEY_ONE             : i32 = 49;       // Key: 1
+const KEY_TWO             : i32 = 50;       // Key: 2
+const KEY_THREE           : i32 = 51;       // Key: 3
+const KEY_FOUR            : i32 = 52;       // Key: 4
+const KEY_FIVE            : i32 = 53;       // Key: 5
+const KEY_SIX             : i32 = 54;       // Key: 6
+const KEY_SEVEN           : i32 = 55;       // Key: 7
+const KEY_EIGHT           : i32 = 56;       // Key: 8
+const KEY_NINE            : i32 = 57;       // Key: 9
+const KEY_SEMICOLON       : i32 = 59;       // Key: ;
+const KEY_EQUAL           : i32 = 61;       // Key: =
+const KEY_A               : i32 = 65;       // Key: A | a
+const KEY_B               : i32 = 66;       // Key: B | b
+const KEY_C               : i32 = 67;       // Key: C | c
+const KEY_D               : i32 = 68;       // Key: D | d
+const KEY_E               : i32 = 69;       // Key: E | e
+const KEY_F               : i32 = 70;       // Key: F | f
+const KEY_G               : i32 = 71;       // Key: G | g
+const KEY_H               : i32 = 72;       // Key: H | h
+const KEY_I               : i32 = 73;       // Key: I | i
+const KEY_J               : i32 = 74;       // Key: J | j
+const KEY_K               : i32 = 75;       // Key: K | k
+const KEY_L               : i32 = 76;       // Key: L | l
+const KEY_M               : i32 = 77;       // Key: M | m
+const KEY_N               : i32 = 78;       // Key: N | n
+const KEY_O               : i32 = 79;       // Key: O | o
+const KEY_P               : i32 = 80;       // Key: P | p
+const KEY_Q               : i32 = 81;       // Key: Q | q
+const KEY_R               : i32 = 82;       // Key: R | r
+const KEY_S               : i32 = 83;       // Key: S | s
+const KEY_T               : i32 = 84;       // Key: T | t
+const KEY_U               : i32 = 85;       // Key: U | u
+const KEY_V               : i32 = 86;       // Key: V | v
+const KEY_W               : i32 = 87;       // Key: W | w
+const KEY_X               : i32 = 88;       // Key: X | x
+const KEY_Y               : i32 = 89;       // Key: Y | y
+const KEY_Z               : i32 = 90;       // Key: Z | z
+const KEY_LEFT_BRACKET    : i32 = 91;       // Key: [
+const KEY_BACKSLASH       : i32 = 92;       // Key: '\'
+const KEY_RIGHT_BRACKET   : i32 = 93;       // Key: ]
+const KEY_GRAVE           : i32 = 96;       // Key: `
+    // Function keys
+const KEY_SPACE           : i32 = 32;       // Key: Space
+const KEY_ESCAPE          : i32 = 256;      // Key: Esc
+const KEY_ENTER           : i32 = 257;      // Key: Enter
+const KEY_TAB             : i32 = 258;      // Key: Tab
+const KEY_BACKSPACE       : i32 = 259;      // Key: Backspace
+const KEY_INSERT          : i32 = 260;      // Key: Ins
+const KEY_DELETE          : i32 = 261;      // Key: Del
+const KEY_RIGHT           : i32 = 262;      // Key: Cursor right
+const KEY_LEFT            : i32 = 263;      // Key: Cursor left
+const KEY_DOWN            : i32 = 264;      // Key: Cursor down
+const KEY_UP              : i32 = 265;      // Key: Cursor up
+const KEY_PAGE_UP         : i32 = 266;      // Key: Page up
+const KEY_PAGE_DOWN       : i32 = 267;      // Key: Page down
+const KEY_HOME            : i32 = 268;      // Key: Home
+const KEY_END             : i32 = 269;      // Key: End
+const KEY_CAPS_LOCK       : i32 = 280;      // Key: Caps lock
+const KEY_SCROLL_LOCK     : i32 = 281;      // Key: Scroll down
+const KEY_NUM_LOCK        : i32 = 282;      // Key: Num lock
+const KEY_PRINT_SCREEN    : i32 = 283;      // Key: Print screen
+const KEY_PAUSE           : i32 = 284;      // Key: Pause
+const KEY_F1              : i32 = 290;      // Key: F1
+const KEY_F2              : i32 = 291;      // Key: F2
+const KEY_F3              : i32 = 292;      // Key: F3
+const KEY_F4              : i32 = 293;      // Key: F4
+const KEY_F5              : i32 = 294;      // Key: F5
+const KEY_F6              : i32 = 295;      // Key: F6
+const KEY_F7              : i32 = 296;      // Key: F7
+const KEY_F8              : i32 = 297;      // Key: F8
+const KEY_F9              : i32 = 298;      // Key: F9
+const KEY_F10             : i32 = 299;      // Key: F10
+const KEY_F11             : i32 = 300;      // Key: F11
+const KEY_F12             : i32 = 301;      // Key: F12
+const KEY_LEFT_SHIFT      : i32 = 340;      // Key: Shift left
+const KEY_LEFT_CONTROL    : i32 = 341;      // Key: Control left
+const KEY_LEFT_ALT        : i32 = 342;      // Key: Alt left
+const KEY_LEFT_SUPER      : i32 = 343;      // Key: Super left
+const KEY_RIGHT_SHIFT     : i32 = 344;      // Key: Shift right
+const KEY_RIGHT_CONTROL   : i32 = 345;      // Key: Control right
+const KEY_RIGHT_ALT       : i32 = 346;      // Key: Alt right
+const KEY_RIGHT_SUPER     : i32 = 347;      // Key: Super right
+const KEY_KB_MENU         : i32 = 348;      // Key: KB menu
+    // Keypad keys
+const KEY_KP_0            : i32 = 320;      // Key: Keypad 0
+const KEY_KP_1            : i32 = 321;      // Key: Keypad 1
+const KEY_KP_2            : i32 = 322;      // Key: Keypad 2
+const KEY_KP_3            : i32 = 323;      // Key: Keypad 3
+const KEY_KP_4            : i32 = 324;      // Key: Keypad 4
+const KEY_KP_5            : i32 = 325;      // Key: Keypad 5
+const KEY_KP_6            : i32 = 326;      // Key: Keypad 6
+const KEY_KP_7            : i32 = 327;      // Key: Keypad 7
+const KEY_KP_8            : i32 = 328;      // Key: Keypad 8
+const KEY_KP_9            : i32 = 329;      // Key: Keypad 9
+const KEY_KP_DECIMAL      : i32 = 330;      // Key: Keypad .
+const KEY_KP_DIVIDE       : i32 = 331;      // Key: Keypad /
+const KEY_KP_MULTIPLY     : i32 = 332;      // Key: Keypad *
+const KEY_KP_SUBTRACT     : i32 = 333;      // Key: Keypad -
+const KEY_KP_ADD          : i32 = 334;      // Key: Keypad +
+const KEY_KP_ENTER        : i32 = 335;      // Key: Keypad Enter
+const KEY_KP_EQUAL        : i32 = 336;      // Key: Keypad =
+    // Android key buttons
+const KEY_BACK            : i32 = 4;        // Key: Android back button
+const KEY_MENU            : i32 = 5;        // Key: Android menu button
+const KEY_VOLUME_UP       : i32 = 24;       // Key: Android volume up button
+const KEY_VOLUME_DOWN     : i32 = 25;       // Key: Android volume down button
+
+const COLOR_LIGHTGRAY  : Color = .{ 200; 200; 200; 255; };   // Light Gray
+const COLOR_GRAY       : Color = .{ 130; 130; 130; 255; };   // Gray
+const COLOR_DARKGRAY   : Color = .{ 80; 80; 80; 255; };      // Dark Gray
+const COLOR_YELLOW     : Color = .{ 253; 249; 0; 255; };     // Yellow
+const COLOR_GOLD       : Color = .{ 255; 203; 0; 255; };     // Gold
+const COLOR_ORANGE     : Color = .{ 255; 161; 0; 255; };     // Orange
+const COLOR_PINK       : Color = .{ 255; 109; 194; 255; };   // Pink
+const COLOR_RED        : Color = .{ 230; 41; 55; 255; };     // Red
+const COLOR_MAROON     : Color = .{ 190; 33; 55; 255; };     // Maroon
+const COLOR_GREEN      : Color = .{ 0; 228; 48; 255; };      // Green
+const COLOR_LIME       : Color = .{ 0; 158; 47; 255; };      // Lime
+const COLOR_DARKGREEN  : Color = .{ 0; 117; 44; 255; };      // Dark Green
+const COLOR_SKYBLUE    : Color = .{ 102; 191; 255; 255; };   // Sky Blue
+const COLOR_BLUE       : Color = .{ 0; 121; 241; 255; };     // Blue
+const COLOR_DARKBLUE   : Color = .{ 0; 82; 172; 255; };      // Dark Blue
+const COLOR_PURPLE     : Color = .{ 200; 122; 255; 255; };   // Purple
+const COLOR_VIOLET     : Color = .{ 135; 60; 190; 255; };    // Violet
+const COLOR_DARKPURPLE : Color = .{ 112; 31; 126; 255; };    // Dark Purple
+const COLOR_BEIGE      : Color = .{ 211; 176; 131; 255; };   // Beige
+const COLOR_BROWN      : Color = .{ 127; 106; 79; 255; };    // Brown
+const COLOR_DARKBROWN  : Color = .{ 76; 63; 47; 255; };      // Dark Brown
+
+const COLOR_WHITE      : Color = .{ 255; 255; 255; 255; };   // White
+const COLOR_BLACK      : Color = .{ 0; 0; 0; 255; };         // Black
+const COLOR_BLANK      : Color = .{ 0; 0; 0; 0; };           // Blank (Transparent)
+const COLOR_MAGENTA    : Color = .{ 255; 0; 255; 255; };     // Magenta
+const COLOR_RAYWHITE   : Color = .{ 245; 245; 245; 255; };   // My own White (raylib logo)

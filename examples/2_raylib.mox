@@ -5,7 +5,7 @@ import "vendor/raylib.mox";
 // raylib dlls will be copied to output directory
 
 fn show_simple_window(window_title: *u8) {
-    InitWindow(800, 600, window_title.cast(*const i8));
+    InitWindow(800, 600, window_title);
     defer CloseWindow();
 
     while (!WindowShouldClose()) {

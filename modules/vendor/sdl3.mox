@@ -94,15 +94,15 @@ const SDL_free_func : __type_ptr = #type *fn(_arg0: *i32): void;
 #linkc fn SDL_GetNumAllocations(): i32;
 #linkc fn SDL_GetEnvironment(): *SDL_Environment;
 #linkc fn SDL_CreateEnvironment(populated: bool): *SDL_Environment;
-#linkc fn SDL_GetEnvironmentVariable(env: *SDL_Environment, name: *const i8): *const i8;
+#linkc fn SDL_GetEnvironmentVariable(env: *SDL_Environment, name: *const u8): *const u8;
 #linkc fn SDL_GetEnvironmentVariables(env: *SDL_Environment): **i8;
-#linkc fn SDL_SetEnvironmentVariable(env: *SDL_Environment, name: *const i8, value: *const i8, overwrite: bool): bool;
-#linkc fn SDL_UnsetEnvironmentVariable(env: *SDL_Environment, name: *const i8): bool;
+#linkc fn SDL_SetEnvironmentVariable(env: *SDL_Environment, name: *const u8, value: *const u8, overwrite: bool): bool;
+#linkc fn SDL_UnsetEnvironmentVariable(env: *SDL_Environment, name: *const u8): bool;
 #linkc fn SDL_DestroyEnvironment(env: *SDL_Environment): void;
-#linkc fn SDL_getenv(name: *const i8): *const i8;
-#linkc fn SDL_getenv_unsafe(name: *const i8): *const i8;
-#linkc fn SDL_setenv_unsafe(name: *const i8, value: *const i8, overwrite: i32): i32;
-#linkc fn SDL_unsetenv_unsafe(name: *const i8): i32;
+#linkc fn SDL_getenv(name: *const u8): *const u8;
+#linkc fn SDL_getenv_unsafe(name: *const u8): *const u8;
+#linkc fn SDL_setenv_unsafe(name: *const u8, value: *const u8, overwrite: i32): i32;
+#linkc fn SDL_unsetenv_unsafe(name: *const u8): i32;
 const SDL_CompareCallback : __type_ptr = #type *fn(_arg0: *const u8, _arg1: *const u8): i32;
 #linkc fn SDL_qsort(base: *i32, nmemb: usize, size: usize, compare: SDL_CompareCallback): void;
 #linkc fn SDL_bsearch(key: *const u8, base: *const u8, nmemb: usize, size: usize, compare: SDL_CompareCallback): *u8;
@@ -144,53 +144,53 @@ const SDL_CompareCallback_r : __type_ptr = #type *fn(_arg0: *i32, _arg1: *const 
 #linkc fn SDL_wcscasecmp(str1: *const wchar_t, str2: *const wchar_t): i32;
 #linkc fn SDL_wcsncasecmp(str1: *const wchar_t, str2: *const wchar_t, maxlen: usize): i32;
 #linkc fn SDL_wcstol(str: *const wchar_t, endp: **wchar_t, base: i32): i32;
-#linkc fn SDL_strlen(str: *const i8): usize;
-#linkc fn SDL_strnlen(str: *const i8, maxlen: usize): usize;
-#linkc fn SDL_strlcpy(dst: *i8, src: *const i8, maxlen: usize): usize;
-#linkc fn SDL_utf8strlcpy(dst: *i8, src: *const i8, dst_bytes: usize): usize;
-#linkc fn SDL_strlcat(dst: *i8, src: *const i8, maxlen: usize): usize;
-#linkc fn SDL_strdup(str: *const i8): *i8;
-#linkc fn SDL_strndup(str: *const i8, maxlen: usize): *i8;
+#linkc fn SDL_strlen(str: *const u8): usize;
+#linkc fn SDL_strnlen(str: *const u8, maxlen: usize): usize;
+#linkc fn SDL_strlcpy(dst: *i8, src: *const u8, maxlen: usize): usize;
+#linkc fn SDL_utf8strlcpy(dst: *i8, src: *const u8, dst_bytes: usize): usize;
+#linkc fn SDL_strlcat(dst: *i8, src: *const u8, maxlen: usize): usize;
+#linkc fn SDL_strdup(str: *const u8): *i8;
+#linkc fn SDL_strndup(str: *const u8, maxlen: usize): *i8;
 #linkc fn SDL_strrev(str: *i8): *i8;
 #linkc fn SDL_strupr(str: *i8): *i8;
 #linkc fn SDL_strlwr(str: *i8): *i8;
-#linkc fn SDL_strchr(str: *const i8, c: i32): *i8;
-#linkc fn SDL_strrchr(str: *const i8, c: i32): *i8;
-#linkc fn SDL_strstr(haystack: *const i8, needle: *const i8): *i8;
-#linkc fn SDL_strnstr(haystack: *const i8, needle: *const i8, maxlen: usize): *i8;
-#linkc fn SDL_strcasestr(haystack: *const i8, needle: *const i8): *i8;
-#linkc fn SDL_strtok_r(str: *i8, delim: *const i8, saveptr: **i8): *i8;
-#linkc fn SDL_utf8strlen(str: *const i8): usize;
-#linkc fn SDL_utf8strnlen(str: *const i8, bytes: usize): usize;
+#linkc fn SDL_strchr(str: *const u8, c: i32): *i8;
+#linkc fn SDL_strrchr(str: *const u8, c: i32): *i8;
+#linkc fn SDL_strstr(haystack: *const u8, needle: *const u8): *i8;
+#linkc fn SDL_strnstr(haystack: *const u8, needle: *const u8, maxlen: usize): *i8;
+#linkc fn SDL_strcasestr(haystack: *const u8, needle: *const u8): *i8;
+#linkc fn SDL_strtok_r(str: *i8, delim: *const u8, saveptr: **i8): *i8;
+#linkc fn SDL_utf8strlen(str: *const u8): usize;
+#linkc fn SDL_utf8strnlen(str: *const u8, bytes: usize): usize;
 #linkc fn SDL_itoa(value: i32, str: *i8, radix: i32): *i8;
 #linkc fn SDL_uitoa(value: u32, str: *i8, radix: i32): *i8;
 #linkc fn SDL_ltoa(value: i32, str: *i8, radix: i32): *i8;
 #linkc fn SDL_ultoa(value: u32, str: *i8, radix: i32): *i8;
 #linkc fn SDL_lltoa(value: i64, str: *i8, radix: i32): *i8;
 #linkc fn SDL_ulltoa(value: u64, str: *i8, radix: i32): *i8;
-#linkc fn SDL_atoi(str: *const i8): i32;
-#linkc fn SDL_atof(str: *const i8): f64;
-#linkc fn SDL_strtol(str: *const i8, endp: **i8, base: i32): i32;
-#linkc fn SDL_strtoul(str: *const i8, endp: **i8, base: i32): u32;
-#linkc fn SDL_strtoll(str: *const i8, endp: **i8, base: i32): i64;
-#linkc fn SDL_strtoull(str: *const i8, endp: **i8, base: i32): u64;
-#linkc fn SDL_strtod(str: *const i8, endp: **i8): f64;
-#linkc fn SDL_strcmp(str1: *const i8, str2: *const i8): i32;
-#linkc fn SDL_strncmp(str1: *const i8, str2: *const i8, maxlen: usize): i32;
-#linkc fn SDL_strcasecmp(str1: *const i8, str2: *const i8): i32;
-#linkc fn SDL_strncasecmp(str1: *const i8, str2: *const i8, maxlen: usize): i32;
-#linkc fn SDL_strpbrk(str: *const i8, breakset: *const i8): *i8;
-#linkc fn SDL_StepUTF8(pstr: **const i8, pslen: *usize): u32;
-#linkc fn SDL_StepBackUTF8(start: *const i8, pstr: **const i8): u32;
+#linkc fn SDL_atoi(str: *const u8): i32;
+#linkc fn SDL_atof(str: *const u8): f64;
+#linkc fn SDL_strtol(str: *const u8, endp: **i8, base: i32): i32;
+#linkc fn SDL_strtoul(str: *const u8, endp: **i8, base: i32): u32;
+#linkc fn SDL_strtoll(str: *const u8, endp: **i8, base: i32): i64;
+#linkc fn SDL_strtoull(str: *const u8, endp: **i8, base: i32): u64;
+#linkc fn SDL_strtod(str: *const u8, endp: **i8): f64;
+#linkc fn SDL_strcmp(str1: *const u8, str2: *const u8): i32;
+#linkc fn SDL_strncmp(str1: *const u8, str2: *const u8, maxlen: usize): i32;
+#linkc fn SDL_strcasecmp(str1: *const u8, str2: *const u8): i32;
+#linkc fn SDL_strncasecmp(str1: *const u8, str2: *const u8, maxlen: usize): i32;
+#linkc fn SDL_strpbrk(str: *const u8, breakset: *const u8): *i8;
+#linkc fn SDL_StepUTF8(pstr: **const u8, pslen: *usize): u32;
+#linkc fn SDL_StepBackUTF8(start: *const u8, pstr: **const u8): u32;
 #linkc fn SDL_UCS4ToUTF8(codepoint: u32, dst: *i8): *i8;
-#linkc fn SDL_sscanf(text: *const i8, fmt: *const i8, _variadic_args: *u8): i32;
-#linkc fn SDL_vsscanf(text: *const i8, fmt: *const i8, ap: va_list): i32;
-#linkc fn SDL_snprintf(text: *i8, maxlen: usize, fmt: *const i8, _variadic_args: *u8): i32;
+#linkc fn SDL_sscanf(text: *const u8, fmt: *const u8, _variadic_args: *u8): i32;
+#linkc fn SDL_vsscanf(text: *const u8, fmt: *const u8, ap: va_list): i32;
+#linkc fn SDL_snprintf(text: *i8, maxlen: usize, fmt: *const u8, _variadic_args: *u8): i32;
 #linkc fn SDL_swprintf(text: *wchar_t, maxlen: usize, fmt: *const wchar_t, _variadic_args: *u8): i32;
-#linkc fn SDL_vsnprintf(text: *i8, maxlen: usize, fmt: *const i8, ap: va_list): i32;
+#linkc fn SDL_vsnprintf(text: *i8, maxlen: usize, fmt: *const u8, ap: va_list): i32;
 #linkc fn SDL_vswprintf(text: *wchar_t, maxlen: usize, fmt: *const wchar_t, ap: va_list): i32;
-#linkc fn SDL_asprintf(strp: **i8, fmt: *const i8, _variadic_args: *u8): i32;
-#linkc fn SDL_vasprintf(strp: **i8, fmt: *const i8, ap: va_list): i32;
+#linkc fn SDL_asprintf(strp: **i8, fmt: *const u8, _variadic_args: *u8): i32;
+#linkc fn SDL_vasprintf(strp: **i8, fmt: *const u8, ap: va_list): i32;
 #linkc fn SDL_srand(seed: u64): void;
 #linkc fn SDL_rand(n: i32): i32;
 #linkc fn SDL_randf(): f32;
@@ -247,10 +247,10 @@ const SDL_CompareCallback_r : __type_ptr = #type *fn(_arg0: *i32, _arg1: *const 
 #linkc fn SDL_tan(x: f64): f64;
 #linkc fn SDL_tanf(x: f32): f32;
 const SDL_iconv_t : __type_ptr = #type *SDL_iconv_data_t;
-#linkc fn SDL_iconv_open(tocode: *const i8, fromcode: *const i8): SDL_iconv_t;
+#linkc fn SDL_iconv_open(tocode: *const u8, fromcode: *const u8): SDL_iconv_t;
 #linkc fn SDL_iconv_close(cd: SDL_iconv_t): i32;
-#linkc fn SDL_iconv(cd: SDL_iconv_t, inbuf: **const i8, inbytesleft: *usize, outbuf: **i8, outbytesleft: *usize): usize;
-#linkc fn SDL_iconv_string(tocode: *const i8, fromcode: *const i8, inbuf: *const i8, inbytesleft: usize): *i8;
+#linkc fn SDL_iconv(cd: SDL_iconv_t, inbuf: **const u8, inbytesleft: *usize, outbuf: **i8, outbytesleft: *usize): usize;
+#linkc fn SDL_iconv_string(tocode: *const u8, fromcode: *const u8, inbuf: *const u8, inbytesleft: usize): *i8;
 const SDL_FunctionPointer : __type_ptr = #type *fn(): void;
 enum SDL_AssertState : i32 {
     SDL_ASSERTION_RETRY;
@@ -263,14 +263,14 @@ enum SDL_AssertState : i32 {
 struct SDL_AssertData {
     always_ignore: bool;
     trigger_count: u32;
-    condition: *const i8;
-    filename: *const i8;
+    condition: *const u8;
+    filename: *const u8;
     linenum: i32;
-    function: *const i8;
+    function: *const u8;
     next: *const SDL_AssertData;
 };
 
-#linkc fn SDL_ReportAssertion(data: *SDL_AssertData, func: *const i8, file: *const i8, line: i32): SDL_AssertState;
+#linkc fn SDL_ReportAssertion(data: *SDL_AssertData, func: *const u8, file: *const u8, line: i32): SDL_AssertState;
 const SDL_AssertionHandler : __type_ptr = #type *fn(_arg0: *const SDL_AssertData, _arg1: *u8): SDL_AssertState;
 #linkc fn SDL_SetAssertionHandler(handler: SDL_AssertionHandler, userdata: *u8): void;
 #linkc fn SDL_GetDefaultAssertionHandler(): SDL_AssertionHandler;
@@ -300,7 +300,7 @@ struct SDL_AsyncIOOutcome {
     userdata: *u8;
 };
 
-#linkc fn SDL_AsyncIOFromFile(file: *const i8, mode: *const i8): *SDL_AsyncIO;
+#linkc fn SDL_AsyncIOFromFile(file: *const u8, mode: *const u8): *SDL_AsyncIO;
 #linkc fn SDL_GetAsyncIOSize(asyncio: *SDL_AsyncIO): i64;
 #linkc fn SDL_ReadAsyncIO(asyncio: *SDL_AsyncIO, ptr: *u8, offset: u64, size: u64, queue: *SDL_AsyncIOQueue, userdata: *u8): bool;
 #linkc fn SDL_WriteAsyncIO(asyncio: *SDL_AsyncIO, ptr: *u8, offset: u64, size: u64, queue: *SDL_AsyncIOQueue, userdata: *u8): bool;
@@ -310,7 +310,7 @@ struct SDL_AsyncIOOutcome {
 #linkc fn SDL_GetAsyncIOResult(queue: *SDL_AsyncIOQueue, outcome: *SDL_AsyncIOOutcome): bool;
 #linkc fn SDL_WaitAsyncIOResult(queue: *SDL_AsyncIOQueue, outcome: *SDL_AsyncIOOutcome, timeoutMS: i32): bool;
 #linkc fn SDL_SignalAsyncIOQueue(queue: *SDL_AsyncIOQueue): void;
-#linkc fn SDL_LoadFileAsync(file: *const i8, queue: *SDL_AsyncIOQueue, userdata: *u8): bool;
+#linkc fn SDL_LoadFileAsync(file: *const u8, queue: *SDL_AsyncIOQueue, userdata: *u8): bool;
 const SDL_SpinLock : __type_ptr = #type i32;
 #linkc fn SDL_TryLockSpinlock(lock: *SDL_SpinLock): bool;
 #linkc fn SDL_LockSpinlock(lock: *SDL_SpinLock): void;
@@ -336,10 +336,10 @@ struct SDL_AtomicU32 {
 #linkc fn SDL_CompareAndSwapAtomicPointer(a: **i32, oldval: *u8, newval: *u8): bool;
 #linkc fn SDL_SetAtomicPointer(a: **i32, v: *u8): *u8;
 #linkc fn SDL_GetAtomicPointer(a: **i32): *u8;
-#linkc fn SDL_SetError(fmt: *const i8, _variadic_args: *u8): bool;
-#linkc fn SDL_SetErrorV(fmt: *const i8, ap: va_list): bool;
+#linkc fn SDL_SetError(fmt: *const u8, _variadic_args: *u8): bool;
+#linkc fn SDL_SetErrorV(fmt: *const u8, ap: va_list): bool;
 #linkc fn SDL_OutOfMemory(): bool;
-#linkc fn SDL_GetError(): *const i8;
+#linkc fn SDL_GetError(): *const u8;
 #linkc fn SDL_ClearError(): bool;
 const SDL_PropertiesID : __type_ptr = #type u32;
 enum SDL_PropertyType : i32 {
@@ -357,21 +357,21 @@ enum SDL_PropertyType : i32 {
 #linkc fn SDL_LockProperties(props: SDL_PropertiesID): bool;
 #linkc fn SDL_UnlockProperties(props: SDL_PropertiesID): void;
 const SDL_CleanupPropertyCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: *u8): void;
-#linkc fn SDL_SetPointerPropertyWithCleanup(props: SDL_PropertiesID, name: *const i8, value: *u8, cleanup: SDL_CleanupPropertyCallback, userdata: *u8): bool;
-#linkc fn SDL_SetPointerProperty(props: SDL_PropertiesID, name: *const i8, value: *u8): bool;
-#linkc fn SDL_SetStringProperty(props: SDL_PropertiesID, name: *const i8, value: *const i8): bool;
-#linkc fn SDL_SetNumberProperty(props: SDL_PropertiesID, name: *const i8, value: i64): bool;
-#linkc fn SDL_SetFloatProperty(props: SDL_PropertiesID, name: *const i8, value: f32): bool;
-#linkc fn SDL_SetBooleanProperty(props: SDL_PropertiesID, name: *const i8, value: bool): bool;
-#linkc fn SDL_HasProperty(props: SDL_PropertiesID, name: *const i8): bool;
-#linkc fn SDL_GetPropertyType(props: SDL_PropertiesID, name: *const i8): SDL_PropertyType;
-#linkc fn SDL_GetPointerProperty(props: SDL_PropertiesID, name: *const i8, default_value: *u8): *u8;
-#linkc fn SDL_GetStringProperty(props: SDL_PropertiesID, name: *const i8, default_value: *const i8): *const i8;
-#linkc fn SDL_GetNumberProperty(props: SDL_PropertiesID, name: *const i8, default_value: i64): i64;
-#linkc fn SDL_GetFloatProperty(props: SDL_PropertiesID, name: *const i8, default_value: f32): f32;
-#linkc fn SDL_GetBooleanProperty(props: SDL_PropertiesID, name: *const i8, default_value: bool): bool;
-#linkc fn SDL_ClearProperty(props: SDL_PropertiesID, name: *const i8): bool;
-const SDL_EnumeratePropertiesCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: SDL_PropertiesID, _arg2: *const i8): void;
+#linkc fn SDL_SetPointerPropertyWithCleanup(props: SDL_PropertiesID, name: *const u8, value: *u8, cleanup: SDL_CleanupPropertyCallback, userdata: *u8): bool;
+#linkc fn SDL_SetPointerProperty(props: SDL_PropertiesID, name: *const u8, value: *u8): bool;
+#linkc fn SDL_SetStringProperty(props: SDL_PropertiesID, name: *const u8, value: *const u8): bool;
+#linkc fn SDL_SetNumberProperty(props: SDL_PropertiesID, name: *const u8, value: i64): bool;
+#linkc fn SDL_SetFloatProperty(props: SDL_PropertiesID, name: *const u8, value: f32): bool;
+#linkc fn SDL_SetBooleanProperty(props: SDL_PropertiesID, name: *const u8, value: bool): bool;
+#linkc fn SDL_HasProperty(props: SDL_PropertiesID, name: *const u8): bool;
+#linkc fn SDL_GetPropertyType(props: SDL_PropertiesID, name: *const u8): SDL_PropertyType;
+#linkc fn SDL_GetPointerProperty(props: SDL_PropertiesID, name: *const u8, default_value: *u8): *u8;
+#linkc fn SDL_GetStringProperty(props: SDL_PropertiesID, name: *const u8, default_value: *const u8): *const u8;
+#linkc fn SDL_GetNumberProperty(props: SDL_PropertiesID, name: *const u8, default_value: i64): i64;
+#linkc fn SDL_GetFloatProperty(props: SDL_PropertiesID, name: *const u8, default_value: f32): f32;
+#linkc fn SDL_GetBooleanProperty(props: SDL_PropertiesID, name: *const u8, default_value: bool): bool;
+#linkc fn SDL_ClearProperty(props: SDL_PropertiesID, name: *const u8): bool;
+const SDL_EnumeratePropertiesCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: SDL_PropertiesID, _arg2: *const u8): void;
 #linkc fn SDL_EnumerateProperties(props: SDL_PropertiesID, callback: SDL_EnumeratePropertiesCallback, userdata: *u8): bool;
 #linkc fn SDL_DestroyProperties(props: SDL_PropertiesID): void;
 const SDL_ThreadID : __type_ptr = #type u64;
@@ -391,9 +391,9 @@ enum SDL_ThreadState : i32 {
 };
 
 const SDL_ThreadFunction : __type_ptr = #type *fn(_arg0: *i32): i32;
-#linkc fn SDL_CreateThreadRuntime(fn: SDL_ThreadFunction, name: *const i8, data: *u8, pfnBeginThread: SDL_FunctionPointer, pfnEndThread: SDL_FunctionPointer): *SDL_Thread;
+#linkc fn SDL_CreateThreadRuntime(fn: SDL_ThreadFunction, name: *const u8, data: *u8, pfnBeginThread: SDL_FunctionPointer, pfnEndThread: SDL_FunctionPointer): *SDL_Thread;
 #linkc fn SDL_CreateThreadWithPropertiesRuntime(props: SDL_PropertiesID, pfnBeginThread: SDL_FunctionPointer, pfnEndThread: SDL_FunctionPointer): *SDL_Thread;
-#linkc fn SDL_GetThreadName(thread: *SDL_Thread): *const i8;
+#linkc fn SDL_GetThreadName(thread: *SDL_Thread): *const u8;
 #linkc fn SDL_GetCurrentThreadID(): SDL_ThreadID;
 #linkc fn SDL_GetThreadID(thread: *SDL_Thread): SDL_ThreadID;
 #linkc fn SDL_SetCurrentThreadPriority(priority: SDL_ThreadPriority): bool;
@@ -463,7 +463,7 @@ struct SDL_IOStreamInterface {
 };
 
 const SDL_compile_time_assert_SDL_IOStreamInterface_SIZE : __type_ptr = #type *i32;
-#linkc fn SDL_IOFromFile(file: *const i8, mode: *const i8): *SDL_IOStream;
+#linkc fn SDL_IOFromFile(file: *const u8, mode: *const u8): *SDL_IOStream;
 #linkc fn SDL_IOFromMem(mem: *i32, size: usize): *SDL_IOStream;
 #linkc fn SDL_IOFromConstMem(mem: *const u8, size: usize): *SDL_IOStream;
 #linkc fn SDL_IOFromDynamicMem(): *SDL_IOStream;
@@ -476,13 +476,13 @@ const SDL_compile_time_assert_SDL_IOStreamInterface_SIZE : __type_ptr = #type *i
 #linkc fn SDL_TellIO(context: *SDL_IOStream): i64;
 #linkc fn SDL_ReadIO(context: *SDL_IOStream, ptr: *u8, size: usize): usize;
 #linkc fn SDL_WriteIO(context: *SDL_IOStream, ptr: *const u8, size: usize): usize;
-#linkc fn SDL_IOprintf(context: *SDL_IOStream, fmt: *const i8, _variadic_args: *u8): usize;
-#linkc fn SDL_IOvprintf(context: *SDL_IOStream, fmt: *const i8, ap: va_list): usize;
+#linkc fn SDL_IOprintf(context: *SDL_IOStream, fmt: *const u8, _variadic_args: *u8): usize;
+#linkc fn SDL_IOvprintf(context: *SDL_IOStream, fmt: *const u8, ap: va_list): usize;
 #linkc fn SDL_FlushIO(context: *SDL_IOStream): bool;
 #linkc fn SDL_LoadFile_IO(src: *SDL_IOStream, datasize: *usize, closeio: bool): *u8;
-#linkc fn SDL_LoadFile(file: *const i8, datasize: *usize): *u8;
+#linkc fn SDL_LoadFile(file: *const u8, datasize: *usize): *u8;
 #linkc fn SDL_SaveFile_IO(src: *SDL_IOStream, data: *const u8, datasize: usize, closeio: bool): bool;
-#linkc fn SDL_SaveFile(file: *const i8, data: *const u8, datasize: usize): bool;
+#linkc fn SDL_SaveFile(file: *const u8, data: *const u8, datasize: usize): bool;
 #linkc fn SDL_ReadU8(src: *SDL_IOStream, value: *u8): bool;
 #linkc fn SDL_ReadS8(src: *SDL_IOStream, value: *i8): bool;
 #linkc fn SDL_ReadU16LE(src: *SDL_IOStream, value: *u16): bool;
@@ -534,11 +534,11 @@ struct SDL_AudioSpec {
 };
 
 #linkc fn SDL_GetNumAudioDrivers(): i32;
-#linkc fn SDL_GetAudioDriver(index: i32): *const i8;
-#linkc fn SDL_GetCurrentAudioDriver(): *const i8;
+#linkc fn SDL_GetAudioDriver(index: i32): *const u8;
+#linkc fn SDL_GetCurrentAudioDriver(): *const u8;
 #linkc fn SDL_GetAudioPlaybackDevices(count: *i32): *SDL_AudioDeviceID;
 #linkc fn SDL_GetAudioRecordingDevices(count: *i32): *SDL_AudioDeviceID;
-#linkc fn SDL_GetAudioDeviceName(devid: SDL_AudioDeviceID): *const i8;
+#linkc fn SDL_GetAudioDeviceName(devid: SDL_AudioDeviceID): *const u8;
 #linkc fn SDL_GetAudioDeviceFormat(devid: SDL_AudioDeviceID, spec: *SDL_AudioSpec, sample_frames: *i32): bool;
 #linkc fn SDL_GetAudioDeviceChannelMap(devid: SDL_AudioDeviceID, count: *i32): *i32;
 #linkc fn SDL_OpenAudioDevice(devid: SDL_AudioDeviceID, spec: *const SDL_AudioSpec): SDL_AudioDeviceID;
@@ -589,10 +589,10 @@ const SDL_AudioStreamCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: *SDL_
 const SDL_AudioPostmixCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: *const SDL_AudioSpec, _arg2: *f32, _arg3: i32): void;
 #linkc fn SDL_SetAudioPostmixCallback(devid: SDL_AudioDeviceID, callback: SDL_AudioPostmixCallback, userdata: *u8): bool;
 #linkc fn SDL_LoadWAV_IO(src: *SDL_IOStream, closeio: bool, spec: *SDL_AudioSpec, audio_buf: **u8, audio_len: *u32): bool;
-#linkc fn SDL_LoadWAV(path: *const i8, spec: *SDL_AudioSpec, audio_buf: **u8, audio_len: *u32): bool;
+#linkc fn SDL_LoadWAV(path: *const u8, spec: *SDL_AudioSpec, audio_buf: **u8, audio_len: *u32): bool;
 #linkc fn SDL_MixAudio(dst: *u8, src: *const u8, format: SDL_AudioFormat, len: u32, volume: f32): bool;
 #linkc fn SDL_ConvertAudioSamples(src_spec: *const SDL_AudioSpec, src_data: *const u8, src_len: i32, dst_spec: *const SDL_AudioSpec, dst_data: **u8, dst_len: *i32): bool;
-#linkc fn SDL_GetAudioFormatName(format: SDL_AudioFormat): *const i8;
+#linkc fn SDL_GetAudioFormatName(format: SDL_AudioFormat): *const u8;
 #linkc fn SDL_GetSilenceValueForFormat(format: SDL_AudioFormat): i32;
 const SDL_BlendMode : __type_ptr = #type u32;
 enum SDL_BlendOperation : i32 {
@@ -881,7 +881,7 @@ struct SDL_PixelFormatDetails {
     Ashift: u8;
 };
 
-#linkc fn SDL_GetPixelFormatName(format: SDL_PixelFormat): *const i8;
+#linkc fn SDL_GetPixelFormatName(format: SDL_PixelFormat): *const u8;
 #linkc fn SDL_GetMasksForPixelFormat(format: SDL_PixelFormat, bpp: *i32, Rmask: *u32, Gmask: *u32, Bmask: *u32, Amask: *u32): bool;
 #linkc fn SDL_GetPixelFormatForMasks(bpp: i32, Rmask: u32, Gmask: u32, Bmask: u32, Amask: u32): SDL_PixelFormat;
 #linkc fn SDL_GetPixelFormatDetails(format: SDL_PixelFormat): *const SDL_PixelFormatDetails;
@@ -968,15 +968,15 @@ struct SDL_Surface {
 #linkc fn SDL_LockSurface(surface: *SDL_Surface): bool;
 #linkc fn SDL_UnlockSurface(surface: *SDL_Surface): void;
 #linkc fn SDL_LoadSurface_IO(src: *SDL_IOStream, closeio: bool): *SDL_Surface;
-#linkc fn SDL_LoadSurface(file: *const i8): *SDL_Surface;
+#linkc fn SDL_LoadSurface(file: *const u8): *SDL_Surface;
 #linkc fn SDL_LoadBMP_IO(src: *SDL_IOStream, closeio: bool): *SDL_Surface;
-#linkc fn SDL_LoadBMP(file: *const i8): *SDL_Surface;
+#linkc fn SDL_LoadBMP(file: *const u8): *SDL_Surface;
 #linkc fn SDL_SaveBMP_IO(surface: *SDL_Surface, dst: *SDL_IOStream, closeio: bool): bool;
-#linkc fn SDL_SaveBMP(surface: *SDL_Surface, file: *const i8): bool;
+#linkc fn SDL_SaveBMP(surface: *SDL_Surface, file: *const u8): bool;
 #linkc fn SDL_LoadPNG_IO(src: *SDL_IOStream, closeio: bool): *SDL_Surface;
-#linkc fn SDL_LoadPNG(file: *const i8): *SDL_Surface;
+#linkc fn SDL_LoadPNG(file: *const u8): *SDL_Surface;
 #linkc fn SDL_SavePNG_IO(surface: *SDL_Surface, dst: *SDL_IOStream, closeio: bool): bool;
-#linkc fn SDL_SavePNG(surface: *SDL_Surface, file: *const i8): bool;
+#linkc fn SDL_SavePNG(surface: *SDL_Surface, file: *const u8): bool;
 #linkc fn SDL_SetSurfaceRLE(surface: *SDL_Surface, enabled: bool): bool;
 #linkc fn SDL_SurfaceHasRLE(surface: *SDL_Surface): bool;
 #linkc fn SDL_SetSurfaceColorKey(surface: *SDL_Surface, enabled: bool, key: u32): bool;
@@ -1040,11 +1040,11 @@ enum SDL_CameraPermissionState : i32 {
 };
 
 #linkc fn SDL_GetNumCameraDrivers(): i32;
-#linkc fn SDL_GetCameraDriver(index: i32): *const i8;
-#linkc fn SDL_GetCurrentCameraDriver(): *const i8;
+#linkc fn SDL_GetCameraDriver(index: i32): *const u8;
+#linkc fn SDL_GetCurrentCameraDriver(): *const u8;
 #linkc fn SDL_GetCameras(count: *i32): *SDL_CameraID;
 #linkc fn SDL_GetCameraSupportedFormats(instance_id: SDL_CameraID, count: *i32): **SDL_CameraSpec;
-#linkc fn SDL_GetCameraName(instance_id: SDL_CameraID): *const i8;
+#linkc fn SDL_GetCameraName(instance_id: SDL_CameraID): *const u8;
 #linkc fn SDL_GetCameraPosition(instance_id: SDL_CameraID): SDL_CameraPosition;
 #linkc fn SDL_OpenCamera(instance_id: SDL_CameraID, spec: *const SDL_CameraSpec): *SDL_Camera;
 #linkc fn SDL_GetCameraPermissionState(camera: *SDL_Camera): SDL_CameraPermissionState;
@@ -1054,18 +1054,18 @@ enum SDL_CameraPermissionState : i32 {
 #linkc fn SDL_AcquireCameraFrame(camera: *SDL_Camera, timestampNS: *u64): *SDL_Surface;
 #linkc fn SDL_ReleaseCameraFrame(camera: *SDL_Camera, frame: *SDL_Surface): void;
 #linkc fn SDL_CloseCamera(camera: *SDL_Camera): void;
-#linkc fn SDL_SetClipboardText(text: *const i8): bool;
+#linkc fn SDL_SetClipboardText(text: *const u8): bool;
 #linkc fn SDL_GetClipboardText(): *i8;
 #linkc fn SDL_HasClipboardText(): bool;
-#linkc fn SDL_SetPrimarySelectionText(text: *const i8): bool;
+#linkc fn SDL_SetPrimarySelectionText(text: *const u8): bool;
 #linkc fn SDL_GetPrimarySelectionText(): *i8;
 #linkc fn SDL_HasPrimarySelectionText(): bool;
-const SDL_ClipboardDataCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: *const i8, _arg2: *usize): *const u8;
+const SDL_ClipboardDataCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: *const u8, _arg2: *usize): *const u8;
 const SDL_ClipboardCleanupCallback : __type_ptr = #type *fn(_arg0: *i32): void;
-#linkc fn SDL_SetClipboardData(callback: SDL_ClipboardDataCallback, cleanup: SDL_ClipboardCleanupCallback, userdata: *u8, mime_types: **const i8, num_mime_types: usize): bool;
+#linkc fn SDL_SetClipboardData(callback: SDL_ClipboardDataCallback, cleanup: SDL_ClipboardCleanupCallback, userdata: *u8, mime_types: **const u8, num_mime_types: usize): bool;
 #linkc fn SDL_ClearClipboardData(): bool;
-#linkc fn SDL_GetClipboardData(mime_type: *const i8, size: *usize): *u8;
-#linkc fn SDL_HasClipboardData(mime_type: *const i8): bool;
+#linkc fn SDL_GetClipboardData(mime_type: *const u8, size: *usize): *u8;
+#linkc fn SDL_HasClipboardData(mime_type: *const u8): bool;
 #linkc fn SDL_GetClipboardMimeTypes(num_mime_types: *usize): **i8;
 #linkc fn SDL_GetNumLogicalCPUCores(): i32;
 #linkc fn SDL_GetCPUCacheLineSize(): i32;
@@ -1174,13 +1174,13 @@ const SDL_GLContextFlag : __type_ptr = #type u32;
 const SDL_GLContextReleaseFlag : __type_ptr = #type u32;
 const SDL_GLContextResetNotification : __type_ptr = #type u32;
 #linkc fn SDL_GetNumVideoDrivers(): i32;
-#linkc fn SDL_GetVideoDriver(index: i32): *const i8;
-#linkc fn SDL_GetCurrentVideoDriver(): *const i8;
+#linkc fn SDL_GetVideoDriver(index: i32): *const u8;
+#linkc fn SDL_GetCurrentVideoDriver(): *const u8;
 #linkc fn SDL_GetSystemTheme(): SDL_SystemTheme;
 #linkc fn SDL_GetDisplays(count: *i32): *SDL_DisplayID;
 #linkc fn SDL_GetPrimaryDisplay(): SDL_DisplayID;
 #linkc fn SDL_GetDisplayProperties(displayID: SDL_DisplayID): SDL_PropertiesID;
-#linkc fn SDL_GetDisplayName(displayID: SDL_DisplayID): *const i8;
+#linkc fn SDL_GetDisplayName(displayID: SDL_DisplayID): *const u8;
 #linkc fn SDL_GetDisplayBounds(displayID: SDL_DisplayID, rect: *SDL_Rect): bool;
 #linkc fn SDL_GetDisplayUsableBounds(displayID: SDL_DisplayID, rect: *SDL_Rect): bool;
 #linkc fn SDL_GetNaturalDisplayOrientation(displayID: SDL_DisplayID): SDL_DisplayOrientation;
@@ -1200,7 +1200,7 @@ const SDL_GLContextResetNotification : __type_ptr = #type u32;
 #linkc fn SDL_GetWindowICCProfile(window: *SDL_Window, size: *usize): *u8;
 #linkc fn SDL_GetWindowPixelFormat(window: *SDL_Window): SDL_PixelFormat;
 #linkc fn SDL_GetWindows(count: *i32): **SDL_Window;
-#linkc fn SDL_CreateWindow(title: *const i8, w: i32, h: i32, flags: SDL_WindowFlags): *SDL_Window;
+#linkc fn SDL_CreateWindow(title: *const u8, w: i32, h: i32, flags: SDL_WindowFlags): *SDL_Window;
 #linkc fn SDL_CreatePopupWindow(parent: *SDL_Window, offset_x: i32, offset_y: i32, w: i32, h: i32, flags: SDL_WindowFlags): *SDL_Window;
 #linkc fn SDL_CreateWindowWithProperties(props: SDL_PropertiesID): *SDL_Window;
 #linkc fn SDL_GetWindowID(window: *SDL_Window): SDL_WindowID;
@@ -1208,8 +1208,8 @@ const SDL_GLContextResetNotification : __type_ptr = #type u32;
 #linkc fn SDL_GetWindowParent(window: *SDL_Window): *SDL_Window;
 #linkc fn SDL_GetWindowProperties(window: *SDL_Window): SDL_PropertiesID;
 #linkc fn SDL_GetWindowFlags(window: *SDL_Window): SDL_WindowFlags;
-#linkc fn SDL_SetWindowTitle(window: *SDL_Window, title: *const i8): bool;
-#linkc fn SDL_GetWindowTitle(window: *SDL_Window): *const i8;
+#linkc fn SDL_SetWindowTitle(window: *SDL_Window, title: *const u8): bool;
+#linkc fn SDL_GetWindowTitle(window: *SDL_Window): *const u8;
 #linkc fn SDL_SetWindowIcon(window: *SDL_Window, icon: *SDL_Surface): bool;
 #linkc fn SDL_SetWindowPosition(window: *SDL_Window, x: i32, y: i32): bool;
 #linkc fn SDL_GetWindowPosition(window: *SDL_Window, x: *i32, y: *i32): bool;
@@ -1281,11 +1281,11 @@ const SDL_HitTest : __type_ptr = #type *fn(_arg0: *SDL_Window, _arg1: *const SDL
 #linkc fn SDL_ScreenSaverEnabled(): bool;
 #linkc fn SDL_EnableScreenSaver(): bool;
 #linkc fn SDL_DisableScreenSaver(): bool;
-#linkc fn SDL_GL_LoadLibrary(path: *const i8): bool;
-#linkc fn SDL_GL_GetProcAddress(proc: *const i8): SDL_FunctionPointer;
-#linkc fn SDL_EGL_GetProcAddress(proc: *const i8): SDL_FunctionPointer;
+#linkc fn SDL_GL_LoadLibrary(path: *const u8): bool;
+#linkc fn SDL_GL_GetProcAddress(proc: *const u8): SDL_FunctionPointer;
+#linkc fn SDL_EGL_GetProcAddress(proc: *const u8): SDL_FunctionPointer;
 #linkc fn SDL_GL_UnloadLibrary(): void;
-#linkc fn SDL_GL_ExtensionSupported(extension: *const i8): bool;
+#linkc fn SDL_GL_ExtensionSupported(extension: *const u8): bool;
 #linkc fn SDL_GL_ResetAttributes(): void;
 #linkc fn SDL_GL_SetAttribute(attr: SDL_GLAttr, value: i32): bool;
 #linkc fn SDL_GL_GetAttribute(attr: SDL_GLAttr, value: *i32): bool;
@@ -1302,14 +1302,14 @@ const SDL_HitTest : __type_ptr = #type *fn(_arg0: *SDL_Window, _arg1: *const SDL
 #linkc fn SDL_GL_SwapWindow(window: *SDL_Window): bool;
 #linkc fn SDL_GL_DestroyContext(context: SDL_GLContext): bool;
 struct SDL_DialogFileFilter {
-    name: *const i8;
-    pattern: *const i8;
+    name: *const u8;
+    pattern: *const u8;
 };
 
-const SDL_DialogFileCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: *const *const i8, _arg2: i32): void;
-#linkc fn SDL_ShowOpenFileDialog(callback: SDL_DialogFileCallback, userdata: *u8, window: *SDL_Window, filters: *const SDL_DialogFileFilter, nfilters: i32, default_location: *const i8, allow_many: bool): void;
-#linkc fn SDL_ShowSaveFileDialog(callback: SDL_DialogFileCallback, userdata: *u8, window: *SDL_Window, filters: *const SDL_DialogFileFilter, nfilters: i32, default_location: *const i8): void;
-#linkc fn SDL_ShowOpenFolderDialog(callback: SDL_DialogFileCallback, userdata: *u8, window: *SDL_Window, default_location: *const i8, allow_many: bool): void;
+const SDL_DialogFileCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: *const *const u8, _arg2: i32): void;
+#linkc fn SDL_ShowOpenFileDialog(callback: SDL_DialogFileCallback, userdata: *u8, window: *SDL_Window, filters: *const SDL_DialogFileFilter, nfilters: i32, default_location: *const u8, allow_many: bool): void;
+#linkc fn SDL_ShowSaveFileDialog(callback: SDL_DialogFileCallback, userdata: *u8, window: *SDL_Window, filters: *const SDL_DialogFileFilter, nfilters: i32, default_location: *const u8): void;
+#linkc fn SDL_ShowOpenFolderDialog(callback: SDL_DialogFileCallback, userdata: *u8, window: *SDL_Window, default_location: *const u8, allow_many: bool): void;
 enum SDL_FileDialogType : i32 {
     SDL_FILEDIALOG_OPENFILE;
     SDL_FILEDIALOG_SAVEFILE;
@@ -1322,7 +1322,7 @@ struct SDL_GUID {
 };
 
 #linkc fn SDL_GUIDToString(guid: SDL_GUID, pszGUID: *i8, cbGUID: i32): void;
-#linkc fn SDL_StringToGUID(pchGUID: *const i8): SDL_GUID;
+#linkc fn SDL_StringToGUID(pchGUID: *const u8): SDL_GUID;
 enum SDL_PowerState : i32 {
     SDL_POWERSTATE_ERROR := -1;
     SDL_POWERSTATE_UNKNOWN;
@@ -1347,13 +1347,13 @@ enum SDL_SensorType : i32 {
 };
 
 #linkc fn SDL_GetSensors(count: *i32): *SDL_SensorID;
-#linkc fn SDL_GetSensorNameForID(instance_id: SDL_SensorID): *const i8;
+#linkc fn SDL_GetSensorNameForID(instance_id: SDL_SensorID): *const u8;
 #linkc fn SDL_GetSensorTypeForID(instance_id: SDL_SensorID): SDL_SensorType;
 #linkc fn SDL_GetSensorNonPortableTypeForID(instance_id: SDL_SensorID): i32;
 #linkc fn SDL_OpenSensor(instance_id: SDL_SensorID): *SDL_Sensor;
 #linkc fn SDL_GetSensorFromID(instance_id: SDL_SensorID): *SDL_Sensor;
 #linkc fn SDL_GetSensorProperties(sensor: *SDL_Sensor): SDL_PropertiesID;
-#linkc fn SDL_GetSensorName(sensor: *SDL_Sensor): *const i8;
+#linkc fn SDL_GetSensorName(sensor: *SDL_Sensor): *const u8;
 #linkc fn SDL_GetSensorType(sensor: *SDL_Sensor): SDL_SensorType;
 #linkc fn SDL_GetSensorNonPortableType(sensor: *SDL_Sensor): i32;
 #linkc fn SDL_GetSensorID(sensor: *SDL_Sensor): SDL_SensorID;
@@ -1384,8 +1384,8 @@ enum SDL_JoystickConnectionState : i32 {
 
 #linkc fn SDL_LockJoysticks(): void;
 #linkc fn SDL_GetJoysticks(count: *i32): *SDL_JoystickID;
-#linkc fn SDL_GetJoystickNameForID(instance_id: SDL_JoystickID): *const i8;
-#linkc fn SDL_GetJoystickPathForID(instance_id: SDL_JoystickID): *const i8;
+#linkc fn SDL_GetJoystickNameForID(instance_id: SDL_JoystickID): *const u8;
+#linkc fn SDL_GetJoystickPathForID(instance_id: SDL_JoystickID): *const u8;
 #linkc fn SDL_GetJoystickPlayerIndexForID(instance_id: SDL_JoystickID): i32;
 #linkc fn SDL_GetJoystickGUIDForID(instance_id: SDL_JoystickID): SDL_GUID;
 #linkc fn SDL_GetJoystickVendorForID(instance_id: SDL_JoystickID): u16;
@@ -1420,7 +1420,7 @@ struct SDL_VirtualJoystickDesc {
     padding2: [2]u16;
     button_mask: u32;
     axis_mask: u32;
-    name: *const i8;
+    name: *const u8;
     touchpads: *const SDL_VirtualJoystickTouchpadDesc;
     sensors: *const SDL_VirtualJoystickSensorDesc;
     userdata: *u8;
@@ -1445,8 +1445,8 @@ const SDL_compile_time_assert_SDL_VirtualJoystickDesc_SIZE : __type_ptr = #type 
 #linkc fn SDL_SetJoystickVirtualTouchpad(joystick: *SDL_Joystick, touchpad: i32, finger: i32, down: bool, x: f32, y: f32, pressure: f32): bool;
 #linkc fn SDL_SendJoystickVirtualSensorData(joystick: *SDL_Joystick, type: SDL_SensorType, sensor_timestamp: u64, data: *const f32, num_values: i32): bool;
 #linkc fn SDL_GetJoystickProperties(joystick: *SDL_Joystick): SDL_PropertiesID;
-#linkc fn SDL_GetJoystickName(joystick: *SDL_Joystick): *const i8;
-#linkc fn SDL_GetJoystickPath(joystick: *SDL_Joystick): *const i8;
+#linkc fn SDL_GetJoystickName(joystick: *SDL_Joystick): *const u8;
+#linkc fn SDL_GetJoystickPath(joystick: *SDL_Joystick): *const u8;
 #linkc fn SDL_GetJoystickPlayerIndex(joystick: *SDL_Joystick): i32;
 #linkc fn SDL_SetJoystickPlayerIndex(joystick: *SDL_Joystick, player_index: i32): bool;
 #linkc fn SDL_GetJoystickGUID(joystick: *SDL_Joystick): SDL_GUID;
@@ -1454,7 +1454,7 @@ const SDL_compile_time_assert_SDL_VirtualJoystickDesc_SIZE : __type_ptr = #type 
 #linkc fn SDL_GetJoystickProduct(joystick: *SDL_Joystick): u16;
 #linkc fn SDL_GetJoystickProductVersion(joystick: *SDL_Joystick): u16;
 #linkc fn SDL_GetJoystickFirmwareVersion(joystick: *SDL_Joystick): u16;
-#linkc fn SDL_GetJoystickSerial(joystick: *SDL_Joystick): *const i8;
+#linkc fn SDL_GetJoystickSerial(joystick: *SDL_Joystick): *const u8;
 #linkc fn SDL_GetJoystickType(joystick: *SDL_Joystick): SDL_JoystickType;
 #linkc fn SDL_GetJoystickGUIDInfo(guid: SDL_GUID, vendor: *u16, product: *u16, version: *u16, crc16: *u16): void;
 #linkc fn SDL_JoystickConnected(joystick: *SDL_Joystick): bool;
@@ -1588,19 +1588,19 @@ struct SDL_GamepadBinding {
     output: SDL_GamepadBinding_output;
 };
 
-#linkc fn SDL_AddGamepadMapping(mapping: *const i8): i32;
+#linkc fn SDL_AddGamepadMapping(mapping: *const u8): i32;
 #linkc fn SDL_AddGamepadMappingsFromIO(src: *SDL_IOStream, closeio: bool): i32;
-#linkc fn SDL_AddGamepadMappingsFromFile(file: *const i8): i32;
+#linkc fn SDL_AddGamepadMappingsFromFile(file: *const u8): i32;
 #linkc fn SDL_ReloadGamepadMappings(): bool;
 #linkc fn SDL_GetGamepadMappings(count: *i32): **i8;
 #linkc fn SDL_GetGamepadMappingForGUID(guid: SDL_GUID): *i8;
 #linkc fn SDL_GetGamepadMapping(gamepad: *SDL_Gamepad): *i8;
-#linkc fn SDL_SetGamepadMapping(instance_id: SDL_JoystickID, mapping: *const i8): bool;
+#linkc fn SDL_SetGamepadMapping(instance_id: SDL_JoystickID, mapping: *const u8): bool;
 #linkc fn SDL_HasGamepad(): bool;
 #linkc fn SDL_GetGamepads(count: *i32): *SDL_JoystickID;
 #linkc fn SDL_IsGamepad(instance_id: SDL_JoystickID): bool;
-#linkc fn SDL_GetGamepadNameForID(instance_id: SDL_JoystickID): *const i8;
-#linkc fn SDL_GetGamepadPathForID(instance_id: SDL_JoystickID): *const i8;
+#linkc fn SDL_GetGamepadNameForID(instance_id: SDL_JoystickID): *const u8;
+#linkc fn SDL_GetGamepadPathForID(instance_id: SDL_JoystickID): *const u8;
 #linkc fn SDL_GetGamepadPlayerIndexForID(instance_id: SDL_JoystickID): i32;
 #linkc fn SDL_GetGamepadGUIDForID(instance_id: SDL_JoystickID): SDL_GUID;
 #linkc fn SDL_GetGamepadVendorForID(instance_id: SDL_JoystickID): u16;
@@ -1614,8 +1614,8 @@ struct SDL_GamepadBinding {
 #linkc fn SDL_GetGamepadFromPlayerIndex(player_index: i32): *SDL_Gamepad;
 #linkc fn SDL_GetGamepadProperties(gamepad: *SDL_Gamepad): SDL_PropertiesID;
 #linkc fn SDL_GetGamepadID(gamepad: *SDL_Gamepad): SDL_JoystickID;
-#linkc fn SDL_GetGamepadName(gamepad: *SDL_Gamepad): *const i8;
-#linkc fn SDL_GetGamepadPath(gamepad: *SDL_Gamepad): *const i8;
+#linkc fn SDL_GetGamepadName(gamepad: *SDL_Gamepad): *const u8;
+#linkc fn SDL_GetGamepadPath(gamepad: *SDL_Gamepad): *const u8;
 #linkc fn SDL_GetGamepadType(gamepad: *SDL_Gamepad): SDL_GamepadType;
 #linkc fn SDL_GetRealGamepadType(gamepad: *SDL_Gamepad): SDL_GamepadType;
 #linkc fn SDL_GetGamepadPlayerIndex(gamepad: *SDL_Gamepad): i32;
@@ -1624,7 +1624,7 @@ struct SDL_GamepadBinding {
 #linkc fn SDL_GetGamepadProduct(gamepad: *SDL_Gamepad): u16;
 #linkc fn SDL_GetGamepadProductVersion(gamepad: *SDL_Gamepad): u16;
 #linkc fn SDL_GetGamepadFirmwareVersion(gamepad: *SDL_Gamepad): u16;
-#linkc fn SDL_GetGamepadSerial(gamepad: *SDL_Gamepad): *const i8;
+#linkc fn SDL_GetGamepadSerial(gamepad: *SDL_Gamepad): *const u8;
 #linkc fn SDL_GetGamepadSteamHandle(gamepad: *SDL_Gamepad): u64;
 #linkc fn SDL_GetGamepadConnectionState(gamepad: *SDL_Gamepad): SDL_JoystickConnectionState;
 #linkc fn SDL_GetGamepadPowerInfo(gamepad: *SDL_Gamepad, percent: *i32): SDL_PowerState;
@@ -1634,14 +1634,14 @@ struct SDL_GamepadBinding {
 #linkc fn SDL_GamepadEventsEnabled(): bool;
 #linkc fn SDL_GetGamepadBindings(gamepad: *SDL_Gamepad, count: *i32): **SDL_GamepadBinding;
 #linkc fn SDL_UpdateGamepads(): void;
-#linkc fn SDL_GetGamepadTypeFromString(str: *const i8): SDL_GamepadType;
-#linkc fn SDL_GetGamepadStringForType(type: SDL_GamepadType): *const i8;
-#linkc fn SDL_GetGamepadAxisFromString(str: *const i8): SDL_GamepadAxis;
-#linkc fn SDL_GetGamepadStringForAxis(axis: SDL_GamepadAxis): *const i8;
+#linkc fn SDL_GetGamepadTypeFromString(str: *const u8): SDL_GamepadType;
+#linkc fn SDL_GetGamepadStringForType(type: SDL_GamepadType): *const u8;
+#linkc fn SDL_GetGamepadAxisFromString(str: *const u8): SDL_GamepadAxis;
+#linkc fn SDL_GetGamepadStringForAxis(axis: SDL_GamepadAxis): *const u8;
 #linkc fn SDL_GamepadHasAxis(gamepad: *SDL_Gamepad, axis: SDL_GamepadAxis): bool;
 #linkc fn SDL_GetGamepadAxis(gamepad: *SDL_Gamepad, axis: SDL_GamepadAxis): i16;
-#linkc fn SDL_GetGamepadButtonFromString(str: *const i8): SDL_GamepadButton;
-#linkc fn SDL_GetGamepadStringForButton(button: SDL_GamepadButton): *const i8;
+#linkc fn SDL_GetGamepadButtonFromString(str: *const u8): SDL_GamepadButton;
+#linkc fn SDL_GetGamepadStringForButton(button: SDL_GamepadButton): *const u8;
 #linkc fn SDL_GamepadHasButton(gamepad: *SDL_Gamepad, button: SDL_GamepadButton): bool;
 #linkc fn SDL_GetGamepadButton(gamepad: *SDL_Gamepad, button: SDL_GamepadButton): bool;
 #linkc fn SDL_GetGamepadButtonLabelForType(type: SDL_GamepadType, button: SDL_GamepadButton): SDL_GamepadButtonLabel;
@@ -1659,8 +1659,8 @@ struct SDL_GamepadBinding {
 #linkc fn SDL_SetGamepadLED(gamepad: *SDL_Gamepad, red: u8, green: u8, blue: u8): bool;
 #linkc fn SDL_SendGamepadEffect(gamepad: *SDL_Gamepad, data: *const u8, size: i32): bool;
 #linkc fn SDL_CloseGamepad(gamepad: *SDL_Gamepad): void;
-#linkc fn SDL_GetGamepadAppleSFSymbolsNameForButton(gamepad: *SDL_Gamepad, button: SDL_GamepadButton): *const i8;
-#linkc fn SDL_GetGamepadAppleSFSymbolsNameForAxis(gamepad: *SDL_Gamepad, axis: SDL_GamepadAxis): *const i8;
+#linkc fn SDL_GetGamepadAppleSFSymbolsNameForButton(gamepad: *SDL_Gamepad, button: SDL_GamepadButton): *const u8;
+#linkc fn SDL_GetGamepadAppleSFSymbolsNameForAxis(gamepad: *SDL_Gamepad, axis: SDL_GamepadAxis): *const u8;
 enum SDL_Scancode : i32 {
     SDL_SCANCODE_UNKNOWN := 0;
     SDL_SCANCODE_A := 4;
@@ -1918,7 +1918,7 @@ const SDL_Keymod : __type_ptr = #type u16;
 const SDL_KeyboardID : __type_ptr = #type u32;
 #linkc fn SDL_HasKeyboard(): bool;
 #linkc fn SDL_GetKeyboards(count: *i32): *SDL_KeyboardID;
-#linkc fn SDL_GetKeyboardNameForID(instance_id: SDL_KeyboardID): *const i8;
+#linkc fn SDL_GetKeyboardNameForID(instance_id: SDL_KeyboardID): *const u8;
 #linkc fn SDL_GetKeyboardFocus(): *SDL_Window;
 #linkc fn SDL_GetKeyboardState(numkeys: *i32): *const bool;
 #linkc fn SDL_ResetKeyboard(): void;
@@ -1926,11 +1926,11 @@ const SDL_KeyboardID : __type_ptr = #type u32;
 #linkc fn SDL_SetModState(modstate: SDL_Keymod): void;
 #linkc fn SDL_GetKeyFromScancode(scancode: SDL_Scancode, modstate: SDL_Keymod, key_event: bool): SDL_Keycode;
 #linkc fn SDL_GetScancodeFromKey(key: SDL_Keycode, modstate: *SDL_Keymod): SDL_Scancode;
-#linkc fn SDL_SetScancodeName(scancode: SDL_Scancode, name: *const i8): bool;
-#linkc fn SDL_GetScancodeName(scancode: SDL_Scancode): *const i8;
-#linkc fn SDL_GetScancodeFromName(name: *const i8): SDL_Scancode;
-#linkc fn SDL_GetKeyName(key: SDL_Keycode): *const i8;
-#linkc fn SDL_GetKeyFromName(name: *const i8): SDL_Keycode;
+#linkc fn SDL_SetScancodeName(scancode: SDL_Scancode, name: *const u8): bool;
+#linkc fn SDL_GetScancodeName(scancode: SDL_Scancode): *const u8;
+#linkc fn SDL_GetScancodeFromName(name: *const u8): SDL_Scancode;
+#linkc fn SDL_GetKeyName(key: SDL_Keycode): *const u8;
+#linkc fn SDL_GetKeyFromName(name: *const u8): SDL_Keycode;
 #linkc fn SDL_StartTextInput(window: *SDL_Window): bool;
 enum SDL_TextInputType : i32 {
     SDL_TEXTINPUT_TYPE_TEXT;
@@ -1998,7 +1998,7 @@ const SDL_MouseButtonFlags : __type_ptr = #type u32;
 const SDL_MouseMotionTransformCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: u64, _arg2: *SDL_Window, _arg3: SDL_MouseID, _arg4: *f32, _arg5: *f32): void;
 #linkc fn SDL_HasMouse(): bool;
 #linkc fn SDL_GetMice(count: *i32): *SDL_MouseID;
-#linkc fn SDL_GetMouseNameForID(instance_id: SDL_MouseID): *const i8;
+#linkc fn SDL_GetMouseNameForID(instance_id: SDL_MouseID): *const u8;
 #linkc fn SDL_GetMouseFocus(): *SDL_Window;
 #linkc fn SDL_GetMouseState(x: *f32, y: *f32): SDL_MouseButtonFlags;
 #linkc fn SDL_GetGlobalMouseState(x: *f32, y: *f32): SDL_MouseButtonFlags;
@@ -2037,7 +2037,7 @@ struct SDL_Finger {
 };
 
 #linkc fn SDL_GetTouchDevices(count: *i32): *SDL_TouchID;
-#linkc fn SDL_GetTouchDeviceName(touchID: SDL_TouchID): *const i8;
+#linkc fn SDL_GetTouchDeviceName(touchID: SDL_TouchID): *const u8;
 #linkc fn SDL_GetTouchDeviceType(touchID: SDL_TouchID): SDL_TouchDeviceType;
 #linkc fn SDL_GetTouchFingers(touchID: SDL_TouchID, count: *i32): **SDL_Finger;
 const SDL_PenID : __type_ptr = #type u32;
@@ -2238,7 +2238,7 @@ struct SDL_TextEditingEvent {
     reserved: u32;
     timestamp: u64;
     windowID: SDL_WindowID;
-    text: *const i8;
+    text: *const u8;
     start: i32;
     length: i32;
 };
@@ -2248,7 +2248,7 @@ struct SDL_TextEditingCandidatesEvent {
     reserved: u32;
     timestamp: u64;
     windowID: SDL_WindowID;
-    candidates: *const *const i8;
+    candidates: *const *const u8;
     num_candidates: i32;
     selected_candidate: i32;
     horizontal: bool;
@@ -2262,7 +2262,7 @@ struct SDL_TextInputEvent {
     reserved: u32;
     timestamp: u64;
     windowID: SDL_WindowID;
-    text: *const i8;
+    text: *const u8;
 };
 
 struct SDL_MouseDeviceEvent {
@@ -2543,8 +2543,8 @@ struct SDL_DropEvent {
     windowID: SDL_WindowID;
     x: f32;
     y: f32;
-    source: *const i8;
-    data: *const i8;
+    source: *const u8;
+    data: *const u8;
 };
 
 struct SDL_ClipboardEvent {
@@ -2553,7 +2553,7 @@ struct SDL_ClipboardEvent {
     timestamp: u64;
     owner: bool;
     num_mime_types: i32;
-    mime_types: **const i8;
+    mime_types: **const u8;
 };
 
 struct SDL_SensorEvent {
@@ -2612,8 +2612,8 @@ const SDL_EventFilter : __type_ptr = #type *fn(_arg0: *i32, _arg1: *SDL_Event): 
 #linkc fn SDL_RegisterEvents(numevents: i32): u32;
 #linkc fn SDL_GetWindowFromEvent(event: *const SDL_Event): *SDL_Window;
 #linkc fn SDL_GetEventDescription(event: *const SDL_Event, buf: *i8, buflen: i32): i32;
-#linkc fn SDL_GetBasePath(): *const i8;
-#linkc fn SDL_GetPrefPath(org: *const i8, app: *const i8): *i8;
+#linkc fn SDL_GetBasePath(): *const u8;
+#linkc fn SDL_GetPrefPath(org: *const u8, app: *const u8): *i8;
 enum SDL_Folder : i32 {
     SDL_FOLDER_HOME;
     SDL_FOLDER_DESKTOP;
@@ -2629,7 +2629,7 @@ enum SDL_Folder : i32 {
     SDL_FOLDER_COUNT;
 };
 
-#linkc fn SDL_GetUserFolder(folder: SDL_Folder): *const i8;
+#linkc fn SDL_GetUserFolder(folder: SDL_Folder): *const u8;
 enum SDL_PathType : i32 {
     SDL_PATHTYPE_NONE;
     SDL_PATHTYPE_FILE;
@@ -2646,20 +2646,20 @@ struct SDL_PathInfo {
 };
 
 const SDL_GlobFlags : __type_ptr = #type u32;
-#linkc fn SDL_CreateDirectory(path: *const i8): bool;
+#linkc fn SDL_CreateDirectory(path: *const u8): bool;
 enum SDL_EnumerationResult : i32 {
     SDL_ENUM_CONTINUE;
     SDL_ENUM_SUCCESS;
     SDL_ENUM_FAILURE;
 };
 
-const SDL_EnumerateDirectoryCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: *const i8, _arg2: *const i8): SDL_EnumerationResult;
-#linkc fn SDL_EnumerateDirectory(path: *const i8, callback: SDL_EnumerateDirectoryCallback, userdata: *u8): bool;
-#linkc fn SDL_RemovePath(path: *const i8): bool;
-#linkc fn SDL_RenamePath(oldpath: *const i8, newpath: *const i8): bool;
-#linkc fn SDL_CopyFile(oldpath: *const i8, newpath: *const i8): bool;
-#linkc fn SDL_GetPathInfo(path: *const i8, info: *SDL_PathInfo): bool;
-#linkc fn SDL_GlobDirectory(path: *const i8, pattern: *const i8, flags: SDL_GlobFlags, count: *i32): **i8;
+const SDL_EnumerateDirectoryCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: *const u8, _arg2: *const u8): SDL_EnumerationResult;
+#linkc fn SDL_EnumerateDirectory(path: *const u8, callback: SDL_EnumerateDirectoryCallback, userdata: *u8): bool;
+#linkc fn SDL_RemovePath(path: *const u8): bool;
+#linkc fn SDL_RenamePath(oldpath: *const u8, newpath: *const u8): bool;
+#linkc fn SDL_CopyFile(oldpath: *const u8, newpath: *const u8): bool;
+#linkc fn SDL_GetPathInfo(path: *const u8, info: *SDL_PathInfo): bool;
+#linkc fn SDL_GlobDirectory(path: *const u8, pattern: *const u8, flags: SDL_GlobFlags, count: *i32): **i8;
 #linkc fn SDL_GetCurrentDirectory(): *i8;
 enum SDL_GPUPrimitiveType : i32 {
     SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
@@ -3115,7 +3115,7 @@ struct SDL_GPUColorTargetBlendState {
 struct SDL_GPUShaderCreateInfo {
     code_size: usize;
     code: *const u8;
-    entrypoint: *const i8;
+    entrypoint: *const u8;
     format: SDL_GPUShaderFormat;
     stage: SDL_GPUShaderStage;
     num_samplers: u32;
@@ -3215,7 +3215,7 @@ struct SDL_GPUGraphicsPipelineCreateInfo {
 struct SDL_GPUComputePipelineCreateInfo {
     code_size: usize;
     code: *const u8;
-    entrypoint: *const i8;
+    entrypoint: *const u8;
     format: SDL_GPUShaderFormat;
     num_samplers: u32;
     num_readonly_storage_textures: u32;
@@ -3299,24 +3299,24 @@ struct SDL_GPUStorageTextureReadWriteBinding {
     padding3: u8;
 };
 
-#linkc fn SDL_GPUSupportsShaderFormats(format_flags: SDL_GPUShaderFormat, name: *const i8): bool;
+#linkc fn SDL_GPUSupportsShaderFormats(format_flags: SDL_GPUShaderFormat, name: *const u8): bool;
 #linkc fn SDL_GPUSupportsProperties(props: SDL_PropertiesID): bool;
-#linkc fn SDL_CreateGPUDevice(format_flags: SDL_GPUShaderFormat, debug_mode: bool, name: *const i8): *SDL_GPUDevice;
+#linkc fn SDL_CreateGPUDevice(format_flags: SDL_GPUShaderFormat, debug_mode: bool, name: *const u8): *SDL_GPUDevice;
 #linkc fn SDL_CreateGPUDeviceWithProperties(props: SDL_PropertiesID): *SDL_GPUDevice;
 struct SDL_GPUVulkanOptions {
     vulkan_api_version: u32;
     feature_list: *u8;
     vulkan_10_physical_device_features: *u8;
     device_extension_count: u32;
-    device_extension_names: **const i8;
+    device_extension_names: **const u8;
     instance_extension_count: u32;
-    instance_extension_names: **const i8;
+    instance_extension_names: **const u8;
 };
 
 #linkc fn SDL_DestroyGPUDevice(device: *SDL_GPUDevice): void;
 #linkc fn SDL_GetNumGPUDrivers(): i32;
-#linkc fn SDL_GetGPUDriver(index: i32): *const i8;
-#linkc fn SDL_GetGPUDeviceDriver(device: *SDL_GPUDevice): *const i8;
+#linkc fn SDL_GetGPUDriver(index: i32): *const u8;
+#linkc fn SDL_GetGPUDeviceDriver(device: *SDL_GPUDevice): *const u8;
 #linkc fn SDL_GetGPUShaderFormats(device: *SDL_GPUDevice): SDL_GPUShaderFormat;
 #linkc fn SDL_GetGPUDeviceProperties(device: *SDL_GPUDevice): SDL_PropertiesID;
 #linkc fn SDL_CreateGPUComputePipeline(device: *SDL_GPUDevice, createinfo: *const SDL_GPUComputePipelineCreateInfo): *SDL_GPUComputePipeline;
@@ -3326,10 +3326,10 @@ struct SDL_GPUVulkanOptions {
 #linkc fn SDL_CreateGPUTexture(device: *SDL_GPUDevice, createinfo: *const SDL_GPUTextureCreateInfo): *SDL_GPUTexture;
 #linkc fn SDL_CreateGPUBuffer(device: *SDL_GPUDevice, createinfo: *const SDL_GPUBufferCreateInfo): *SDL_GPUBuffer;
 #linkc fn SDL_CreateGPUTransferBuffer(device: *SDL_GPUDevice, createinfo: *const SDL_GPUTransferBufferCreateInfo): *SDL_GPUTransferBuffer;
-#linkc fn SDL_SetGPUBufferName(device: *SDL_GPUDevice, buffer: *SDL_GPUBuffer, text: *const i8): void;
-#linkc fn SDL_SetGPUTextureName(device: *SDL_GPUDevice, texture: *SDL_GPUTexture, text: *const i8): void;
-#linkc fn SDL_InsertGPUDebugLabel(command_buffer: *SDL_GPUCommandBuffer, text: *const i8): void;
-#linkc fn SDL_PushGPUDebugGroup(command_buffer: *SDL_GPUCommandBuffer, name: *const i8): void;
+#linkc fn SDL_SetGPUBufferName(device: *SDL_GPUDevice, buffer: *SDL_GPUBuffer, text: *const u8): void;
+#linkc fn SDL_SetGPUTextureName(device: *SDL_GPUDevice, texture: *SDL_GPUTexture, text: *const u8): void;
+#linkc fn SDL_InsertGPUDebugLabel(command_buffer: *SDL_GPUCommandBuffer, text: *const u8): void;
+#linkc fn SDL_PushGPUDebugGroup(command_buffer: *SDL_GPUCommandBuffer, name: *const u8): void;
 #linkc fn SDL_PopGPUDebugGroup(command_buffer: *SDL_GPUCommandBuffer): void;
 #linkc fn SDL_ReleaseGPUTexture(device: *SDL_GPUDevice, texture: *SDL_GPUTexture): void;
 #linkc fn SDL_ReleaseGPUSampler(device: *SDL_GPUDevice, sampler: *SDL_GPUSampler): void;
@@ -3502,11 +3502,11 @@ const SDL_HapticEffect := #run SDL_HapticEffectType |> type_union(SDL_HapticCons
 
 const SDL_HapticID : __type_ptr = #type u32;
 #linkc fn SDL_GetHaptics(count: *i32): *SDL_HapticID;
-#linkc fn SDL_GetHapticNameForID(instance_id: SDL_HapticID): *const i8;
+#linkc fn SDL_GetHapticNameForID(instance_id: SDL_HapticID): *const u8;
 #linkc fn SDL_OpenHaptic(instance_id: SDL_HapticID): *SDL_Haptic;
 #linkc fn SDL_GetHapticFromID(instance_id: SDL_HapticID): *SDL_Haptic;
 #linkc fn SDL_GetHapticID(haptic: *SDL_Haptic): SDL_HapticID;
-#linkc fn SDL_GetHapticName(haptic: *SDL_Haptic): *const i8;
+#linkc fn SDL_GetHapticName(haptic: *SDL_Haptic): *const u8;
 #linkc fn SDL_IsMouseHaptic(): bool;
 #linkc fn SDL_OpenHapticFromMouse(): *SDL_Haptic;
 #linkc fn SDL_IsJoystickHaptic(joystick: *SDL_Joystick): bool;
@@ -3564,7 +3564,7 @@ struct SDL_hid_device_info {
 #linkc fn SDL_hid_enumerate(vendor_id: u16, product_id: u16): *SDL_hid_device_info;
 #linkc fn SDL_hid_free_enumeration(devs: *SDL_hid_device_info): void;
 #linkc fn SDL_hid_open(vendor_id: u16, product_id: u16, serial_number: *const wchar_t): *SDL_hid_device;
-#linkc fn SDL_hid_open_path(path: *const i8): *SDL_hid_device;
+#linkc fn SDL_hid_open_path(path: *const u8): *SDL_hid_device;
 #linkc fn SDL_hid_get_properties(dev: *SDL_hid_device): SDL_PropertiesID;
 #linkc fn SDL_hid_write(dev: *SDL_hid_device, data: *const u8, length: usize): i32;
 #linkc fn SDL_hid_read_timeout(dev: *SDL_hid_device, data: *u8, length: usize, milliseconds: i32): i32;
@@ -3587,15 +3587,15 @@ enum SDL_HintPriority : i32 {
     SDL_HINT_OVERRIDE;
 };
 
-#linkc fn SDL_SetHintWithPriority(name: *const i8, value: *const i8, priority: SDL_HintPriority): bool;
-#linkc fn SDL_SetHint(name: *const i8, value: *const i8): bool;
-#linkc fn SDL_ResetHint(name: *const i8): bool;
+#linkc fn SDL_SetHintWithPriority(name: *const u8, value: *const u8, priority: SDL_HintPriority): bool;
+#linkc fn SDL_SetHint(name: *const u8, value: *const u8): bool;
+#linkc fn SDL_ResetHint(name: *const u8): bool;
 #linkc fn SDL_ResetHints(): void;
-#linkc fn SDL_GetHint(name: *const i8): *const i8;
-#linkc fn SDL_GetHintBoolean(name: *const i8, default_value: bool): bool;
-const SDL_HintCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: *const i8, _arg2: *const i8, _arg3: *const i8): void;
-#linkc fn SDL_AddHintCallback(name: *const i8, callback: SDL_HintCallback, userdata: *u8): bool;
-#linkc fn SDL_RemoveHintCallback(name: *const i8, callback: SDL_HintCallback, userdata: *u8): void;
+#linkc fn SDL_GetHint(name: *const u8): *const u8;
+#linkc fn SDL_GetHintBoolean(name: *const u8, default_value: bool): bool;
+const SDL_HintCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: *const u8, _arg2: *const u8, _arg3: *const u8): void;
+#linkc fn SDL_AddHintCallback(name: *const u8, callback: SDL_HintCallback, userdata: *u8): bool;
+#linkc fn SDL_RemoveHintCallback(name: *const u8, callback: SDL_HintCallback, userdata: *u8): void;
 const SDL_InitFlags : __type_ptr = #type u32;
 enum SDL_AppResult : i32 {
     SDL_APP_CONTINUE;
@@ -3615,15 +3615,15 @@ const SDL_AppQuit_func : __type_ptr = #type *fn(_arg0: *i32, _arg1: SDL_AppResul
 #linkc fn SDL_IsMainThread(): bool;
 const SDL_MainThreadCallback : __type_ptr = #type *fn(_arg0: *i32): void;
 #linkc fn SDL_RunOnMainThread(callback: SDL_MainThreadCallback, userdata: *u8, wait_complete: bool): bool;
-#linkc fn SDL_SetAppMetadata(appname: *const i8, appversion: *const i8, appidentifier: *const i8): bool;
-#linkc fn SDL_SetAppMetadataProperty(name: *const i8, value: *const i8): bool;
-#linkc fn SDL_GetAppMetadataProperty(name: *const i8): *const i8;
-#linkc fn SDL_LoadObject(sofile: *const i8): *SDL_SharedObject;
-#linkc fn SDL_LoadFunction(handle: *SDL_SharedObject, name: *const i8): SDL_FunctionPointer;
+#linkc fn SDL_SetAppMetadata(appname: *const u8, appversion: *const u8, appidentifier: *const u8): bool;
+#linkc fn SDL_SetAppMetadataProperty(name: *const u8, value: *const u8): bool;
+#linkc fn SDL_GetAppMetadataProperty(name: *const u8): *const u8;
+#linkc fn SDL_LoadObject(sofile: *const u8): *SDL_SharedObject;
+#linkc fn SDL_LoadFunction(handle: *SDL_SharedObject, name: *const u8): SDL_FunctionPointer;
 #linkc fn SDL_UnloadObject(handle: *SDL_SharedObject): void;
 struct SDL_Locale {
-    language: *const i8;
-    country: *const i8;
+    language: *const u8;
+    country: *const u8;
 };
 
 #linkc fn SDL_GetPreferredLocales(count: *i32): **SDL_Locale;
@@ -3666,18 +3666,18 @@ enum SDL_LogPriority : i32 {
 #linkc fn SDL_SetLogPriority(category: i32, priority: SDL_LogPriority): void;
 #linkc fn SDL_GetLogPriority(category: i32): SDL_LogPriority;
 #linkc fn SDL_ResetLogPriorities(): void;
-#linkc fn SDL_SetLogPriorityPrefix(priority: SDL_LogPriority, prefix: *const i8): bool;
-#linkc fn SDL_Log(fmt: *const i8, _variadic_args: *u8): void;
-#linkc fn SDL_LogTrace(category: i32, fmt: *const i8, _variadic_args: *u8): void;
-#linkc fn SDL_LogVerbose(category: i32, fmt: *const i8, _variadic_args: *u8): void;
-#linkc fn SDL_LogDebug(category: i32, fmt: *const i8, _variadic_args: *u8): void;
-#linkc fn SDL_LogInfo(category: i32, fmt: *const i8, _variadic_args: *u8): void;
-#linkc fn SDL_LogWarn(category: i32, fmt: *const i8, _variadic_args: *u8): void;
-#linkc fn SDL_LogError(category: i32, fmt: *const i8, _variadic_args: *u8): void;
-#linkc fn SDL_LogCritical(category: i32, fmt: *const i8, _variadic_args: *u8): void;
-#linkc fn SDL_LogMessage(category: i32, priority: SDL_LogPriority, fmt: *const i8, _variadic_args: *u8): void;
-#linkc fn SDL_LogMessageV(category: i32, priority: SDL_LogPriority, fmt: *const i8, ap: va_list): void;
-const SDL_LogOutputFunction : __type_ptr = #type *fn(_arg0: *i32, _arg1: i32, _arg2: SDL_LogPriority, _arg3: *const i8): void;
+#linkc fn SDL_SetLogPriorityPrefix(priority: SDL_LogPriority, prefix: *const u8): bool;
+#linkc fn SDL_Log(fmt: *const u8, _variadic_args: *u8): void;
+#linkc fn SDL_LogTrace(category: i32, fmt: *const u8, _variadic_args: *u8): void;
+#linkc fn SDL_LogVerbose(category: i32, fmt: *const u8, _variadic_args: *u8): void;
+#linkc fn SDL_LogDebug(category: i32, fmt: *const u8, _variadic_args: *u8): void;
+#linkc fn SDL_LogInfo(category: i32, fmt: *const u8, _variadic_args: *u8): void;
+#linkc fn SDL_LogWarn(category: i32, fmt: *const u8, _variadic_args: *u8): void;
+#linkc fn SDL_LogError(category: i32, fmt: *const u8, _variadic_args: *u8): void;
+#linkc fn SDL_LogCritical(category: i32, fmt: *const u8, _variadic_args: *u8): void;
+#linkc fn SDL_LogMessage(category: i32, priority: SDL_LogPriority, fmt: *const u8, _variadic_args: *u8): void;
+#linkc fn SDL_LogMessageV(category: i32, priority: SDL_LogPriority, fmt: *const u8, ap: va_list): void;
+const SDL_LogOutputFunction : __type_ptr = #type *fn(_arg0: *i32, _arg1: i32, _arg2: SDL_LogPriority, _arg3: *const u8): void;
 #linkc fn SDL_GetDefaultLogOutputFunction(): SDL_LogOutputFunction;
 #linkc fn SDL_GetLogOutputFunction(callback: *SDL_LogOutputFunction, userdata: **u8): void;
 #linkc fn SDL_SetLogOutputFunction(callback: SDL_LogOutputFunction, userdata: *u8): void;
@@ -3686,7 +3686,7 @@ const SDL_MessageBoxButtonFlags : __type_ptr = #type u32;
 struct SDL_MessageBoxButtonData {
     flags: SDL_MessageBoxButtonFlags;
     buttonID: i32;
-    text: *const i8;
+    text: *const u8;
 };
 
 struct SDL_MessageBoxColor {
@@ -3711,22 +3711,22 @@ struct SDL_MessageBoxColorScheme {
 struct SDL_MessageBoxData {
     flags: SDL_MessageBoxFlags;
     window: *SDL_Window;
-    title: *const i8;
-    message: *const i8;
+    title: *const u8;
+    message: *const u8;
     numbuttons: i32;
     buttons: *const SDL_MessageBoxButtonData;
     colorScheme: *const SDL_MessageBoxColorScheme;
 };
 
 #linkc fn SDL_ShowMessageBox(messageboxdata: *const SDL_MessageBoxData, buttonid: *i32): bool;
-#linkc fn SDL_ShowSimpleMessageBox(flags: SDL_MessageBoxFlags, title: *const i8, message: *const i8, window: *SDL_Window): bool;
+#linkc fn SDL_ShowSimpleMessageBox(flags: SDL_MessageBoxFlags, title: *const u8, message: *const u8, window: *SDL_Window): bool;
 const SDL_MetalView : __type_ptr = #type *u8;
 #linkc fn SDL_Metal_CreateView(window: *SDL_Window): SDL_MetalView;
 #linkc fn SDL_Metal_DestroyView(view: SDL_MetalView): void;
 #linkc fn SDL_Metal_GetLayer(view: SDL_MetalView): *u8;
-#linkc fn SDL_OpenURL(url: *const i8): bool;
-#linkc fn SDL_GetPlatform(): *const i8;
-#linkc fn SDL_CreateProcess(args: *const *const i8, pipe_stdio: bool): *SDL_Process;
+#linkc fn SDL_OpenURL(url: *const u8): bool;
+#linkc fn SDL_GetPlatform(): *const u8;
+#linkc fn SDL_CreateProcess(args: *const *const u8, pipe_stdio: bool): *SDL_Process;
 enum SDL_ProcessIO : i32 {
     SDL_PROCESS_STDIO_INHERITED;
     SDL_PROCESS_STDIO_NULL;
@@ -3777,16 +3777,16 @@ struct SDL_Texture {
 };
 
 #linkc fn SDL_GetNumRenderDrivers(): i32;
-#linkc fn SDL_GetRenderDriver(index: i32): *const i8;
-#linkc fn SDL_CreateWindowAndRenderer(title: *const i8, width: i32, height: i32, window_flags: SDL_WindowFlags, window: **SDL_Window, renderer: **SDL_Renderer): bool;
-#linkc fn SDL_CreateRenderer(window: *SDL_Window, name: *const i8): *SDL_Renderer;
+#linkc fn SDL_GetRenderDriver(index: i32): *const u8;
+#linkc fn SDL_CreateWindowAndRenderer(title: *const u8, width: i32, height: i32, window_flags: SDL_WindowFlags, window: **SDL_Window, renderer: **SDL_Renderer): bool;
+#linkc fn SDL_CreateRenderer(window: *SDL_Window, name: *const u8): *SDL_Renderer;
 #linkc fn SDL_CreateRendererWithProperties(props: SDL_PropertiesID): *SDL_Renderer;
 #linkc fn SDL_CreateGPURenderer(device: *SDL_GPUDevice, window: *SDL_Window): *SDL_Renderer;
 #linkc fn SDL_GetGPURendererDevice(renderer: *SDL_Renderer): *SDL_GPUDevice;
 #linkc fn SDL_CreateSoftwareRenderer(surface: *SDL_Surface): *SDL_Renderer;
 #linkc fn SDL_GetRenderer(window: *SDL_Window): *SDL_Renderer;
 #linkc fn SDL_GetRenderWindow(renderer: *SDL_Renderer): *SDL_Window;
-#linkc fn SDL_GetRendererName(renderer: *SDL_Renderer): *const i8;
+#linkc fn SDL_GetRendererName(renderer: *SDL_Renderer): *const u8;
 #linkc fn SDL_GetRendererProperties(renderer: *SDL_Renderer): SDL_PropertiesID;
 #linkc fn SDL_GetRenderOutputSize(renderer: *SDL_Renderer, w: *i32, h: *i32): bool;
 #linkc fn SDL_GetCurrentRenderOutputSize(renderer: *SDL_Renderer, w: *i32, h: *i32): bool;
@@ -3870,8 +3870,8 @@ struct SDL_Texture {
 #linkc fn SDL_AddVulkanRenderSemaphores(renderer: *SDL_Renderer, wait_stage_mask: u32, wait_semaphore: i64, signal_semaphore: i64): bool;
 #linkc fn SDL_SetRenderVSync(renderer: *SDL_Renderer, vsync: i32): bool;
 #linkc fn SDL_GetRenderVSync(renderer: *SDL_Renderer, vsync: *i32): bool;
-#linkc fn SDL_RenderDebugText(renderer: *SDL_Renderer, x: f32, y: f32, str: *const i8): bool;
-#linkc fn SDL_RenderDebugTextFormat(renderer: *SDL_Renderer, x: f32, y: f32, fmt: *const i8, _variadic_args: *u8): bool;
+#linkc fn SDL_RenderDebugText(renderer: *SDL_Renderer, x: f32, y: f32, str: *const u8): bool;
+#linkc fn SDL_RenderDebugTextFormat(renderer: *SDL_Renderer, x: f32, y: f32, fmt: *const u8, _variadic_args: *u8): bool;
 #linkc fn SDL_SetDefaultTextureScaleMode(renderer: *SDL_Renderer, scale_mode: SDL_ScaleMode): bool;
 #linkc fn SDL_GetDefaultTextureScaleMode(renderer: *SDL_Renderer, scale_mode: *SDL_ScaleMode): bool;
 struct SDL_GPURenderStateCreateInfo {
@@ -3893,35 +3893,35 @@ struct SDL_StorageInterface {
     version: u32;
     close: fn(_arg0: *i32): bool;
     ready: fn(_arg0: *i32): bool;
-    enumerate: fn(_arg0: *i32, _arg1: *const i8, _arg2: SDL_EnumerateDirectoryCallback, _arg3: *u8): bool;
-    info: fn(_arg0: *i32, _arg1: *const i8, _arg2: *SDL_PathInfo): bool;
-    read_file: fn(_arg0: *i32, _arg1: *const i8, _arg2: *u8, _arg3: u64): bool;
-    write_file: fn(_arg0: *i32, _arg1: *const i8, _arg2: *const u8, _arg3: u64): bool;
-    mkdir: fn(_arg0: *i32, _arg1: *const i8): bool;
-    remove: fn(_arg0: *i32, _arg1: *const i8): bool;
-    rename: fn(_arg0: *i32, _arg1: *const i8, _arg2: *const i8): bool;
-    copy: fn(_arg0: *i32, _arg1: *const i8, _arg2: *const i8): bool;
+    enumerate: fn(_arg0: *i32, _arg1: *const u8, _arg2: SDL_EnumerateDirectoryCallback, _arg3: *u8): bool;
+    info: fn(_arg0: *i32, _arg1: *const u8, _arg2: *SDL_PathInfo): bool;
+    read_file: fn(_arg0: *i32, _arg1: *const u8, _arg2: *u8, _arg3: u64): bool;
+    write_file: fn(_arg0: *i32, _arg1: *const u8, _arg2: *const u8, _arg3: u64): bool;
+    mkdir: fn(_arg0: *i32, _arg1: *const u8): bool;
+    remove: fn(_arg0: *i32, _arg1: *const u8): bool;
+    rename: fn(_arg0: *i32, _arg1: *const u8, _arg2: *const u8): bool;
+    copy: fn(_arg0: *i32, _arg1: *const u8, _arg2: *const u8): bool;
     space_remaining: fn(_arg0: *i32): u64;
 };
 
 const SDL_compile_time_assert_SDL_StorageInterface_SIZE : __type_ptr = #type *i32;
-#linkc fn SDL_OpenTitleStorage(override: *const i8, props: SDL_PropertiesID): *SDL_Storage;
-#linkc fn SDL_OpenUserStorage(org: *const i8, app: *const i8, props: SDL_PropertiesID): *SDL_Storage;
-#linkc fn SDL_OpenFileStorage(path: *const i8): *SDL_Storage;
+#linkc fn SDL_OpenTitleStorage(override: *const u8, props: SDL_PropertiesID): *SDL_Storage;
+#linkc fn SDL_OpenUserStorage(org: *const u8, app: *const u8, props: SDL_PropertiesID): *SDL_Storage;
+#linkc fn SDL_OpenFileStorage(path: *const u8): *SDL_Storage;
 #linkc fn SDL_OpenStorage(iface: *const SDL_StorageInterface, userdata: *u8): *SDL_Storage;
 #linkc fn SDL_CloseStorage(storage: *SDL_Storage): bool;
 #linkc fn SDL_StorageReady(storage: *SDL_Storage): bool;
-#linkc fn SDL_GetStorageFileSize(storage: *SDL_Storage, path: *const i8, length: *u64): bool;
-#linkc fn SDL_ReadStorageFile(storage: *SDL_Storage, path: *const i8, destination: *u8, length: u64): bool;
-#linkc fn SDL_WriteStorageFile(storage: *SDL_Storage, path: *const i8, source: *const u8, length: u64): bool;
-#linkc fn SDL_CreateStorageDirectory(storage: *SDL_Storage, path: *const i8): bool;
-#linkc fn SDL_EnumerateStorageDirectory(storage: *SDL_Storage, path: *const i8, callback: SDL_EnumerateDirectoryCallback, userdata: *u8): bool;
-#linkc fn SDL_RemoveStoragePath(storage: *SDL_Storage, path: *const i8): bool;
-#linkc fn SDL_RenameStoragePath(storage: *SDL_Storage, oldpath: *const i8, newpath: *const i8): bool;
-#linkc fn SDL_CopyStorageFile(storage: *SDL_Storage, oldpath: *const i8, newpath: *const i8): bool;
-#linkc fn SDL_GetStoragePathInfo(storage: *SDL_Storage, path: *const i8, info: *SDL_PathInfo): bool;
+#linkc fn SDL_GetStorageFileSize(storage: *SDL_Storage, path: *const u8, length: *u64): bool;
+#linkc fn SDL_ReadStorageFile(storage: *SDL_Storage, path: *const u8, destination: *u8, length: u64): bool;
+#linkc fn SDL_WriteStorageFile(storage: *SDL_Storage, path: *const u8, source: *const u8, length: u64): bool;
+#linkc fn SDL_CreateStorageDirectory(storage: *SDL_Storage, path: *const u8): bool;
+#linkc fn SDL_EnumerateStorageDirectory(storage: *SDL_Storage, path: *const u8, callback: SDL_EnumerateDirectoryCallback, userdata: *u8): bool;
+#linkc fn SDL_RemoveStoragePath(storage: *SDL_Storage, path: *const u8): bool;
+#linkc fn SDL_RenameStoragePath(storage: *SDL_Storage, oldpath: *const u8, newpath: *const u8): bool;
+#linkc fn SDL_CopyStorageFile(storage: *SDL_Storage, oldpath: *const u8, newpath: *const u8): bool;
+#linkc fn SDL_GetStoragePathInfo(storage: *SDL_Storage, path: *const u8, info: *SDL_PathInfo): bool;
 #linkc fn SDL_GetStorageSpaceRemaining(storage: *SDL_Storage): u64;
-#linkc fn SDL_GlobStorageDirectory(storage: *SDL_Storage, path: *const i8, pattern: *const i8, flags: SDL_GlobFlags, count: *i32): **i8;
+#linkc fn SDL_GlobStorageDirectory(storage: *SDL_Storage, path: *const u8, pattern: *const u8, flags: SDL_GlobFlags, count: *i32): **i8;
 const SDL_WindowsMessageHook : __type_ptr = #type *fn(_arg0: *i32, _arg1: *MSG): bool;
 #linkc fn SDL_SetWindowsMessageHook(callback: SDL_WindowsMessageHook, userdata: *u8): void;
 #linkc fn SDL_GetDirect3D9AdapterIndex(displayID: SDL_DisplayID): i32;
@@ -3992,18 +3992,18 @@ const SDL_NSTimerCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: SDL_Timer
 #linkc fn SDL_RemoveTimer(id: SDL_TimerID): bool;
 const SDL_TrayEntryFlags : __type_ptr = #type u32;
 const SDL_TrayCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: *SDL_TrayEntry): void;
-#linkc fn SDL_CreateTray(icon: *SDL_Surface, tooltip: *const i8): *SDL_Tray;
+#linkc fn SDL_CreateTray(icon: *SDL_Surface, tooltip: *const u8): *SDL_Tray;
 #linkc fn SDL_SetTrayIcon(tray: *SDL_Tray, icon: *SDL_Surface): void;
-#linkc fn SDL_SetTrayTooltip(tray: *SDL_Tray, tooltip: *const i8): void;
+#linkc fn SDL_SetTrayTooltip(tray: *SDL_Tray, tooltip: *const u8): void;
 #linkc fn SDL_CreateTrayMenu(tray: *SDL_Tray): *SDL_TrayMenu;
 #linkc fn SDL_CreateTraySubmenu(entry: *SDL_TrayEntry): *SDL_TrayMenu;
 #linkc fn SDL_GetTrayMenu(tray: *SDL_Tray): *SDL_TrayMenu;
 #linkc fn SDL_GetTraySubmenu(entry: *SDL_TrayEntry): *SDL_TrayMenu;
 #linkc fn SDL_GetTrayEntries(menu: *SDL_TrayMenu, count: *i32): **const SDL_TrayEntry;
 #linkc fn SDL_RemoveTrayEntry(entry: *SDL_TrayEntry): void;
-#linkc fn SDL_InsertTrayEntryAt(menu: *SDL_TrayMenu, pos: i32, label: *const i8, flags: SDL_TrayEntryFlags): *SDL_TrayEntry;
-#linkc fn SDL_SetTrayEntryLabel(entry: *SDL_TrayEntry, label: *const i8): void;
-#linkc fn SDL_GetTrayEntryLabel(entry: *SDL_TrayEntry): *const i8;
+#linkc fn SDL_InsertTrayEntryAt(menu: *SDL_TrayMenu, pos: i32, label: *const u8, flags: SDL_TrayEntryFlags): *SDL_TrayEntry;
+#linkc fn SDL_SetTrayEntryLabel(entry: *SDL_TrayEntry, label: *const u8): void;
+#linkc fn SDL_GetTrayEntryLabel(entry: *SDL_TrayEntry): *const u8;
 #linkc fn SDL_SetTrayEntryChecked(entry: *SDL_TrayEntry, checked: bool): void;
 #linkc fn SDL_GetTrayEntryChecked(entry: *SDL_TrayEntry): bool;
 #linkc fn SDL_SetTrayEntryEnabled(entry: *SDL_TrayEntry, enabled: bool): void;
@@ -4016,7 +4016,7 @@ const SDL_TrayCallback : __type_ptr = #type *fn(_arg0: *i32, _arg1: *SDL_TrayEnt
 #linkc fn SDL_GetTrayMenuParentTray(menu: *SDL_TrayMenu): *SDL_Tray;
 #linkc fn SDL_UpdateTrays(): void;
 #linkc fn SDL_GetVersion(): i32;
-#linkc fn SDL_GetRevision(): *const i8;
+#linkc fn SDL_GetRevision(): *const u8;
 
 // Numeric macro constants
 const SDL_PLATFORM_WINDOWS : i32 = 1;

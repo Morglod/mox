@@ -67,6 +67,56 @@ fn fmod(a: f32, b: f32): f32 { return c_fmodf(a, b); }
 fn fmod(a: f64, b: f64): f64 { return c_fmod(a, b); }
 // abs() exists in internal.mox
 
+fn mod(a: i32, b: i32): i32 { return a % b; }
+fn mod(a: i64, b: i64): i64 { return a % b; }
+fn mod(a: $T, b: $T): $T { return a % b; }
+fn mod(a: f32, b: f32): f32 { return fmod(a, b); }
+fn mod(a: f64, b: f64): f64 { return fmod(a, b); }
+fn mod(a: [$N]$T, b: [$N]$T): [$N]$T {
+    out : [$N]$T = #memory_garbage;
+
+    #run {
+        for (i : it_range($N)) {
+            #emit {
+                out[i] = mod(a[i], b[i]);
+            };
+        }
+    };
+
+    return out;
+}
+
+fn mod_euclid(x: $T, m: $T): $T {
+    r := x % m;
+    if (r < 0) {
+        return r + abs(m);
+    } else {
+        return r;
+    }
+}
+
+fn mod_euclid(v: [$N]$T, m: [$N]$T): [$N]$T {
+    out: [$N]$T = #memory_garbage;
+    #run {
+        for (i : it_range($N)) {
+            #emit out[i] = mod_euclid(v[i], m[i]);
+        }
+    };
+    return out;
+}
+
+fn abs(x: [$N]$T): [$N]$T {
+    out : [$N]$T = #memory_garbage;
+
+    #run {
+        for (i : it_range($N)) {
+            #emit out[i] = abs(x[i]);
+        }
+    };
+
+    return out;
+}
+
 fn pi($T: __type_ptr): $T {
     return 4 * atan(1 .cast($T));
 }
@@ -147,7 +197,11 @@ const vec4d := #type [4]f64;
 
 fn dot(a: [$N]$T, b: [$N]$T): $T {
     acc: $T = 0;
-    for (i : it_range($N)) { acc += a[i] * b[i]; }
+    #run {
+        for (i : it_range($N)) {
+            #emit acc += a[i] * b[i];
+        }
+    };
     return acc;
 }
 
@@ -169,24 +223,19 @@ fn reflect(v: [$N]$T, n: [$N]$T): [$N]$T {
     return v - n * (dot(v, n) * 2);
 }
 
-fn vmin(a: [$N]$T, b: [$N]$T): [$N]$T {
+fn min(a: [$N]$T, b: [$N]$T): [$N]$T {
     out: [$N]$T = a;
     for (i : it_range($N)) { out[i] = min(a[i], b[i]); }
     return out;
 }
-fn vmax(a: [$N]$T, b: [$N]$T): [$N]$T {
+fn max(a: [$N]$T, b: [$N]$T): [$N]$T {
     out: [$N]$T = a;
     for (i : it_range($N)) { out[i] = max(a[i], b[i]); }
     return out;
 }
-fn vclamp(v: [$N]$T, lo: [$N]$T, hi: [$N]$T): [$N]$T {
+fn clamp(v: [$N]$T, lo: [$N]$T, hi: [$N]$T): [$N]$T {
     out: [$N]$T = v;
     for (i : it_range($N)) { out[i] = clamp(v[i], lo[i], hi[i]); }
-    return out;
-}
-fn vabs(v: [$N]$T): [$N]$T {
-    out: [$N]$T = v;
-    for (i : it_range($N)) { out[i] = abs(v[i]); }
     return out;
 }
 
@@ -196,6 +245,10 @@ fn cross(a: [3]$T, b: [3]$T): [3]$T {
     out.y = a.z * b.x - a.x * b.z;
     out.z = a.x * b.y - a.y * b.x;
     return out;
+}
+
+fn cross(a: [2]$T, b: [2]$T): $T {
+    return a.x * b.y - a.y * b.x;
 }
 
 struct Matrix($T: __type_ptr, $X: u32, $Y: u32) {
@@ -474,4 +527,51 @@ fn quat_slerp(a: Quat($T), b: Quat($T), t: $T): Quat($T) {
     r.z = a.z*scale0 + b2.z*scale1;
     r.w = a.w*scale0 + b2.w*scale1;
     return r;
+}
+
+fn is_point_in_rect(point: []$T, a: []$T, b: []$T): bool {
+    N := min(point.len, a.len) |> min(b.len);
+    for (i : it_range(N)) {
+        if (point[i] < a[i] || point[i] > b[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+fn is_point_in_rect(point: [$N]$T, a: [$N]$T, b: [$N]$T): bool {
+    // TODO: comparison operators for builtin vectors
+    // return point >= a && point <= b;
+
+    ps : []$T = #memory_garbage;
+    ps.ptr = point.ptr;
+    ps.len = $N;
+
+    as : []$T = #memory_garbage;
+    as.ptr = a.ptr;
+    as.len = $N;
+    
+    bs : []$T = #memory_garbage;
+    bs.ptr = b.ptr;
+    bs.len = $N;
+    
+    return is_point_in_rect(ps, as, bs);
+}
+
+fn wrap_in_rect(p: [$N]$T, a: [$N]$T, b: [$N]$T): [$N]$T {
+    low := min(a, b);
+    high := max(a, b);
+    size := high - low;
+    return mod_euclid(p - low, size) + low;
+}
+
+fn angle_to_direction(radians: $T): [2]$T {
+    return [2]$T.{
+        cos(radians);
+        sin(radians);
+    };
+}
+
+fn angle_degree_to_direction(degrees: $T): [2]$T {
+    return angle_to_direction(to_radians(degrees));
 }

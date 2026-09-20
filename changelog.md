@@ -1,3 +1,39 @@
+## 0.1.7
+
+asteroids simple game example added
+
+### Compiler
+
+Fixed bug in interpreter with generic parameters
+
+Fixed dwarf ranges in jit backend
+
+Fixed bug with float mod op in jit backend
+
+Passing function to argument automatically takes pointer to it (before you should write .^ everytime)
+
+Fixed bug when function declared in another function body was wrongly compiled
+
+### Modules
+
+raylib vectors uses arrays now (which has vector math)
+
+raylib keys and colors added
+
+`*i8` for c strings replaced to mox's `*u8` in vendors
+
+`mod`, `abs` overloads in math.mox
+
+`mod_euclid` added
+
+`vmin`, `vmax`, `vclamp` renamed to just min, max, clamp and now correctly works as vector overloads for scalars
+
+`is_point_in_rect`, `wrap_in_rect`, `angle_to_direction`, `angle_degree_to_direction` added to math.mox
+
+`mem_copy` now automatically handles memory overlap case (memmove vs memcpy)
+
+`remove_if` and `remove_at` added to dynarr
+
 ## 0.1.6
 
 Docs on how to work with memory
