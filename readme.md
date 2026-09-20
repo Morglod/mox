@@ -27,7 +27,7 @@ To know language better, you can read [./by_example.mox](./by_example.mox)
 
 Zip archive already contains both versions of compiler and base modules.  
 
-* [0.1.6 (x86_64 Windows/Linux)](https://github.com/Morglod/mox/releases/download/0.1.6/mox_016_170926.zip)
+* [0.1.7 (x86_64 Windows/Linux)](https://github.com/Morglod/mox/releases/download/0.1.7/mox_017_200926.zip)
 
 *For highlighting you can use C or Go or Rust for now*
 
@@ -82,10 +82,10 @@ Code generation and ast manipulation:
 fn per_platform_import_statement($path: []u8): __ast_ptr {
     platform_subpath : []u8 = "";
 
-    switch (mox_platform) {
-        case .x86_64_win:
+    switch (MOX_OS) {
+        case .Windows:
             platform_subpath = "win";
-        case .x86_64_sysv:
+        case .Linux:
             platform_subpath = "sysv";
         case:
             platform_subpath = "unknown";

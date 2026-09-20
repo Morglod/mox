@@ -10,7 +10,7 @@ Fixed dwarf ranges in jit backend
 
 Fixed bug with float mod op in jit backend
 
-Passing function to argument automatically takes pointer to it (before you should write .^ everytime)
+Passing function to argument (or assigning it to variable) automatically takes pointer to it (before you should write .^ everytime)
 
 Fixed bug when function declared in another function body was wrongly compiled
 
