@@ -27,7 +27,7 @@ To know language better, you can read [./by_example.mox](./by_example.mox)
 
 Zip archive already contains both versions of compiler and base modules.  
 
-* [0.1.7 (x86_64 Windows/Linux)](https://github.com/Morglod/mox/releases/download/0.1.7/mox_017_200926.zip)
+* [0.1.8 (x86_64 Windows/Linux)](https://github.com/Morglod/mox/releases/download/0.1.8/mox_018_230926.zip)
 
 *For highlighting you can use C or Go or Rust for now*
 
