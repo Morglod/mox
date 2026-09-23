@@ -1,3 +1,21 @@
+## 0.1.8
+
+### Compiler
+
+Fixed bug with interpreter on nested function declarations
+
+Fixed distinct types for poly function signatures are now deduplicated
+
+Fixed interpreter global allocations to prevent stack overflow
+
+CLI's `out=` argument if not specified, defaults to file with right extention (.c for c backend, .ll/.s/.bc for different llvm formats, and .obj)
+
+Fixed multiple issues in C backend, asteroids now compiles right to C
+
+### Modules
+
+Fixed thread_local is_init flag added. (Before for init status, key!=0 was checked, which was worng).
+
 ## 0.1.7
 
 asteroids simple game example added

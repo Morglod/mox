@@ -282,7 +282,7 @@ fn mem_copy(dst: *u8, src: *u8, size: i64): void {
 
 fn mem_copy(dst: []$T, src: []$T): void {
     len := min(dst.len, src.len);
-    mem_copy(dst.ptr, src.ptr, len);
+    mem_copy(dst.ptr.cast(*u8), src.ptr.cast(*u8), len * sizeof_type($T));
 }
 
 fn mem_set(dst: *u8, value: u8, size: i64): void {

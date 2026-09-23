@@ -3,6 +3,10 @@
 
 import "internal.mox";
 
+#if (MOX_OS == .Linux) {
+    #run __compiler_link_lib("m", false);
+}
+
 #linkc("sqrtf") fn c_sqrtf(x: f32): f32;
 #linkc("sqrt")  fn c_sqrt(x: f64): f64;
 #linkc("sinf")  fn c_sinf(x: f32): f32;

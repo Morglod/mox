@@ -5,20 +5,23 @@ import "./panic.mox";
 
 struct ThreadLocalStorage($T: __type_ptr) {
     key: OsTlsKey;
+    is_init: bool;
 };
 
 fn create_thread_local($T: __type_ptr): ThreadLocalStorage($T) {
     storage: ThreadLocalStorage($T) = .{
         key = 0;
+        is_init = false;
     };
     return storage;
 }
 
 fn thread_local_init(storage: *ThreadLocalStorage($T)): bool {
-    if (storage.key == 0) {
+    if (!storage.is_init) {
         if (!os_tls_key_create_simple(storage.key.^)) {
             panic("failed init thread local storage: os_tls_key_create_simple failed");
         }
+        storage.is_init = true;
         if (#run $T.cast(*MoxType).kind != .Ptr) {
             ptr := mem_alloc(default_alloc(), $T, 8);
             ptr.* = 0;

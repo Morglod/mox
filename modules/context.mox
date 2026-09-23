@@ -41,7 +41,7 @@ fn init_default_context() {
 }
 
 fn _require_context_init() {
-    if (_context_is_init.key == 0) {
+    if (!_context_is_init.is_init) {
         init_default_context();
         thread_local_set(_context_is_init.^, 1 .cast(u64).cast(*u8));
         return;
