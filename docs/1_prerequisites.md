@@ -68,3 +68,5 @@ On Windows Microsoft SDK should be installed or compatible compiler setup
     ⚠️ After this you should always open "Developer Command Prompt"  
     or run `C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat`  
     each time you want to compile something
+
+    ⚠️ You should always specify llvm_target_triple="x86_64-pc-windows-msvc" to mox compiler, to be able to link with msvc clang

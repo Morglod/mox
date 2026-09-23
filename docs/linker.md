@@ -115,3 +115,5 @@ If msvc clang can not find system libraries:
     ```
 
 - try to install msys2 clang, read Windows section of [docs/1_prerequisites.md](./1_prerequisites.md)
+
+⚠️ You should always specify llvm_target_triple="x86_64-pc-windows-msvc" to mox compiler, to be able to link with msvc clang

@@ -6,3 +6,5 @@ pointers could not pass from comptime to runtime (except function pointers)
 comptime execution with llvm and C backend are limited to interpreter, so it could be slow
 
 i use unix paths and bash even on windows
+
+you should always specify llvm_target_triple="x86_64-pc-windows-msvc" to mox compiler, to be able to link with msvc clang
