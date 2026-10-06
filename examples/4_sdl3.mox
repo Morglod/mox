@@ -1,3 +1,5 @@
+// this example shows usage of sdl3 and macro expansion
+
 import "std.mox";
 import "vendor/sdl3.mox";
 
@@ -18,7 +20,7 @@ fn #fail($fmt: []u8, values: $T) {
     // 1. Initialize SDL
     init_status := SDL_Init(SDL_INIT_VIDEO);
     if (!init_status) {
-        #fail("sdl init failed with code: {}", .{ init_status; });
+        #fail("sdl init failed with code: {}", .{ init_status });
     }
 
     defer SDL_Quit();
@@ -32,7 +34,7 @@ fn #fail($fmt: []u8, values: $T) {
     defer SDL_DestroyWindow(window);
     
     // 3. Create Renderer
-    renderer := SDL_CreateRenderer(window, nullptr(i8));
+    renderer := SDL_CreateRenderer(window, nullptr(u8));
     if (renderer == 0) {
         #fail("render creation failed", .{});
     }

@@ -5,7 +5,7 @@ import "./format.mox";
 import "./context.mox";
 import "./slice.mox";
 import "./buffer_builder.mox";
-import "./c_interp.mox";
+import "./c_interop.mox";
 
 // ASCII only for now
 

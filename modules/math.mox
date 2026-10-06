@@ -38,6 +38,15 @@ import "internal.mox";
 #linkc("fmodf") fn c_fmodf(a: f32, b: f32): f32;
 #linkc("fmod")  fn c_fmod(a: f64, b: f64): f64;
 #linkc("fabs")  fn c_fabs(x: f64): f64;
+#linkc("fabsf")  fn c_fabsf(x: f32): f32;
+
+const LN_2_F32: f32     = 0.693147180559945309f;
+const LOG2_E_F32: f32   = 1.442695040888963407f;
+const LOG10_E_F32: f32  = 0.434294481903251828f;
+
+const LN_2_F64: f64    = 0.693147180559945309417232121458176568;
+const LOG2_E_F64: f64  = 1.44269504088896340735992468100189214;
+const LOG10_E_F64: f64 = 0.434294481903251827651128918916605082;
 
 fn sqrt(x: f32): f32 { return c_sqrtf(x); }
 fn sqrt(x: f64): f64 { return c_sqrt(x); }
@@ -61,8 +70,20 @@ fn exp(x: f32): f32 { return c_expf(x); }
 fn exp(x: f64): f64 { return c_exp(x); }
 fn log(x: f32): f32 { return c_logf(x); }
 fn log(x: f64): f64 { return c_log(x); }
+
 fn floor(x: f32): f32 { return c_floorf(x); }
 fn floor(x: f64): f64 { return c_floor(x); }
+
+fn floor(x: [$N]$T): [$N]$T {
+    out: [$N]$T = #memory_garbage;
+    #run {
+        for (i : it_range($N)) {
+            #emit out[i] = floor(x[i]);
+        }
+    };
+    return out;
+}
+
 fn ceil(x: f32): f32 { return c_ceilf(x); }
 fn ceil(x: f64): f64 { return c_ceil(x); }
 fn round(x: f32): f32 { return c_roundf(x); }
@@ -89,6 +110,22 @@ fn mod(a: [$N]$T, b: [$N]$T): [$N]$T {
 
     return out;
 }
+
+fn mix(a: $T, b: $T, k: $T): $T {
+    return a + (b - a) * k;
+}
+
+fn mix(a: [$N]$T, b: [$N]$T, k: $T): [$N]$T {
+    return a + (b - a) * k;
+}
+
+fn exp2(x: f32): f32  { return exp(x * LN_2_F32); }
+fn log2(x: f32): f32  { return log(x) * LOG2_E_F32; }
+fn log10(x: f32): f32 { return log(x) * LOG10_E_F32; }
+
+fn exp2(x: f64): f64  { return exp(x * LN_2_F64); }
+fn log2(x: f64): f64  { return log(x) * LOG2_E_F64; }
+fn log10(x: f64): f64 { return log(x) * LOG10_E_F64; }
 
 fn mod_euclid(x: $T, m: $T): $T {
     r := x % m;
@@ -122,8 +159,11 @@ fn abs(x: [$N]$T): [$N]$T {
 }
 
 fn pi($T: __type_ptr): $T {
-    return 4 * atan(1 .cast($T));
+    return #run 4 * atan(1 .cast($T));
 }
+
+const PI_F32 : f32 = pi(f32);
+const PI_F64 : f64 = pi(f64);
 
 fn to_radians(deg: $T): $T {
     return deg * pi($T) / 180;
@@ -578,4 +618,321 @@ fn angle_to_direction(radians: $T): [2]$T {
 
 fn angle_degree_to_direction(degrees: $T): [2]$T {
     return angle_to_direction(to_radians(degrees));
+}
+
+fn angle_to_direction_3d_yup(yaw: $T, pitch: $T): [3]$T {
+    cp := cos(pitch);
+    return [3]$T.{
+        cp * cos(yaw);
+        sin(pitch);
+        cp * sin(yaw);
+    };
+}
+
+fn angle_degree_to_direction_3d_yup(yaw: $T, pitch: $T): [3]$T {
+    return angle_to_direction_3d_yup(to_radians(yaw), to_radians(pitch));
+}
+
+fn quat_to_direction(q: Quat($T)): [3]$T {
+    return quat_rotate_vec(q, [3]$T.{1; 0; 0;});
+}
+
+fn sign(x: $T): $T {
+    if (x < 0) { return -1; }
+    if (x > 0) { return 1; }
+    return 0;  
+}
+
+fn sign(x: [$N]$T): [$N]$T {
+    out: [$N]$T = #memory_garbage;
+    #run {
+        for (i : it_range($N)) {
+            #emit out[i] = sign(x[i]);
+        }
+    };
+    return out;
+}
+
+fn saturate(x: $T): $T {
+    return clamp(x, 0, 1);
+}
+
+fn saturate(x: [$N]$T): [$N]$T {
+    out: [$N]$T = #memory_garbage;
+    #run {
+        for (i : it_range($N)) {
+            #emit out[i] = saturate(x[i]);
+        }
+    };
+    return out;
+}
+
+fn fract(x: $T): $T {
+    return x - floor(x);
+}
+
+fn trunc(x: $T): $T {
+    if (x < 0) {
+        return ceil(x);
+    }
+    return floor(x);
+}
+
+fn trunc(x: [$N]$T): [$N]$T {
+    out: [$N]$T = #memory_garbage;
+    #run {
+        for (i : it_range($N)) {
+            #emit out[i] = trunc(x[i]);
+        }
+    };
+    return out;
+}
+
+fn inverse_lerp(a: $T, b: $T, v: $T): $T {
+    return (v - a) / (b - a);
+}
+
+// remap [a,b] to [c,d]
+fn remap(x: $T, a: $T, b: $T, c: $T, d: $T): $T {
+    return lerp(c, d, inverse_lerp(a, b, x));
+}
+
+// remap [0,a] to [0,b]
+fn remap(x: $T, a: $T, b: $T): $T {
+    a1: $T = 0;
+    b1: $T = 0;
+    return lerp(b1, b, inverse_lerp(a1, a, x));
+}
+
+fn step(edge: $T, x: $T): $T {
+    if (x < edge) { return 0; }
+    return 1;
+}
+
+fn smoothstep(edge0: $T, edge1: $T, x: $T): $T {
+    t := clamp((x - edge0) / (edge1 - edge0), 0, 1);
+    return t * t * (3 - 2 * t);
+}
+
+fn smootherstep(edge0: $T, edge1: $T, x: $T): $T {
+    t := clamp((x - edge0) / (edge1 - edge0), 0, 1);
+    return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+fn approx_eq(a: $T, b: $T, epsilon: $T = 0.00001): bool {
+    if (a == b || is_inf(a) || is_inf(b)) { return true; }
+    diff := abs(a - b);
+    if (diff < epsilon) { return true; }
+    return diff <= epsilon * max(abs(a), abs(b));
+}
+
+// move with constat speed to goal (but not further)
+// pos = move_towards(pos, goal, speed * dt)
+fn move_towards(current: $T, target: $T, max_delta: $T): $T {
+    diff := target - current;
+    if (abs(diff) <= max_delta) {
+        return target;
+    }
+    return current + sign(diff) * max_delta;
+}
+
+// move with constat speed to goal (but not further)
+// pos = move_towards(pos, goal, speed * dt)
+fn move_towards(current: [$N]$T, target: [$N]$T, max_delta: $T): [$N]$T {
+    diff := target - current;
+    dist := length(diff);
+    if (dist <= max_delta || dist == 0) {
+        return target;
+    }
+    return current + diff * (max_delta / dist);
+}
+
+fn damp(a: $T, b: $T, rate: $T, dt: $T): $T {
+    return lerp(a, b, 1.0 - exp(-rate * dt));
+}
+
+fn damp(a: [$N]$T, b: [$N]$T, rate: $T, dt: $T): [$N]$T {
+    out: [$N]$T = #memory_garbage;
+    #run {
+        for (i : it_range($N)) {
+            #emit out[i] = damp(a[i], b[i], rate, dt);
+        }
+    };
+    return out;
+}
+
+fn damp_half(a: $T, b: $T, half: $T, dt: $T): $T {
+    return lerp(a, b, 1.0 - exp2(-dt / half));
+}
+
+fn damp_half(a: [$N]$T, b: [$N]$T, half: $T, dt: $T): [$N]$T {
+    out: [$N]$T = #memory_garbage;
+    #run {
+        for (i : it_range($N)) {
+            #emit out[i] = damp_half(a[i], b[i], half, dt);
+        }
+    };
+    return out;
+}
+
+fn smooth_damp(
+    current: $T,
+    target: $T,
+    velocity: *$T,
+    smooth_time: $T,
+    max_speed: $T,
+    dt: $T
+): $T {
+    smooth_time := max(0.0001, smooth_time);
+    omega := 2.0 / smooth_time;
+
+    // approximation of exp(-omega * dt)
+    x := omega * dt;
+    e := 1.0 / (1.0 + x + 0.48 * x * x + 0.235 * x * x * x);
+
+    // clamp maximum speed
+    original_target := target;
+    max_change := max_speed * smooth_time;
+    change := clamp(current - target, -max_change, max_change);
+    target = current - change;
+
+    temp := (velocity.* + omega * change) * dt;
+    velocity.* = (velocity.* - omega * temp) * e;
+    output := target + (change + temp) * e;
+
+    // prevent overshooting
+    if ((original_target - current > 0.0) == (output > original_target)) {
+        output = original_target;
+        velocity.* = (output - original_target) / dt;
+    }
+
+    return output;
+}
+
+fn smooth_damp(
+    current: [$N]$T,
+    target: [$N]$T,
+    velocity: *[$N]$T,
+    smooth_time: $T,
+    max_speed: $T,
+    dt: $T
+): [$N]$T {
+    smooth_time := max(0.0001, smooth_time);
+    omega := 2.0 / smooth_time;
+
+    // approximation of exp(-omega * dt)
+    x := omega * dt;
+    e := 1.0 / (1.0 + x + 0.48 * x * x + 0.235 * x * x * x);
+
+    // clamp maximum speed
+    original_target := target;
+    max_change := max_speed * smooth_time;
+    change := clamp(current - target, -max_change, max_change);
+    target = current - change;
+
+    temp := (velocity.* + omega * change) * dt;
+    velocity.* = (velocity.* - omega * temp) * e;
+    output := target + (change + temp) * e;
+
+    // prevent overshooting
+    #run {
+        for (i : it_range($N)) {
+            #emit {
+                if ((original_target[i] - current[i] > 0.0) == (output[i] > original_target[i])) {
+                    output[i] = original_target[i];
+                    velocity.*[i] = (output[i] - original_target[i]) / dt;
+                }
+            };
+        }
+    };
+
+    return output;
+}
+
+// Wraps t into [0, length). Like fmod, but always positive.
+fn repeat(t: $T, length: $T): $T {
+    return clamp(t - floor(t / length) * length, 0, length);
+}
+
+// Bounces t back and forth between 0 and length: 0 -> length -> 0 -> length ...
+fn ping_pong(t: $T, length: $T): $T {
+    t := repeat(t, length * 2);
+    return length - abs(t - length);
+}
+
+fn snap(x: $T, step: $T): $T {
+    if (step == 0) { return x; }
+    return round(x / step) * step;
+}
+
+fn snap(x: [$N]$T, step: $T): [$N]$T {
+    if (step == 0) { return x; }
+    out: [$N]$T = #memory_garbage;
+    #run {
+        for (i : it_range($N)) {
+            #emit out[i] = round(x[i] / step) * step;
+        }
+    };
+    return out;
+}
+
+fn hypot(x: f32, y: f32): f32 {
+    a := x.cast(f64);
+    b := y.cast(f64);
+    return sqrt(a * a + b * b) .cast(f32);
+}
+
+const HYPOT_F64_HI: f64 = 1.0e153;
+const HYPOT_F64_LO: f64 = 1.0e-150;
+
+fn hypot(x: f64, y: f64): f64 {
+    a := abs(x);
+    b := abs(y);
+    if (is_inf(a) || is_inf(b)) { return F64_INF; }
+
+    hi : f64 = #memory_garbage;
+    if (a > b) { hi = a; }
+    else { hi = b; }
+
+    // fast path: squares can't overflow or lose precision
+    if (hi < HYPOT_F64_HI && hi > HYPOT_F64_LO) {
+        return sqrt(a * a + b * b);
+    }
+
+    // Slow path: huge, tiny, zero, or NaN
+    if (a < b) {
+        tmp := a;
+        a = b;
+        b = tmp;
+    }
+    if (a == 0.0) { return 0.0; }
+    r := b / a;
+    return a * sqrt(1.0 + r * r);
+}
+
+fn copysign(x: f32, y: f32): f32 {
+    bits := (bitcast(u32, x) & 0x7FFFFFFF) | (bitcast(u32, y) & 0x80000000);
+    return bitcast(f32, bits);
+}
+
+fn copysign(x: f64, y: f64): f64 {
+    bits := (bitcast(u64, x) & 0x7FFFFFFFFFFFFFFF) | (bitcast(u64, y) & 0x8000000000000000);
+    return bitcast(f64, bits);
+}
+
+fn cbrt(x: $T): $T {
+    if (x == 0.0 || !is_finite(x)) { return x; }
+    y := copysign(pow(abs(x), 1.0 / 3.0), x);
+    y = y - (y * y * y - x) / (3.0 * y * y);
+    return y;
+}
+
+fn vec_cast($T_Dst: __type_ptr, src: [$N]$T): [$N]$T_Dst {
+    out : [$N]$T_Dst = #memory_garbage;
+    #run {
+        for (i : it_range($N)) {
+            #emit out[i] = src[i].cast($T_Dst);
+        }
+    };
+    return out;
 }

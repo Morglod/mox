@@ -270,7 +270,6 @@ struct AutomationEventList {
     events: *AutomationEvent;
 };
 
-const ConfigFlags : __type_ptr = #type i32;
 const TraceLogLevel : __type_ptr = #type i32;
 const KeyboardKey : __type_ptr = #type i32;
 const MouseButton : __type_ptr = #type i32;
@@ -306,9 +305,9 @@ const SaveFileTextCallback : __type_ptr = #type *fn(_arg0: *const u8, _arg1: *co
 #linkc fn IsWindowMaximized(): bool;
 #linkc fn IsWindowFocused(): bool;
 #linkc fn IsWindowResized(): bool;
-#linkc fn IsWindowState(flag: u32): bool;
-#linkc fn SetWindowState(flags: u32): void;
-#linkc fn ClearWindowState(flags: u32): void;
+#linkc fn IsWindowState(flag: RaylibConfigFlags): bool;
+#linkc fn SetWindowState(flags: RaylibConfigFlags): void;
+#linkc fn ClearWindowState(flags: RaylibConfigFlags): void;
 #linkc fn ToggleFullscreen(): void;
 #linkc fn ToggleBorderlessWindowed(): void;
 #linkc fn MaximizeWindow(): void;
@@ -1047,3 +1046,22 @@ const COLOR_BLACK      : Color = .{ 0; 0; 0; 255; };         // Black
 const COLOR_BLANK      : Color = .{ 0; 0; 0; 0; };           // Blank (Transparent)
 const COLOR_MAGENTA    : Color = .{ 255; 0; 255; 255; };     // Magenta
 const COLOR_RAYWHITE   : Color = .{ 245; 245; 245; 255; };   // My own White (raylib logo)
+
+enum RaylibConfigFlags : u32 {
+    VSYNC_HINT         := 0x00000040;   // Set to try enabling V-Sync on GPU
+    FULLSCREEN_MODE    := 0x00000002;   // Set to run program in fullscreen
+    WINDOW_RESIZABLE   := 0x00000004;   // Set to allow resizable window
+    WINDOW_UNDECORATED := 0x00000008;   // Set to disable window decoration (frame and buttons)
+    WINDOW_HIDDEN      := 0x00000080;   // Set to hide window
+    WINDOW_MINIMIZED   := 0x00000200;   // Set to minimize window (iconify)
+    WINDOW_MAXIMIZED   := 0x00000400;   // Set to maximize window (expanded to monitor)
+    WINDOW_UNFOCUSED   := 0x00000800;   // Set to window non focused
+    WINDOW_TOPMOST     := 0x00001000;   // Set to window always on top
+    WINDOW_ALWAYS_RUN  := 0x00000100;   // Set to allow windows running while minimized
+    WINDOW_TRANSPARENT := 0x00000010;   // Set to allow transparent framebuffer
+    WINDOW_HIGHDPI     := 0x00002000;   // Set to support HighDPI
+    WINDOW_MOUSE_PASSTHROUGH := 0x00004000; // Set to support mouse passthrough, only supported when WINDOW_UNDECORATED
+    BORDERLESS_WINDOWED_MODE := 0x00008000; // Set to run program in borderless windowed mode
+    MSAA_4X_HINT       := 0x00000020;   // Set to try enabling MSAA 4X
+    INTERLACED_HINT    := 0x00010000;   // Set to try enabling interlaced video format (for V3D)
+}

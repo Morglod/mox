@@ -97,3 +97,29 @@ fn utf8_encode(cp: u32, dst: []u8): i64 {
     n := utf8_encode(cp, dst.ptr);
     return n.cast(i64);
 }
+
+struct Utf8DecodeIterator {
+    text: []u8;
+    i: i64;
+    cur_cp: u32;
+};
+
+fn utf8_decode_iterate(text: []u8): Utf8DecodeIterator {
+    return .{
+        text = text;
+        i = 0;
+        cur_cp = 0;
+    };
+}
+
+fn iterator_next(it: *Utf8DecodeIterator): bool {
+    if (it.i < it.text.len) {
+        it.i += utf8_decode(it.text, it.i, it.cur_cp.^);
+        return true;
+    }
+    return false;
+}
+
+fn iterator_current(it: *Utf8DecodeIterator): u32 {
+    return it.cur_cp;
+}

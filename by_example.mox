@@ -46,8 +46,9 @@ fn vars_and_types() {
     var5 : MyStruct = #memory_garbage;
 
     // struct literals
-    var6 : MyStruct = .{ x = 123; };
-    var7 := MyStruct.{ x = 123; };
+    var6 : MyStruct = .{ x = 123 };
+    var7 := MyStruct.{ x = 123, };
+    var7 = .{ x = 123; };
 
     // string literals could materialize in two forms:
     // slice of u8 that points to constant memory
@@ -68,7 +69,7 @@ fn vars_and_types() {
     // [3]i32 is explicitly specified fixed array
     
     // [?]i32 is inferred length fixed array
-    var9: [?]i32 = .{ 0; 1; 2; 3; 4; };
+    var9: [?]i32 = .{ 0, 1, 2, 3, 4, };
     
     // for ergonomics on arrays, .ptr "field" is available
     // works as operator
@@ -426,6 +427,11 @@ fn comptime_and_globals() {
     // we sometimes need to check for it
     if (#is_comptime) {
 
+    }
+
+    // sometimes you also need to optimize for interpreter
+    if (#is_interp) {
+        
     }
 }
 

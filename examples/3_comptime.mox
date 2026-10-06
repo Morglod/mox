@@ -36,7 +36,7 @@ fn foo() {
         __compiler_link_lib("comptime_example.so", true);
         build_copy_to_output("./comptime_example.so");
     }
-    println("\ncomptime_example(10,20) = {}\n", .{ comptime_example(10, 20); });
+    println("\ncomptime_example(10,20) = {}\n", .{ comptime_example(10, 20) });
 }
 
 #linkc fn main(): i32 {

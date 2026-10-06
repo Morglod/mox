@@ -2,7 +2,7 @@ import "./internal.mox";
 import "./slice.mox";
 import "./vt_input.mox"; // shared Event model, filled by os_term_poll
 import "./context.mox";
-import "./c_interp.mox";
+import "./c_interop.mox";
 import "./arena.mox";
 import "./alloc.mox";
 import "./string.mox";
@@ -772,7 +772,6 @@ fn os_stdin_read_bytes(ti: *OsTermInput, buf: *u8, cap: i64): i64 {
     return pos;
 }
 
-// Slice variants that cannot live in os.mox: OsTermInput differs per platform, and #temp_c_string needs c_interp.mox which os.mox cannot import.
 // Keep in sync with os_posix.mox.
 
 fn os_stdin_read_bytes(ti: *OsTermInput, buf: []u8): i64 { return os_stdin_read_bytes(ti, buf.ptr, buf.len); }

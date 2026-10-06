@@ -125,6 +125,7 @@ struct MoxSourceLocation {
 // fn __compiler_internal_module_file_path(module_id: u64): []u8
 // fn __compiler_internal_link_lib(path: []u8, load_in_comptime: bool): void
 // fn __compiler_internal_append_linker(str: []u8): void
+// fn __compiler_register_hook(hook_id: u64, callback: <macro>, custom_data: *T): void
 // __mox_source_path_table
 // __mox_source_path_count
 
@@ -176,6 +177,10 @@ fn __mox_dangerously_format_to_type_ptr($type_ptr: u64): __type_ptr {
 
 const MOX_PLATFORM: MoxPlatform = __compiler_platform().cast(MoxPlatform);
 
+// hook ids for __compiler_register_hook
+const MOX_COMPILER_HOOK_NONE: u64 = 0;
+const MOX_COMPILER_HOOK_COMPILATION_ENDED: u64 = 1;
+
 fn _mox_internal_get_os(platform: MoxPlatform): MoxOs {
     switch (platform) {
         case .x86_64_win:
@@ -191,7 +196,7 @@ fn _mox_internal_get_os(platform: MoxPlatform): MoxOs {
 
 const MOX_OS: MoxOs = _mox_internal_get_os(MOX_PLATFORM);
 
-const MAX_U32: u32 = 4294967295;
+const MAX_U32: u32 = 0xFFFFFFFF;
 
 const MOX_IS_DEBUG: bool = false;
 
@@ -220,6 +225,15 @@ fn type_union($T1: __type_ptr, $T2: __type_ptr): __type_ptr {
 
 fn nullptr($T: __type_ptr): *$T {
     return 0 .cast(u64) .cast(*$T);
+}
+
+// utilities to work with types as values
+fn mox_make_ptr_type($T: __type_ptr): __type_ptr {
+    return #type *$T;
+}
+
+fn mox_make_ptr_type($T: *MoxType): __type_ptr {
+    return mox_make_ptr_type($T.cast(__type_ptr));
 }
 
 fn byte_offset(ptr: $T / *$P, offset: isize) : $T {
@@ -315,6 +329,13 @@ fn mem_eq(a: *$T, b: *$T): bool {
     sz := sizeof_type($T);
 
     return mem_eq(a.cast(*u8), b.cast(*u8), sz, sz);
+}
+
+fn bitcast($T_Dst: __type_ptr, x: $T_Src): $T_Dst {
+    y: $T_Dst = #memory_garbage;
+    zs := sizeof_type($T_Src);
+    mem_copy(y.^.cast(*u8), x.^.cast(*u8), min(sizeof_type($T_Src), sizeof_type($T_Dst)));
+    return y;
 }
 
 fn align_up(value: $T, align: $T): $T {
@@ -564,3 +585,48 @@ fn zeroed($T: __type_ptr): $T {
 const KILOBYTE: i64 = 1024;
 const MEGABYTE: i64 = KILOBYTE * 1024;
 const GIGABYTE: i64 = MEGABYTE * 1024;
+
+fn is_nan(x: f32): bool {
+    b := bitcast(u32, x) & 0x7FFFFFFF;
+    return b > 0x7F800000;
+}
+
+fn is_nan(x: f64): bool {
+    b := bitcast(u64, x) & 0x7FFFFFFFFFFFFFFF;
+    return b > 0x7FF0000000000000;
+}
+
+fn is_inf(x: f32): bool {
+    b := bitcast(u32, x) & 0x7FFFFFFF;
+    return b == 0x7F800000;
+}
+
+fn is_inf(x: f64): bool {
+    b := bitcast(u64, x) & 0x7FFFFFFFFFFFFFFF;
+    return b == 0x7FF0000000000000;
+}
+
+fn is_finite(x: f32): bool {
+    return (bitcast(u32, x) & 0x7F800000) != 0x7F800000;
+}
+
+fn is_finite(x: f64): bool {
+    return (bitcast(u64, x) & 0x7FF0000000000000) != 0x7FF0000000000000;
+}
+
+const F32_INF : f32 = bitcast(f32, 0x7F800000u32);
+const F64_INF : f64 = bitcast(f64, 0x7FF0000000000000u64);
+
+fn f_inf($T: __type_ptr): $T {
+    #if ($T.cast(*MoxType).kind == .F32) {
+        return F32_INF;
+    } else {
+        return F64_INF;
+    }
+}
+
+// later mox will have proper inline condition expression
+fn select(x: bool, a: $T, b: $T): $T {
+    if (x) { return b; }
+    return a;
+}

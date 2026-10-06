@@ -33,6 +33,18 @@ fn _c_string_into(tmp: []u8, str: []u8): *u8 {
     return tmp.ptr;
 }
 
+fn c_string_into(arena: *Arena, str: []u8): *u8 {
+    n := str.len;
+    if (n > 0 && str[n - 1] == 0) {
+        return str.ptr;
+    }
+
+    dst := arena_push_slice(arena, u8, str.len + 1);
+    mem_copy(dst, str);
+    dst[n] = 0;
+    return dst.ptr;
+}
+
 // useful when you need to pass null terminated C string to C api
 fn #temp_c_string(str: []u8): *u8 {
     tmp := #temp_buffer(str.len + 1);

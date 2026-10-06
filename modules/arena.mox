@@ -107,6 +107,14 @@ fn arena_push_copy(arena: *Arena, value: $T, align: u32 = 1): *$T {
     return ptr;
 }
 
+fn arena_push_slice(arena: *Arena, $T: __type_ptr, len: i64, align: u32 = 1): []$T {
+    ptr := arena_push(arena, sizeof_type($T) * len, align).ptr;
+    out: []$T = #memory_garbage;
+    out.ptr = ptr.cast(*$T);
+    out.len = len;
+    return out;
+}
+
 // copies s onto the arena
 fn arena_push_slice_copy(arena: *Arena, s: []$T, align: u32 = 1): []$T {
     elem_size := sizeof_type($T);

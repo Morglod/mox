@@ -1,0 +1,51 @@
+// this example shows:
+// how to transfer comptime function pointers to runtime
+// how to patch global variables at comptime after program compilation ended
+
+import "std.mox";
+
+struct Command {
+    name: []u8;
+    run: *fn (x: i32): i32;
+}
+
+// here we will store finished command list that will go to runtime
+commands: []Command = 0;   #no_comptime_reset
+
+// here will store commands at comptime
+_commands: DynArr(Command) = 0;
+
+#run {
+    dynarr_init(_commands.^, get_context_alloc());
+}
+
+fn register_command(name: []u8, run: *fn(x: i32): i32) {
+    push(_commands.^, Command.{
+        name = name;
+        run = run;
+    });
+}
+
+fn double(x: i32): i32 { return x * 2; }
+fn square(x: i32): i32 { return x * x; }
+
+#run register_command("double", double);
+#run register_command("square", square);
+
+fn #build_command_list(_: *u8): void {
+    // because it was allocated at comptime and never freed
+    // we could safely assign slice of commands to "no reset" global
+    commands = _commands.items;
+}
+
+// this hook will be executed at the end of whole program compilation
+#run __compiler_register_hook(MOX_COMPILER_HOOK_COMPILATION_ENDED, #build_command_list, nullptr(u8));
+
+#linkc fn main(): i32 {
+    // here at runtime we have list of registered commands with valid function pointers
+    for (i : it_range(commands.len)) {
+        result := commands[i].run(3);
+        println("command {} name='{}' run(3)={}", .{ i, commands[i].name, result });
+    }
+    return 0;
+}

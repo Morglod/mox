@@ -1,3 +1,5 @@
+// this example shows raylib usage and running any external code at comptime
+
 import "std.mox";
 import "vendor/raylib.mox";
 
@@ -10,7 +12,7 @@ fn show_simple_window(window_title: *u8) {
 
     while (!WindowShouldClose()) {
         BeginDrawing();
-        ClearBackground(Color.{ 24; 24; 24; 255; });
+        ClearBackground(Color.{ 24, 24, 24, 255 });
         EndDrawing();
     }
 }
