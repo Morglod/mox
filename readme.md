@@ -91,7 +91,7 @@ fn per_platform_import_statement($path: []u8): __ast_ptr {
             platform_subpath = "unknown";
     }
 
-    code_str := #format_temp("import \"{}_{}\";", .{ $path; platform_subpath; });
+    code_str := #format_temp("import \"{}_{}\";", .{ $path, platform_subpath });
     ast := __compiler_parse(code_str);
     return ast;
 }
