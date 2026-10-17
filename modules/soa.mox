@@ -62,35 +62,27 @@ fn __soa_fields_count($soa_type: __type_ptr): i64 {
 
 fn soa_alloc(soa: *$T, max_items: i64, alloc: *Alloc): void {
     const fields_count := __soa_fields_count($T);
-    #run {
-        for (i : it_range(fields_count)) {
-            const field_type := __soa_field_type($T, i);
-            const field_type_size := field_type.size .cast(i64);
-            #emit soa.__soa_slots[i] = mem_alloc_slice(alloc, u8, field_type_size * max_items);
-        }
-    };
+    #for (i : it_range(fields_count)) {
+        const field_type := __soa_field_type($T, i);
+        const field_type_size := field_type.size .cast(i64);
+        soa.__soa_slots[i] = mem_alloc_slice(alloc, u8, field_type_size * max_items);
+    }
 }
 
 fn soa_realloc(soa: *$T, max_items: i64, alloc: *Alloc): void {
     const fields_count := __soa_fields_count($T);
-    #run {
-        for (i : it_range(fields_count)) {
-            const field_type := __soa_field_type($T, i);
-            const field_type_size := field_type.size .cast(i64);
-            #emit soa.__soa_slots[i] = mem_realloc_slice(alloc, soa.__soa_slots[i], field_type_size * max_items);
-        }
-    };
+    #for (i : it_range(fields_count)) {
+        const field_type := __soa_field_type($T, i);
+        const field_type_size := field_type.size .cast(i64);
+        soa.__soa_slots[i] = mem_realloc_slice(alloc, soa.__soa_slots[i], field_type_size * max_items);
+    }
 }
 
 fn soa_free(soa: *$T, max_items: i64, alloc: *Alloc): void {
     const fields_count := __soa_fields_count($T);
-    #run {
-        for (i : it_range(fields_count)) {
-            #emit {
-                soa.__soa_slots[i] = mem_free(alloc, soa.__soa_slots[i]);
-                soa.__soa_slots[i].ptr = nullptr(u8);
-                soa.__soa_slots[i].len = 0;
-            };
-        }
-    };
+    #for (i : it_range(fields_count)) {
+        soa.__soa_slots[i] = mem_free(alloc, soa.__soa_slots[i]);
+        soa.__soa_slots[i].ptr = nullptr(u8);
+        soa.__soa_slots[i].len = 0;
+    }
 }

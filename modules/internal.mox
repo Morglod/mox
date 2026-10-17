@@ -62,14 +62,17 @@ enum MoxTypeKind : u8 {
     Placeholder;
     ComptimeInt;
     ComptimeFloat;
+    PolyTypePattern;
 };
 
 struct MoxType {
     type_hash: u64;
     size: u32;
     kind: MoxTypeKind;
-    align: u8;
+    _align: u8;
     flags: u8;
+
+    #alias align = alignof_type(self);
 };
 
 struct MoxType_Ptr {
@@ -109,6 +112,34 @@ struct MoxType_Struct {
     alias_info: __ast_ptr;
 };
 
+// this is compiler internals which could be changed frequently
+enum _Mox_CValue_Flag : u8 {
+    is_bad := 1;
+    is_comptime := 2;
+    is_const := 4;
+    is_string_literal := 8;
+    is_reference_ptr := 16;
+    is_place := 32;
+    is_global_internal_alloc := 64;
+};
+
+struct _Mox_CValue {
+    flags: _Mox_CValue_Flag;
+    type: *MoxType;
+    payload: u64;
+};
+
+struct MoxType_Enum_Field {
+    ident: __ast_ptr;
+    value: _Mox_CValue;
+};
+
+struct MoxType_Enum {
+    base: MoxType;
+    enum_base_type: *MoxType;
+    values: []MoxType_Enum_Field;
+};
+
 // structure for #caller_location
 struct MoxSourceLocation {
     offset: u64;
@@ -118,6 +149,7 @@ struct MoxSourceLocation {
 
 // fn __type_equal(a: __type_ptr, b: __type_ptr): bool
 // fn __compiler_print_type(t: __type_ptr): void
+// fn __compiler_alignof_type(t: __type_ptr): u32   (use alignof_type)
 // fn __compiler_platform(): u8   cast to MoxPlatform
 // fn __compiler_parse(code: []u8): __ast_ptr   parses in the CALLER module
 // fn __compiler_ast_to_string(ast: __ast_ptr): []u8
@@ -205,12 +237,21 @@ fn sizeof_type($T: __type_ptr): i64 {
     return sz.cast(i64);
 }
 
+fn alignof_type($T: __type_ptr): u32 {
+    return #run __compiler_alignof_type($T);
+}
+
 fn mox_struct_fields($T: __type_ptr): []MoxType_StructField {
     return $T.cast(*MoxType).cast(*MoxType_Struct).fields;
 }
 
 fn mox_struct_field_type($T: __type_ptr, i: i64): __type_ptr {
     return $T.cast(*MoxType).cast(*MoxType_Struct).fields[i].type.cast(__type_ptr);
+}
+
+fn #field_ptr(value: *$T, $i: i64): #run mox_make_ptr_type(mox_struct_field_type($T, $i)) {
+    const FIELD_OFFSET := $T.cast(*MoxType).cast(*MoxType_Struct).fields[$i].memory_offset.cast(u64);
+    return value |> byte_offset(FIELD_OFFSET) .cast(#run mox_make_ptr_type(mox_struct_field_type($T, $i)));
 }
 
 fn type_union($T1: __type_ptr, $T2: __type_ptr): __type_ptr {
@@ -257,16 +298,8 @@ fn ty_offset(ptr: $T / *$P, offset: isize) : $T {
     return byte_offset(ptr, sizeof_type($P) * offset);
 }
 
-fn ty_offset($ty: $T/__type_ptr, ptr: *$T, offset: isize) : *$T {
-    return byte_offset(ptr, sizeof_type($T) * offset);
-}
-
 fn ty_offset(ptr: $T / *$P, offset: usize) : $T {
     return byte_offset(ptr, sizeof_type($P).cast(u64) * offset);
-}
-
-fn ty_offset($ty: $T/__type_ptr, ptr: *$T, offset: usize) : *$T {
-    return byte_offset(ptr, sizeof_type($T).cast(u64) * offset);
 }
 
 fn ptr_ty_diff(base: *$T, x: *$T): i64 {
@@ -305,6 +338,14 @@ fn mem_set(dst: *u8, value: u8, size: i64): void {
         dst.* = value;
         dst = dst |> byte_offset(1);
     }
+}
+
+fn mem_zero(dst: *$T): void {
+    mem_set(dst.cast(*u8), 0, sizeof_type($T));
+}
+
+fn mem_zero(dst: *u8, size: i64): void {
+    mem_set(dst, 0, size);
 }
 
 fn mem_eq(a: *u8, b: *u8, size_a: i64, size_b: i64): bool {
@@ -361,9 +402,7 @@ fn max(a: $T, b: $T): $T {
 }
 
 fn clamp(x: $T, lo: $T, hi: $T): $T {
-    if (x < lo) { return lo; }
-    if (x > hi) { return hi; }
-    return x;
+    return min(max(x, lo), hi);
 }
 
 fn abs(x: $T): $T {

@@ -388,6 +388,11 @@ fn comptime_exec() {
         }
     };
 
+    // which is the same as this with comptime #for
+    #for (i : it_range(10u32)) {
+        var4 += i;
+    }
+
     // there are compiler builtin function that could parse any string as mox code to ast
     const code : __ast_ptr = __compiler_parse("libc_puts(\"hello world from comptime 3!\");");
 

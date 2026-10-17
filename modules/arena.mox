@@ -96,18 +96,21 @@ fn arena_push(arena: *Arena, size: i64, align: u32 = 1): []u8 {
     return s;
 }
 
-fn arena_push(arena: *Arena, $T: __type_ptr, align: u32 = 1): *$T {
+fn arena_push(arena: *Arena, $T: __type_ptr, align: u32 = 0): *$T {
+    if (align == 0) { align = alignof_type(#type $T); }
     ptr := arena_push(arena, sizeof_type($T), align).ptr;
     return ptr.cast(*$T);
 }
 
-fn arena_push_copy(arena: *Arena, value: $T, align: u32 = 1): *$T {
+fn arena_push_copy(arena: *Arena, value: $T, align: u32 = 0): *$T {
+    if (align == 0) { align = alignof_type(#type $T); }
     ptr := arena_push(arena, $T, align);
     ptr.* = value;
     return ptr;
 }
 
-fn arena_push_slice(arena: *Arena, $T: __type_ptr, len: i64, align: u32 = 1): []$T {
+fn arena_push_slice(arena: *Arena, $T: __type_ptr, len: i64, align: u32 = 0): []$T {
+    if (align == 0) { align = alignof_type(#type $T); }
     ptr := arena_push(arena, sizeof_type($T) * len, align).ptr;
     out: []$T = #memory_garbage;
     out.ptr = ptr.cast(*$T);
@@ -116,7 +119,8 @@ fn arena_push_slice(arena: *Arena, $T: __type_ptr, len: i64, align: u32 = 1): []
 }
 
 // copies s onto the arena
-fn arena_push_slice_copy(arena: *Arena, s: []$T, align: u32 = 1): []$T {
+fn arena_push_slice_copy(arena: *Arena, s: []$T, align: u32 = 0): []$T {
+    if (align == 0) { align = alignof_type($T); }
     elem_size := sizeof_type($T);
     mem := arena_push(arena, elem_size * s.len, align);
     mem_copy(mem.ptr, s.ptr.cast(*u8), elem_size * s.len);
@@ -127,12 +131,12 @@ fn arena_push_slice_copy(arena: *Arena, s: []$T, align: u32 = 1): []$T {
 }
 
 fn arena_push_str_copy(arena: *Arena, s: []u8): []u8 {
-    return arena_push_slice_copy(arena, s);
+    return arena_push_slice_copy(arena, s, 1);
 }
 
 // copies as a C string: NUL-terminated, and the NUL is counted in the returned slice's len
 fn arena_push_str_copy_c(arena: *Arena, s: []u8): []u8 {
-    mem := arena_push(arena, s.len + 1);
+    mem := arena_push(arena, s.len + 1, 1);
     mem_copy(mem.ptr, s.ptr, s.len);
     mem[s.len] = 0;
     return mem;
@@ -141,7 +145,7 @@ fn arena_push_str_copy_c(arena: *Arena, s: []u8): []u8 {
 fn arena_pop_to(arena: *Arena, new_pos: i64, size: i64): void {
     arena.pos = new_pos;
     #if (ARENA_ZERO_ON_POP) {
-        mem_set(arena_ptr_at(arena, new_pos), 0, size);
+        mem_zero(arena_ptr_at(arena, new_pos), size);
     }
 }
 

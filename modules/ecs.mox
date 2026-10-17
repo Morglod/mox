@@ -61,15 +61,10 @@ fn arch_init(arch: *Archetype($S), alloc: *Alloc, cap: i64): void {
     }
 
     // one dense array per component, unrolled at comptime
-    #run {
-        n := __compiler_members_count($S);
-        for (ci : it_range(n)) {
-            csize := __compiler_sizeof(__compiler_member_type($S, ci));
-            #emit {
-                arch.slots[ci] = mem_alloc(alloc, cap * csize, 64);
-            };
-        }
-    };
+    #for (ci : it_range(__compiler_members_count($S))) {
+        const csize := sizeof_type(__compiler_member_type($S, ci));
+        arch.slots[ci] = mem_alloc(alloc, cap * csize, 64);
+    }
 }
 
 fn arch_alive(arch: *Archetype($S), e: Entity): bool {
@@ -119,15 +114,10 @@ fn arch_destroy(arch: *Archetype($S), e: Entity): void {
     last_dense := arch.count;
 
     if (dead_dense != last_dense) {
-        #run {
-            n := __compiler_members_count($S);
-            for (ci : it_range(n)) {
-                csize := __compiler_sizeof(__compiler_member_type($S, ci));
-                #emit {
-                    mem_copy(byte_offset(arch.slots[ci], dead_dense * csize), byte_offset(arch.slots[ci], last_dense * csize), csize);
-                };
-            }
-        };
+        #for (ci : it_range(__compiler_members_count($S))) {
+            const csize := __compiler_sizeof(__compiler_member_type($S, ci));
+            mem_copy(byte_offset(arch.slots[ci], dead_dense * csize), byte_offset(arch.slots[ci], last_dense * csize), csize);
+        }
         moved_slot := arch.dense_to_slot[last_dense];
         arch.slot_to_dense[moved_slot] = dead_dense.cast(u32);
         arch.dense_to_slot[dead_dense] = moved_slot;
@@ -161,16 +151,11 @@ fn iterator_current(it: *ArchIter): i64 {
 // for per archetype capacity call arch_init on the fields directly
 fn ecs_init(world: *$W, alloc: *Alloc, cap: i64): void {
     base := world.cast(*u8);
-    #run {
-        n := __compiler_members_count($W);
-        for (ai : it_range(n)) {
-            atype := __compiler_member_type($W, ai);
-            aoff  := __compiler_member_offset($W, ai);
-            #emit {
-                arch_init(byte_offset(base, aoff).cast(#type *atype), alloc, cap);
-            };
-        }
-    };
+    #for (i : it_range(__compiler_members_count($W))) {
+        const atype := __compiler_member_type($W, i);
+        const aoff  := __compiler_member_offset($W, i);
+        arch_init(byte_offset(base, aoff).cast(#type *atype), alloc, cap);
+    }
 }
 
 struct Query($W: __type_ptr, $R: __type_ptr) {
@@ -214,16 +199,11 @@ fn ecs_query(world: *$W, $R: __type_ptr): Query($W, $R) {
     q : Query($W, $R) = 0;
     q.cur_seg = -1;
     base := world.cast(*u8);
-    #run {
-        na := __compiler_members_count($W);
-        for (ai : it_range(na)) {
-            atype := __compiler_member_type($W, ai);
-            aoff  := __compiler_member_offset($W, ai);
-            #emit {
-                _query_scan(byte_offset(base, aoff).cast(#type *atype), q.^);
-            };
-        }
-    };
+    #for (i : it_range(__compiler_members_count($W))) {
+        const atype := __compiler_member_type($W, i);
+        const aoff  := __compiler_member_offset($W, i);
+        _query_scan(byte_offset(base, aoff).cast(#type *atype), q.^);
+    }
     return q;
 }
 

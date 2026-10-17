@@ -1,0 +1,1942 @@
+// Auto-generated bindings from: box3d/box3d.h (Box3D by Erin Catto, MIT, https://github.com/erincatto/box3d)
+// Generator: gen_bindings (c99_parser)
+
+import "internal.mox";
+import "./box3d/link.mox";
+
+// Opaque types (forward-declared structs without definitions)
+const b3Recording := u64;  // opaque type
+const b3RecPlayer := u64;  // opaque type
+
+const b3AllocFcn : __type_ptr = #type fn(size: i32, alignment: i32): *u8;
+const b3FreeFcn : __type_ptr = #type fn(mem: *u8): void;
+const b3AssertFcn : __type_ptr = #type fn(condition: *const u8, fileName: *const u8, lineNumber: i32): i32;
+const b3LogFcn : __type_ptr = #type fn(message: *const u8): void;
+#linkc fn b3SetAllocator(allocFcn: *b3AllocFcn, freeFcn: *b3FreeFcn): void;
+#linkc fn b3GetByteCount(): i32;
+#linkc fn b3SetAssertFcn(assertFcn: *b3AssertFcn): void;
+#linkc fn b3InternalAssert(condition: *const u8, fileName: *const u8, lineNumber: i32): i32;
+#linkc fn b3SetLogFcn(logFcn: *b3LogFcn): void;
+struct b3Version {
+    major: i32;
+    minor: i32;
+    revision: i32;
+};
+
+#linkc fn b3GetVersion(): b3Version;
+#linkc fn b3IsDoublePrecision(): bool;
+#linkc fn b3GetTicks(): u64;
+#linkc fn b3GetMilliseconds(ticks: u64): f32;
+#linkc fn b3GetMillisecondsAndReset(ticks: *u64): f32;
+#linkc fn b3Yield(): void;
+#linkc fn b3Sleep(milliseconds: i32): void;
+#linkc fn b3Hash(hash: u32, data: *const u8, count: i32): u32;
+
+const b3Vec2 := #type [2]f32;
+
+const b3Vec3 := #type [3]f32;
+
+struct b3CosSin {
+    cosine: f32;
+    sine: f32;
+};
+
+struct b3Quat {
+    v: b3Vec3;
+    s: f32;
+};
+
+struct b3Transform {
+    p: b3Vec3;
+    q: b3Quat;
+};
+
+const b3Pos : __type_ptr = #type b3Vec3;
+const b3WorldTransform : __type_ptr = #type b3Transform;
+struct b3Matrix3 {
+    cx: b3Vec3;
+    cy: b3Vec3;
+    cz: b3Vec3;
+};
+
+struct b3AABB {
+    lowerBound: b3Vec3;
+    upperBound: b3Vec3;
+};
+
+struct b3Plane {
+    normal: b3Vec3;
+    offset: f32;
+};
+
+const b3Vec3_zero : b3Vec3 = zeroed(b3Vec3);
+const b3Vec3_one : b3Vec3 = b3Vec3.{ 1.0f; 1.0f; 1.0f; };
+const b3Vec3_axisX : b3Vec3 = b3Vec3.{ 1.0f; 0.0f; 0.0f; };
+const b3Vec3_axisY : b3Vec3 = b3Vec3.{ 0.0f; 1.0f; 0.0f; };
+const b3Vec3_axisZ : b3Vec3 = b3Vec3.{ 0.0f; 0.0f; 1.0f; };
+const b3Quat_identity : b3Quat = b3Quat.{ zeroed(b3Vec3); 1.0f; };
+const b3Transform_identity : b3Transform = b3Transform.{ zeroed(b3Vec3); b3Quat.{ zeroed(b3Vec3); 1.0f; }; };
+const b3Mat3_zero : b3Matrix3 = zeroed(b3Matrix3);
+const b3Mat3_identity : b3Matrix3 = b3Matrix3.{ b3Vec3.{ 1.0f; 0.0f; 0.0f; }; b3Vec3.{ 0.0f; 1.0f; 0.0f; }; b3Vec3.{ 0.0f; 0.0f; 1.0f; }; };
+const b3Pos_zero : b3Pos = zeroed(b3Pos);
+const b3WorldTransform_identity : b3WorldTransform = b3WorldTransform.{ zeroed(b3Vec3); b3Quat.{ zeroed(b3Vec3); 1.0f; }; };
+#linkc fn b3Atan2(y: f32, x: f32): f32;
+#linkc fn b3ComputeCosSin(radians: f32): b3CosSin;
+#linkc fn b3MakeQuatFromMatrix(m: *const b3Matrix3): b3Quat;
+#linkc fn b3ComputeQuatBetweenUnitVectors(v1: b3Vec3, v2: b3Vec3): b3Quat;
+#linkc fn b3Steiner(mass: f32, origin: b3Vec3): b3Matrix3;
+struct b3SegmentDistanceResult {
+    point1: b3Vec3;
+    fraction1: f32;
+    point2: b3Vec3;
+    fraction2: f32;
+};
+
+#linkc fn b3PointToSegmentDistance(a: b3Vec3, b: b3Vec3, q: b3Vec3): b3Vec3;
+#linkc fn b3LineDistance(p1: b3Vec3, d1: b3Vec3, p2: b3Vec3, d2: b3Vec3): b3SegmentDistanceResult;
+#linkc fn b3SegmentDistance(p1: b3Vec3, q1: b3Vec3, p2: b3Vec3, q2: b3Vec3): b3SegmentDistanceResult;
+#linkc fn b3IsValidFloat(a: f32): bool;
+#linkc fn b3IsValidVec3(a: b3Vec3): bool;
+#linkc fn b3IsValidQuat(q: b3Quat): bool;
+#linkc fn b3IsValidTransform(a: b3Transform): bool;
+#linkc fn b3IsValidMatrix3(a: b3Matrix3): bool;
+#linkc fn b3IsValidAABB(a: b3AABB): bool;
+#linkc fn b3IsBoundedAABB(a: b3AABB): bool;
+#linkc fn b3IsSaneAABB(a: b3AABB): bool;
+#linkc fn b3IsValidPlane(a: b3Plane): bool;
+#linkc fn b3IsValidPosition(p: b3Pos): bool;
+#linkc fn b3IsValidWorldTransform(t: b3WorldTransform): bool;
+#linkc fn b3SetLengthUnitsPerMeter(lengthUnits: f32): void;
+#linkc fn b3GetLengthUnitsPerMeter(): f32;
+#linkc fn b3SetStallThreshold(seconds: f32): void;
+#linkc fn b3GetStallThreshold(): f32;
+struct b3WorldId {
+    index1: u16;
+    generation: u16;
+};
+
+struct b3BodyId {
+    index1: i32;
+    world0: u16;
+    generation: u16;
+};
+
+struct b3ShapeId {
+    index1: i32;
+    world0: u16;
+    generation: u16;
+};
+
+struct b3JointId {
+    index1: i32;
+    world0: u16;
+    generation: u16;
+};
+
+struct b3ContactId {
+    index1: i32;
+    world0: u16;
+    padding: i16;
+    generation: u32;
+};
+
+const b3_nullWorldId : b3WorldId = zeroed(b3WorldId);
+const b3_nullBodyId : b3BodyId = zeroed(b3BodyId);
+const b3_nullShapeId : b3ShapeId = zeroed(b3ShapeId);
+const b3_nullJointId : b3JointId = zeroed(b3JointId);
+const b3_nullContactId : b3ContactId = zeroed(b3ContactId);
+const b3TaskCallback : __type_ptr = #type fn(taskContext: *u8): void;
+const b3EnqueueTaskCallback : __type_ptr = #type fn(task: *b3TaskCallback, taskContext: *u8, userContext: *u8, taskName: *const u8): *u8;
+const b3FinishTaskCallback : __type_ptr = #type fn(userTask: *u8, userContext: *u8): void;
+const b3DestroyDebugShapeCallback : __type_ptr = #type fn(userShape: *u8, userContext: *u8): void;
+const b3FrictionCallback : __type_ptr = #type fn(frictionA: f32, userMaterialIdA: u64, frictionB: f32, userMaterialIdB: u64): f32;
+const b3RestitutionCallback : __type_ptr = #type fn(restitutionA: f32, userMaterialIdA: u64, restitutionB: f32, userMaterialIdB: u64): f32;
+const b3CustomFilterFcn : __type_ptr = #type fn(shapeIdA: b3ShapeId, shapeIdB: b3ShapeId, context: *u8): bool;
+const b3PreSolveFcn : __type_ptr = #type fn(shapeIdA: b3ShapeId, shapeIdB: b3ShapeId, point: b3Pos, normal: b3Vec3, context: *u8): bool;
+const b3OverlapResultFcn : __type_ptr = #type fn(shapeId: b3ShapeId, context: *u8): bool;
+const b3CastResultFcn : __type_ptr = #type fn(shapeId: b3ShapeId, point: b3Pos, normal: b3Vec3, fraction: f32, userMaterialId: u64, triangleIndex: i32, childIndex: i32, context: *u8): f32;
+struct b3Capacity {
+    staticShapeCount: i32;
+    dynamicShapeCount: i32;
+    staticBodyCount: i32;
+    dynamicBodyCount: i32;
+    contactCount: i32;
+};
+
+#linkc fn b3DefaultWorldDef(): b3WorldDef;
+enum b3BodyType : i32 {
+    b3_staticBody := 0;
+    b3_kinematicBody := 1;
+    b3_dynamicBody := 2;
+    b3_bodyTypeCount;
+};
+
+struct b3MotionLocks {
+    linearX: bool;
+    linearY: bool;
+    linearZ: bool;
+    angularX: bool;
+    angularY: bool;
+    angularZ: bool;
+};
+
+struct b3BodyDef {
+    type: b3BodyType;
+    position: b3Pos;
+    rotation: b3Quat;
+    linearVelocity: b3Vec3;
+    angularVelocity: b3Vec3;
+    linearDamping: f32;
+    angularDamping: f32;
+    gravityScale: f32;
+    sleepThreshold: f32;
+    name: *const u8;
+    userData: *u8;
+    motionLocks: b3MotionLocks;
+    enableSleep: bool;
+    isAwake: bool;
+    isBullet: bool;
+    isEnabled: bool;
+    allowFastRotation: bool;
+    enableContactRecycling: bool;
+    internalValue: i32;
+};
+
+#linkc fn b3DefaultBodyDef(): b3BodyDef;
+struct b3Filter {
+    categoryBits: u64;
+    maskBits: u64;
+    groupIndex: i32;
+};
+
+#linkc fn b3DefaultFilter(): b3Filter;
+struct b3SurfaceMaterial {
+    friction: f32;
+    restitution: f32;
+    rollingResistance: f32;
+    tangentVelocity: b3Vec3;
+    userMaterialId: u64;
+    customColor: u32;
+    padding: u32;
+};
+
+#linkc fn b3DefaultSurfaceMaterial(): b3SurfaceMaterial;
+enum b3ShapeType : i32 {
+    b3_capsuleShape;
+    b3_compoundShape;
+    b3_heightShape;
+    b3_hullShape;
+    b3_meshShape;
+    b3_sphereShape;
+    b3_shapeTypeCount;
+};
+
+struct b3ShapeDef {
+    name: *const u8;
+    userData: *u8;
+    materials: *b3SurfaceMaterial;
+    materialCount: i32;
+    baseMaterial: b3SurfaceMaterial;
+    density: f32;
+    explosionScale: f32;
+    filter: b3Filter;
+    enableCustomFiltering: bool;
+    isSensor: bool;
+    enableSensorEvents: bool;
+    enableContactEvents: bool;
+    enableHitEvents: bool;
+    enablePreSolveEvents: bool;
+    invokeContactCreation: bool;
+    updateBodyMass: bool;
+    enableSpeculativeContact: bool;
+    internalValue: i32;
+};
+
+#linkc fn b3DefaultShapeDef(): b3ShapeDef;
+struct b3Profile {
+    step: f32;
+    pairs: f32;
+    collide: f32;
+    solve: f32;
+    solverSetup: f32;
+    constraints: f32;
+    prepareConstraints: f32;
+    integrateVelocities: f32;
+    warmStart: f32;
+    solveImpulses: f32;
+    integratePositions: f32;
+    relaxImpulses: f32;
+    applyRestitution: f32;
+    storeImpulses: f32;
+    splitIslands: f32;
+    transforms: f32;
+    sensorHits: f32;
+    jointEvents: f32;
+    hitEvents: f32;
+    refit: f32;
+    bullets: f32;
+    sleepIslands: f32;
+    sensors: f32;
+};
+
+struct b3Counters {
+    bodyCount: i32;
+    shapeCount: i32;
+    contactCount: i32;
+    jointCount: i32;
+    islandCount: i32;
+    stackUsed: i32;
+    arenaCapacity: i32;
+    staticTreeHeight: i32;
+    treeHeight: i32;
+    satCallCount: i32;
+    satCacheHitCount: i32;
+    byteCount: i32;
+    taskCount: i32;
+    colorCounts: [24]i32;
+    manifoldCounts: [8]i32;
+    awakeContactCount: i32;
+    recycledContactCount: i32;
+    distanceIterations: i32;
+    pushBackIterations: i32;
+    rootIterations: i32;
+};
+
+enum b3JointType : i32 {
+    b3_parallelJoint;
+    b3_distanceJoint;
+    b3_filterJoint;
+    b3_motorJoint;
+    b3_prismaticJoint;
+    b3_revoluteJoint;
+    b3_sphericalJoint;
+    b3_weldJoint;
+    b3_wheelJoint;
+};
+
+struct b3JointDef {
+    userData: *u8;
+    bodyIdA: b3BodyId;
+    bodyIdB: b3BodyId;
+    localFrameA: b3Transform;
+    localFrameB: b3Transform;
+    forceThreshold: f32;
+    torqueThreshold: f32;
+    constraintHertz: f32;
+    constraintDampingRatio: f32;
+    drawScale: f32;
+    collideConnected: bool;
+    internalValue: i32;
+};
+
+struct b3DistanceJointDef {
+    base: b3JointDef;
+    length: f32;
+    enableSpring: bool;
+    lowerSpringForce: f32;
+    upperSpringForce: f32;
+    hertz: f32;
+    dampingRatio: f32;
+    enableLimit: bool;
+    minLength: f32;
+    maxLength: f32;
+    enableMotor: bool;
+    maxMotorForce: f32;
+    motorSpeed: f32;
+};
+
+#linkc fn b3DefaultDistanceJointDef(): b3DistanceJointDef;
+struct b3MotorJointDef {
+    base: b3JointDef;
+    linearVelocity: b3Vec3;
+    maxVelocityForce: f32;
+    angularVelocity: b3Vec3;
+    maxVelocityTorque: f32;
+    linearHertz: f32;
+    linearDampingRatio: f32;
+    maxSpringForce: f32;
+    angularHertz: f32;
+    angularDampingRatio: f32;
+    maxSpringTorque: f32;
+};
+
+#linkc fn b3DefaultMotorJointDef(): b3MotorJointDef;
+struct b3FilterJointDef {
+    base: b3JointDef;
+};
+
+#linkc fn b3DefaultFilterJointDef(): b3FilterJointDef;
+struct b3ParallelJointDef {
+    base: b3JointDef;
+    hertz: f32;
+    dampingRatio: f32;
+    maxTorque: f32;
+};
+
+#linkc fn b3DefaultParallelJointDef(): b3ParallelJointDef;
+struct b3PrismaticJointDef {
+    base: b3JointDef;
+    enableSpring: bool;
+    hertz: f32;
+    dampingRatio: f32;
+    targetTranslation: f32;
+    enableLimit: bool;
+    lowerTranslation: f32;
+    upperTranslation: f32;
+    enableMotor: bool;
+    maxMotorForce: f32;
+    motorSpeed: f32;
+};
+
+#linkc fn b3DefaultPrismaticJointDef(): b3PrismaticJointDef;
+struct b3RevoluteJointDef {
+    base: b3JointDef;
+    targetAngle: f32;
+    enableSpring: bool;
+    hertz: f32;
+    dampingRatio: f32;
+    enableLimit: bool;
+    lowerAngle: f32;
+    upperAngle: f32;
+    enableMotor: bool;
+    maxMotorTorque: f32;
+    motorSpeed: f32;
+};
+
+#linkc fn b3DefaultRevoluteJointDef(): b3RevoluteJointDef;
+struct b3SphericalJointDef {
+    base: b3JointDef;
+    enableSpring: bool;
+    hertz: f32;
+    dampingRatio: f32;
+    targetRotation: b3Quat;
+    enableConeLimit: bool;
+    coneAngle: f32;
+    enableTwistLimit: bool;
+    lowerTwistAngle: f32;
+    upperTwistAngle: f32;
+    enableMotor: bool;
+    maxMotorTorque: f32;
+    motorVelocity: b3Vec3;
+};
+
+#linkc fn b3DefaultSphericalJointDef(): b3SphericalJointDef;
+struct b3WeldJointDef {
+    base: b3JointDef;
+    linearHertz: f32;
+    angularHertz: f32;
+    linearDampingRatio: f32;
+    angularDampingRatio: f32;
+};
+
+#linkc fn b3DefaultWeldJointDef(): b3WeldJointDef;
+struct b3WheelJointDef {
+    base: b3JointDef;
+    enableSuspensionSpring: bool;
+    suspensionHertz: f32;
+    suspensionDampingRatio: f32;
+    enableSuspensionLimit: bool;
+    lowerSuspensionLimit: f32;
+    upperSuspensionLimit: f32;
+    enableSpinMotor: bool;
+    maxSpinTorque: f32;
+    spinSpeed: f32;
+    enableSteering: bool;
+    steeringHertz: f32;
+    steeringDampingRatio: f32;
+    targetSteeringAngle: f32;
+    maxSteeringTorque: f32;
+    enableSteeringLimit: bool;
+    lowerSteeringLimit: f32;
+    upperSteeringLimit: f32;
+};
+
+#linkc fn b3DefaultWheelJointDef(): b3WheelJointDef;
+struct b3ExplosionDef {
+    maskBits: u64;
+    position: b3Pos;
+    radius: f32;
+    falloff: f32;
+    impulsePerArea: f32;
+};
+
+#linkc fn b3DefaultExplosionDef(): b3ExplosionDef;
+struct b3SensorBeginTouchEvent {
+    sensorShapeId: b3ShapeId;
+    visitorShapeId: b3ShapeId;
+};
+
+struct b3SensorEndTouchEvent {
+    sensorShapeId: b3ShapeId;
+    visitorShapeId: b3ShapeId;
+};
+
+struct b3SensorEvents {
+    beginEvents: *b3SensorBeginTouchEvent;
+    endEvents: *b3SensorEndTouchEvent;
+    beginCount: i32;
+    endCount: i32;
+};
+
+struct b3ContactBeginTouchEvent {
+    shapeIdA: b3ShapeId;
+    shapeIdB: b3ShapeId;
+    contactId: b3ContactId;
+};
+
+struct b3ContactEndTouchEvent {
+    shapeIdA: b3ShapeId;
+    shapeIdB: b3ShapeId;
+    contactId: b3ContactId;
+};
+
+struct b3ContactHitEvent {
+    shapeIdA: b3ShapeId;
+    shapeIdB: b3ShapeId;
+    contactId: b3ContactId;
+    point: b3Pos;
+    normal: b3Vec3;
+    approachSpeed: f32;
+    userMaterialIdA: u64;
+    userMaterialIdB: u64;
+};
+
+struct b3ContactEvents {
+    beginEvents: *b3ContactBeginTouchEvent;
+    endEvents: *b3ContactEndTouchEvent;
+    hitEvents: *b3ContactHitEvent;
+    beginCount: i32;
+    endCount: i32;
+    hitCount: i32;
+};
+
+struct b3BodyMoveEvent {
+    userData: *u8;
+    transform: b3WorldTransform;
+    bodyId: b3BodyId;
+    fellAsleep: bool;
+};
+
+struct b3BodyEvents {
+    moveEvents: *b3BodyMoveEvent;
+    moveCount: i32;
+};
+
+struct b3JointEvent {
+    jointId: b3JointId;
+    userData: *u8;
+};
+
+struct b3JointEvents {
+    jointEvents: *b3JointEvent;
+    count: i32;
+};
+
+struct b3QueryFilter {
+    categoryBits: u64;
+    maskBits: u64;
+    id: u64;
+    name: *const u8;
+};
+
+#linkc fn b3DefaultQueryFilter(): b3QueryFilter;
+struct b3RayCastInput {
+    origin: b3Vec3;
+    translation: b3Vec3;
+    maxFraction: f32;
+};
+
+struct b3RayResult {
+    shapeId: b3ShapeId;
+    point: b3Pos;
+    normal: b3Vec3;
+    userMaterialId: u64;
+    fraction: f32;
+    triangleIndex: i32;
+    childIndex: i32;
+    nodeVisits: i32;
+    leafVisits: i32;
+    hit: bool;
+};
+
+struct b3ShapeProxy {
+    points: *const b3Vec3;
+    count: i32;
+    radius: f32;
+};
+
+struct b3ShapeCastInput {
+    proxy: b3ShapeProxy;
+    translation: b3Vec3;
+    maxFraction: f32;
+    canEncroach: bool;
+};
+
+struct b3BoxCastInput {
+    box: b3AABB;
+    translation: b3Vec3;
+    maxFraction: f32;
+};
+
+struct b3CastOutput {
+    normal: b3Vec3;
+    point: b3Vec3;
+    fraction: f32;
+    iterations: i32;
+    triangleIndex: i32;
+    childIndex: i32;
+    materialIndex: i32;
+    hit: bool;
+};
+
+const b3WorldCastOutput : __type_ptr = #type b3CastOutput;
+struct b3BodyCastResult {
+    shapeId: b3ShapeId;
+    point: b3Pos;
+    normal: b3Vec3;
+    fraction: f32;
+    triangleIndex: i32;
+    userMaterialId: u64;
+    iterations: i32;
+    hit: bool;
+};
+
+struct b3SimplexCache {
+    metric: f32;
+    count: u16;
+    indexA: [4]u8;
+    indexB: [4]u8;
+};
+
+const b3_emptyDistanceCache : b3SimplexCache = zeroed(b3SimplexCache);
+struct b3ShapeCastPairInput {
+    proxyA: b3ShapeProxy;
+    proxyB: b3ShapeProxy;
+    transform: b3Transform;
+    translationB: b3Vec3;
+    maxFraction: f32;
+    canEncroach: bool;
+};
+
+struct b3DistanceInput {
+    proxyA: b3ShapeProxy;
+    proxyB: b3ShapeProxy;
+    transform: b3Transform;
+    useRadii: bool;
+};
+
+struct b3DistanceOutput {
+    pointA: b3Vec3;
+    pointB: b3Vec3;
+    normal: b3Vec3;
+    distance: f32;
+    iterations: i32;
+    simplexCount: i32;
+};
+
+struct b3SimplexVertex {
+    wA: b3Vec3;
+    wB: b3Vec3;
+    w: b3Vec3;
+    a: f32;
+    indexA: i32;
+    indexB: i32;
+};
+
+struct b3Simplex {
+    vertices: [4]b3SimplexVertex;
+    count: i32;
+};
+
+struct b3Sweep {
+    localCenter: b3Vec3;
+    c1: b3Vec3;
+    c2: b3Vec3;
+    q1: b3Quat;
+    q2: b3Quat;
+};
+
+struct b3TOIInput {
+    proxyA: b3ShapeProxy;
+    proxyB: b3ShapeProxy;
+    sweepA: b3Sweep;
+    sweepB: b3Sweep;
+    maxFraction: f32;
+};
+
+enum b3TOIState : i32 {
+    b3_toiStateUnknown;
+    b3_toiStateFailed;
+    b3_toiStateOverlapped;
+    b3_toiStateHit;
+    b3_toiStateSeparated;
+};
+
+struct b3TOIOutput {
+    state: b3TOIState;
+    point: b3Vec3;
+    normal: b3Vec3;
+    fraction: f32;
+    distance: f32;
+    distanceIterations: i32;
+    pushBackIterations: i32;
+    rootIterations: i32;
+    usedFallback: bool;
+};
+
+enum b3TreeNodeFlags : i32 {
+    b3_allocatedNode := 0x0001;
+    b3_enlargedNode := 0x0002;
+    b3_leafNode := 0x0004;
+};
+
+struct b3TreeNodeChildren {
+    child1: i32;
+    child2: i32;
+};
+
+// Anonymous union b3TreeNode__field2
+const b3TreeNode__field2_value := #run (b3TreeNodeChildren |> type_union(u64));
+struct b3TreeNode__field2 {
+    value: b3TreeNode__field2_value;
+    _align: [0]u64;
+};
+
+// Anonymous union b3TreeNode__field3
+const b3TreeNode__field3 := #run (i32 |> type_union(i32));
+
+struct b3TreeNode {
+    aabb: b3AABB;
+    categoryBits: u64;
+    _field2: b3TreeNode__field2;
+    _field3: b3TreeNode__field3;
+    height: u16;
+    flags: u16;
+};
+
+struct b3DynamicTree {
+    version: u64;
+    nodes: *b3TreeNode;
+    root: i32;
+    nodeCount: i32;
+    nodeCapacity: i32;
+    proxyCount: i32;
+    freeList: i32;
+    leafIndices: *i32;
+    leafBoxes: *b3AABB;
+    leafCenters: *b3Vec3;
+    binIndices: *i32;
+    rebuildCapacity: i32;
+};
+
+struct b3TreeStats {
+    nodeVisits: i32;
+    leafVisits: i32;
+};
+
+const b3TreeQueryCallbackFcn : __type_ptr = #type fn(proxyId: i32, userData: u64, context: *u8): bool;
+const b3TreeQueryClosestCallbackFcn : __type_ptr = #type fn(distanceSqrMin: f32, proxyId: i32, userData: u64, context: *u8): f32;
+const b3TreeBoxCastCallbackFcn : __type_ptr = #type fn(input: *const b3BoxCastInput, proxyId: i32, userData: u64, context: *u8): f32;
+const b3TreeRayCastCallbackFcn : __type_ptr = #type fn(input: *const b3RayCastInput, proxyId: i32, userData: u64, context: *u8): f32;
+struct b3PlaneResult {
+    plane: b3Plane;
+    point: b3Vec3;
+};
+
+struct b3CollisionPlane {
+    plane: b3Plane;
+    pushLimit: f32;
+    push: f32;
+    clipVelocity: bool;
+};
+
+struct b3PlaneSolverResult {
+    delta: b3Vec3;
+    iterationCount: i32;
+};
+
+struct b3BodyPlaneResult {
+    shapeId: b3ShapeId;
+    result: b3PlaneResult;
+};
+
+const b3PlaneResultFcn : __type_ptr = #type fn(shapeId: b3ShapeId, plane: *const b3PlaneResult, planeCount: i32, context: *u8): bool;
+const b3MoverFilterFcn : __type_ptr = #type fn(shapeId: b3ShapeId, context: *u8): bool;
+struct b3MassData {
+    mass: f32;
+    center: b3Vec3;
+    inertia: b3Matrix3;
+};
+
+struct b3Sphere {
+    center: b3Vec3;
+    radius: f32;
+};
+
+struct b3Capsule {
+    center1: b3Vec3;
+    center2: b3Vec3;
+    radius: f32;
+};
+
+struct b3HullVertex {
+    edge: u8;
+};
+
+struct b3HullHalfEdge {
+    next: u8;
+    twin: u8;
+    origin: u8;
+    face: u8;
+};
+
+struct b3HullFace {
+    edge: u8;
+};
+
+struct b3HullData {
+    version: u64;
+    byteCount: i32;
+    hash: u32;
+    aabb: b3AABB;
+    surfaceArea: f32;
+    volume: f32;
+    innerRadius: f32;
+    center: b3Vec3;
+    centralInertia: b3Matrix3;
+    vertexCount: i32;
+    vertexOffset: i32;
+    pointOffset: i32;
+    edgeCount: i32;
+    edgeOffset: i32;
+    faceCount: i32;
+    planeOffset: i32;
+    faceOffset: i32;
+    soaVertexOffset: i32;
+    soaNormalOffset: i32;
+    padding: i32;
+};
+
+struct b3BoxHull {
+    base: b3HullData;
+    boxVertices: [8]b3HullVertex;
+    boxPoints: [8]b3Vec3;
+    boxEdges: [24]b3HullHalfEdge;
+    boxPlanes: [6]b3Plane;
+    boxFaces: [6]b3HullFace;
+    padding: [10]u8;
+    vx: [8]f32;
+    vy: [8]f32;
+    vz: [8]f32;
+    nx: [8]f32;
+    ny: [8]f32;
+    nz: [8]f32;
+};
+
+struct b3MeshDef {
+    vertices: *b3Vec3;
+    indices: *i32;
+    materialIndices: *u8;
+    weldTolerance: f32;
+    vertexCount: i32;
+    triangleCount: i32;
+    weldVertices: bool;
+    useMedianSplit: bool;
+    identifyEdges: bool;
+};
+
+enum b3MeshEdgeFlags : i32 {
+    b3_concaveEdge1 := 0x01;
+    b3_concaveEdge2 := 0x02;
+    b3_concaveEdge3 := 0x04;
+    b3_inverseConcaveEdge1 := 0x10;
+    b3_inverseConcaveEdge2 := 0x20;
+    b3_inverseConcaveEdge3 := 0x40;
+    b3_allConcaveEdges := b3_concaveEdge1 | b3_concaveEdge2 | b3_concaveEdge3;
+    b3_flatEdge1 := b3_concaveEdge1 | b3_inverseConcaveEdge1;
+    b3_flatEdge2 := b3_concaveEdge2 | b3_inverseConcaveEdge2;
+    b3_flatEdge3 := b3_concaveEdge3 | b3_inverseConcaveEdge3;
+    b3_allFlatEdges := b3_flatEdge1 | b3_flatEdge2 | b3_flatEdge3;
+};
+
+struct b3MeshTriangle {
+    index1: i32;
+    index2: i32;
+    index3: i32;
+};
+
+// Anonymous struct b3MeshNode_data_asNode
+struct b3MeshNode_data_asNode {
+    axis_childOffset: u32; // bitfield: axis:2 childOffset:30
+};
+
+// Anonymous struct b3MeshNode_data_asLeaf
+struct b3MeshNode_data_asLeaf {
+    type_triangleCount: u32; // bitfield: type:2 triangleCount:30
+};
+
+// Anonymous union b3MeshNode_data
+const b3MeshNode_data := #run (b3MeshNode_data_asNode |> type_union(b3MeshNode_data_asLeaf));
+
+struct b3MeshNode {
+    lowerBound: b3Vec3;
+    data: b3MeshNode_data;
+    upperBound: b3Vec3;
+    triangleOffset: u32;
+};
+
+struct b3MeshData {
+    version: u64;
+    byteCount: i32;
+    hash: u32;
+    bounds: b3AABB;
+    surfaceArea: f32;
+    treeHeight: i32;
+    degenerateCount: i32;
+    nodeOffset: i32;
+    nodeCount: i32;
+    vertexOffset: i32;
+    vertexCount: i32;
+    triangleOffset: i32;
+    triangleCount: i32;
+    materialOffset: i32;
+    materialCount: i32;
+    flagsOffset: i32;
+};
+
+struct b3Mesh {
+    data: *const b3MeshData;
+    scale: b3Vec3;
+};
+
+struct b3HeightFieldDef {
+    heights: *f32;
+    materialIndices: *u8;
+    scale: b3Vec3;
+    countX: i32;
+    countZ: i32;
+    globalMinimumHeight: f32;
+    globalMaximumHeight: f32;
+    clockwiseWinding: bool;
+};
+
+struct b3HeightFieldData {
+    version: u64;
+    byteCount: i32;
+    hash: u32;
+    aabb: b3AABB;
+    minHeight: f32;
+    maxHeight: f32;
+    heightScale: f32;
+    scale: b3Vec3;
+    columnCount: i32;
+    rowCount: i32;
+    heightsOffset: i32;
+    materialOffset: i32;
+    flagsOffset: i32;
+    clockwise: bool;
+    padding: [3]u8;
+};
+
+struct b3CompoundCapsuleDef {
+    capsule: b3Capsule;
+    material: b3SurfaceMaterial;
+};
+
+struct b3CompoundHullDef {
+    hull: *const b3HullData;
+    transform: b3Transform;
+    material: b3SurfaceMaterial;
+};
+
+struct b3CompoundMeshDef {
+    meshData: *const b3MeshData;
+    transform: b3Transform;
+    scale: b3Vec3;
+    materials: *const b3SurfaceMaterial;
+    materialCount: i32;
+};
+
+struct b3CompoundSphereDef {
+    sphere: b3Sphere;
+    material: b3SurfaceMaterial;
+};
+
+struct b3CompoundDef {
+    capsules: *b3CompoundCapsuleDef;
+    capsuleCount: i32;
+    hulls: *b3CompoundHullDef;
+    hullCount: i32;
+    meshes: *b3CompoundMeshDef;
+    meshCount: i32;
+    spheres: *b3CompoundSphereDef;
+    sphereCount: i32;
+};
+
+struct b3CompoundData {
+    version: u64;
+    byteCount: i32;
+    nodeOffset: i32;
+    tree: b3DynamicTree;
+    materialOffset: i32;
+    materialCount: i32;
+    capsuleOffset: i32;
+    capsuleCount: i32;
+    hullOffset: i32;
+    hullCount: i32;
+    sharedHullCount: i32;
+    meshOffset: i32;
+    meshCount: i32;
+    sharedMeshCount: i32;
+    sphereOffset: i32;
+    sphereCount: i32;
+};
+
+struct b3CompoundCapsule {
+    capsule: b3Capsule;
+    materialIndex: i32;
+};
+
+struct b3CompoundHull {
+    hull: *const b3HullData;
+    transform: b3Transform;
+    materialIndex: i32;
+};
+
+struct b3CompoundMesh {
+    meshData: *const b3MeshData;
+    transform: b3Transform;
+    scale: b3Vec3;
+    materialIndices: [4]i32;
+};
+
+struct b3CompoundSphere {
+    sphere: b3Sphere;
+    materialIndex: i32;
+};
+
+// Anonymous union b3ChildShape__field0
+const b3ChildShape__field0_value := #run (b3Capsule |> type_union(*const b3HullData) |> type_union(b3Mesh) |> type_union(b3Sphere));
+struct b3ChildShape__field0 {
+    value: b3ChildShape__field0_value;
+    _align: [0]u64;
+};
+
+struct b3ChildShape {
+    _field0: b3ChildShape__field0;
+    transform: b3Transform;
+    materialIndices: [4]i32;
+    type: b3ShapeType;
+};
+
+const b3CompoundQueryFcn : __type_ptr = #type fn(compound: *const b3CompoundData, childIndex: i32, context: *u8): bool;
+struct b3ManifoldPoint {
+    anchorA: b3Vec3;
+    anchorB: b3Vec3;
+    separation: f32;
+    baseSeparation: f32;
+    normalImpulse: f32;
+    totalNormalImpulse: f32;
+    normalVelocity: f32;
+    featureId: u32;
+    triangleIndex: i32;
+    persisted: bool;
+};
+
+struct b3Manifold {
+    points: [4]b3ManifoldPoint;
+    normal: b3Vec3;
+    twistImpulse: f32;
+    frictionImpulse: b3Vec3;
+    rollingImpulse: b3Vec3;
+    pointCount: i32;
+};
+
+struct b3ContactData {
+    contactId: b3ContactId;
+    shapeIdA: b3ShapeId;
+    shapeIdB: b3ShapeId;
+    manifolds: *const b3Manifold;
+    manifoldCount: i32;
+};
+
+enum b3SeparatingFeature : i32 {
+    b3_invalidAxis := 0;
+    b3_backsideAxis;
+    b3_faceAxisA;
+    b3_faceAxisB;
+    b3_edgePairAxis;
+    b3_closestPointsAxis;
+    b3_manualFaceAxisA;
+    b3_manualFaceAxisB;
+    b3_manualEdgePairAxis;
+};
+
+enum b3TriangleFeature : i32 {
+    b3_featureNone := 0;
+    b3_featureTriangleFace;
+    b3_featureHullFace;
+    b3_featureEdge1;
+    b3_featureEdge2;
+    b3_featureEdge3;
+    b3_featureVertex1;
+    b3_featureVertex2;
+    b3_featureVertex3;
+};
+
+struct b3SATCache {
+    separation: f32;
+    type: u8;
+    indexA: u8;
+    indexB: u8;
+    hit: u8;
+};
+
+struct b3FeaturePair {
+    owner1: u8;
+    index1: u8;
+    owner2: u8;
+    index2: u8;
+};
+
+struct b3LocalManifoldPoint {
+    point: b3Vec3;
+    separation: f32;
+    pair: b3FeaturePair;
+    triangleIndex: i32;
+};
+
+struct b3LocalManifold {
+    normal: b3Vec3;
+    triangleNormal: b3Vec3;
+    points: *b3LocalManifoldPoint;
+    pointCount: i32;
+    triangleIndex: i32;
+    i1: i32;
+    i2: i32;
+    i3: i32;
+    squaredDistance: f32;
+    feature: b3TriangleFeature;
+    triangleFlags: i32;
+};
+
+enum b3HexColor : i32 {
+    b3_colorAliceBlue := 0xF0F8FF;
+    b3_colorAntiqueWhite := 0xFAEBD7;
+    b3_colorAqua := 0x00FFFF;
+    b3_colorAquamarine := 0x7FFFD4;
+    b3_colorAzure := 0xF0FFFF;
+    b3_colorBeige := 0xF5F5DC;
+    b3_colorBisque := 0xFFE4C4;
+    b3_colorBlack := 0x000000;
+    b3_colorBlanchedAlmond := 0xFFEBCD;
+    b3_colorBlue := 0x0000FF;
+    b3_colorBlueViolet := 0x8A2BE2;
+    b3_colorBrown := 0xA52A2A;
+    b3_colorBurlywood := 0xDEB887;
+    b3_colorCadetBlue := 0x5F9EA0;
+    b3_colorChartreuse := 0x7FFF00;
+    b3_colorChocolate := 0xD2691E;
+    b3_colorCoral := 0xFF7F50;
+    b3_colorCornflowerBlue := 0x6495ED;
+    b3_colorCornsilk := 0xFFF8DC;
+    b3_colorCrimson := 0xDC143C;
+    b3_colorCyan := 0x00FFFF;
+    b3_colorDarkBlue := 0x00008B;
+    b3_colorDarkCyan := 0x008B8B;
+    b3_colorDarkGoldenRod := 0xB8860B;
+    b3_colorDarkGray := 0xA9A9A9;
+    b3_colorDarkGreen := 0x006400;
+    b3_colorDarkKhaki := 0xBDB76B;
+    b3_colorDarkMagenta := 0x8B008B;
+    b3_colorDarkOliveGreen := 0x556B2F;
+    b3_colorDarkOrange := 0xFF8C00;
+    b3_colorDarkOrchid := 0x9932CC;
+    b3_colorDarkRed := 0x8B0000;
+    b3_colorDarkSalmon := 0xE9967A;
+    b3_colorDarkSeaGreen := 0x8FBC8F;
+    b3_colorDarkSlateBlue := 0x483D8B;
+    b3_colorDarkSlateGray := 0x2F4F4F;
+    b3_colorDarkTurquoise := 0x00CED1;
+    b3_colorDarkViolet := 0x9400D3;
+    b3_colorDeepPink := 0xFF1493;
+    b3_colorDeepSkyBlue := 0x00BFFF;
+    b3_colorDimGray := 0x696969;
+    b3_colorDodgerBlue := 0x1E90FF;
+    b3_colorFireBrick := 0xB22222;
+    b3_colorFloralWhite := 0xFFFAF0;
+    b3_colorForestGreen := 0x228B22;
+    b3_colorFuchsia := 0xFF00FF;
+    b3_colorGainsboro := 0xDCDCDC;
+    b3_colorGhostWhite := 0xF8F8FF;
+    b3_colorGold := 0xFFD700;
+    b3_colorGoldenRod := 0xDAA520;
+    b3_colorGray := 0x808080;
+    b3_colorGreen := 0x008000;
+    b3_colorGreenYellow := 0xADFF2F;
+    b3_colorHoneyDew := 0xF0FFF0;
+    b3_colorHotPink := 0xFF69B4;
+    b3_colorIndianRed := 0xCD5C5C;
+    b3_colorIndigo := 0x4B0082;
+    b3_colorIvory := 0xFFFFF0;
+    b3_colorKhaki := 0xF0E68C;
+    b3_colorLavender := 0xE6E6FA;
+    b3_colorLavenderBlush := 0xFFF0F5;
+    b3_colorLawnGreen := 0x7CFC00;
+    b3_colorLemonChiffon := 0xFFFACD;
+    b3_colorLightBlue := 0xADD8E6;
+    b3_colorLightCoral := 0xF08080;
+    b3_colorLightCyan := 0xE0FFFF;
+    b3_colorLightGoldenRodYellow := 0xFAFAD2;
+    b3_colorLightGray := 0xD3D3D3;
+    b3_colorLightGreen := 0x90EE90;
+    b3_colorLightPink := 0xFFB6C1;
+    b3_colorLightSalmon := 0xFFA07A;
+    b3_colorLightSeaGreen := 0x20B2AA;
+    b3_colorLightSkyBlue := 0x87CEFA;
+    b3_colorLightSlateGray := 0x778899;
+    b3_colorLightSteelBlue := 0xB0C4DE;
+    b3_colorLightYellow := 0xFFFFE0;
+    b3_colorLime := 0x00FF00;
+    b3_colorLimeGreen := 0x32CD32;
+    b3_colorLinen := 0xFAF0E6;
+    b3_colorMagenta := 0xFF00FF;
+    b3_colorMaroon := 0x800000;
+    b3_colorMediumAquaMarine := 0x66CDAA;
+    b3_colorMediumBlue := 0x0000CD;
+    b3_colorMediumOrchid := 0xBA55D3;
+    b3_colorMediumPurple := 0x9370DB;
+    b3_colorMediumSeaGreen := 0x3CB371;
+    b3_colorMediumSlateBlue := 0x7B68EE;
+    b3_colorMediumSpringGreen := 0x00FA9A;
+    b3_colorMediumTurquoise := 0x48D1CC;
+    b3_colorMediumVioletRed := 0xC71585;
+    b3_colorMidnightBlue := 0x191970;
+    b3_colorMintCream := 0xF5FFFA;
+    b3_colorMistyRose := 0xFFE4E1;
+    b3_colorMoccasin := 0xFFE4B5;
+    b3_colorNavajoWhite := 0xFFDEAD;
+    b3_colorNavy := 0x000080;
+    b3_colorOldLace := 0xFDF5E6;
+    b3_colorOlive := 0x808000;
+    b3_colorOliveDrab := 0x6B8E23;
+    b3_colorOrange := 0xFFA500;
+    b3_colorOrangeRed := 0xFF4500;
+    b3_colorOrchid := 0xDA70D6;
+    b3_colorPaleGoldenRod := 0xEEE8AA;
+    b3_colorPaleGreen := 0x98FB98;
+    b3_colorPaleTurquoise := 0xAFEEEE;
+    b3_colorPaleVioletRed := 0xDB7093;
+    b3_colorPapayaWhip := 0xFFEFD5;
+    b3_colorPeachPuff := 0xFFDAB9;
+    b3_colorPeru := 0xCD853F;
+    b3_colorPink := 0xFFC0CB;
+    b3_colorPlum := 0xDDA0DD;
+    b3_colorPowderBlue := 0xB0E0E6;
+    b3_colorPurple := 0x800080;
+    b3_colorRebeccaPurple := 0x663399;
+    b3_colorRed := 0xFF0000;
+    b3_colorRosyBrown := 0xBC8F8F;
+    b3_colorRoyalBlue := 0x4169E1;
+    b3_colorSaddleBrown := 0x8B4513;
+    b3_colorSalmon := 0xFA8072;
+    b3_colorSandyBrown := 0xF4A460;
+    b3_colorSeaGreen := 0x2E8B57;
+    b3_colorSeaShell := 0xFFF5EE;
+    b3_colorSienna := 0xA0522D;
+    b3_colorSilver := 0xC0C0C0;
+    b3_colorSkyBlue := 0x87CEEB;
+    b3_colorSlateBlue := 0x6A5ACD;
+    b3_colorSlateGray := 0x708090;
+    b3_colorSnow := 0xFFFAFA;
+    b3_colorSpringGreen := 0x00FF7F;
+    b3_colorSteelBlue := 0x4682B4;
+    b3_colorTan := 0xD2B48C;
+    b3_colorTeal := 0x008080;
+    b3_colorThistle := 0xD8BFD8;
+    b3_colorTomato := 0xFF6347;
+    b3_colorTurquoise := 0x40E0D0;
+    b3_colorViolet := 0xEE82EE;
+    b3_colorWheat := 0xF5DEB3;
+    b3_colorWhite := 0xFFFFFF;
+    b3_colorWhiteSmoke := 0xF5F5F5;
+    b3_colorYellow := 0xFFFF00;
+    b3_colorYellowGreen := 0x9ACD32;
+    b3_colorBox2DRed := 0xDC3132;
+    b3_colorBox2DBlue := 0x30AEBF;
+    b3_colorBox2DGreen := 0x8CC924;
+    b3_colorBox2DYellow := 0xFFEE8C;
+};
+
+enum b3DebugMaterial : i32 {
+    b3_debugMaterialDefault := 0;
+    b3_debugMaterialMatte;
+    b3_debugMaterialSoft;
+    b3_debugMaterialDead;
+    b3_debugMaterialGlossy;
+    b3_debugMaterialMetallic;
+};
+
+#linkc fn b3GetGraphColor(index: i32): b3HexColor;
+// Anonymous union b3DebugShape__field2
+const b3DebugShape__field2 := #run (*const b3Capsule |> type_union(*const b3CompoundData) |> type_union(*const b3HeightFieldData) |> type_union(*const b3HullData) |> type_union(*const b3Mesh) |> type_union(*const b3Sphere));
+
+struct b3DebugShape {
+    shapeId: b3ShapeId;
+    type: b3ShapeType;
+    _field2: b3DebugShape__field2;
+};
+
+const b3CreateDebugShapeCallback : __type_ptr = #type fn(debugShape: *const b3DebugShape, userContext: *u8): *u8;
+struct b3WorldDef {
+    gravity: b3Vec3;
+    restitutionThreshold: f32;
+    hitEventThreshold: f32;
+    contactHertz: f32;
+    contactDampingRatio: f32;
+    contactSpeed: f32;
+    maximumLinearSpeed: f32;
+    frictionCallback: *b3FrictionCallback;
+    restitutionCallback: *b3RestitutionCallback;
+    enableSleep: bool;
+    enableContinuous: bool;
+    workerCount: u32;
+    enqueueTask: *b3EnqueueTaskCallback;
+    finishTask: *b3FinishTaskCallback;
+    userTaskContext: *u8;
+    userData: *u8;
+    createDebugShape: *b3CreateDebugShapeCallback;
+    destroyDebugShape: *b3DestroyDebugShapeCallback;
+    userDebugShapeContext: *u8;
+    capacity: b3Capacity;
+    internalValue: i32;
+};
+
+struct b3DebugDraw {
+    DrawShapeFcn: *fn(userShape: *u8, transform: b3WorldTransform, color: b3HexColor, context: *u8): void;
+    DrawSegmentFcn: *fn(p1: b3Pos, p2: b3Pos, color: b3HexColor, context: *u8): void;
+    DrawTransformFcn: *fn(transform: b3WorldTransform, context: *u8): void;
+    DrawPointFcn: *fn(p: b3Pos, size: f32, color: b3HexColor, context: *u8): void;
+    DrawSphereFcn: *fn(p: b3Pos, radius: f32, color: b3HexColor, alpha: f32, context: *u8): void;
+    DrawCapsuleFcn: *fn(p1: b3Pos, p2: b3Pos, radius: f32, color: b3HexColor, alpha: f32, context: *u8): void;
+    DrawBoundsFcn: *fn(aabb: b3AABB, color: b3HexColor, context: *u8): void;
+    DrawBoxFcn: *fn(extents: b3Vec3, transform: b3WorldTransform, color: b3HexColor, context: *u8): void;
+    DrawStringFcn: *fn(p: b3Pos, s: *const u8, color: b3HexColor, context: *u8): void;
+    drawingBounds: b3AABB;
+    forceScale: f32;
+    jointScale: f32;
+    drawShapes: bool;
+    drawJoints: bool;
+    drawJointExtras: bool;
+    drawBounds: bool;
+    drawMass: bool;
+    drawSleep: bool;
+    drawBodyNames: bool;
+    drawContacts: bool;
+    drawAnchorA: bool;
+    drawGraphColors: bool;
+    drawContactFeatures: bool;
+    drawContactNormals: bool;
+    drawContactForces: bool;
+    drawIslands: bool;
+    context: *u8;
+};
+
+#linkc fn b3DefaultDebugDraw(): b3DebugDraw;
+#linkc fn b3DynamicTree_Create(proxyCapacity: i32): b3DynamicTree;
+#linkc fn b3DynamicTree_Destroy(tree: *b3DynamicTree): void;
+#linkc fn b3DynamicTree_CreateProxy(tree: *b3DynamicTree, aabb: b3AABB, categoryBits: u64, userData: u64): i32;
+#linkc fn b3DynamicTree_DestroyProxy(tree: *b3DynamicTree, proxyId: i32): void;
+#linkc fn b3DynamicTree_MoveProxy(tree: *b3DynamicTree, proxyId: i32, aabb: b3AABB): void;
+#linkc fn b3DynamicTree_EnlargeProxy(tree: *b3DynamicTree, proxyId: i32, aabb: b3AABB): void;
+#linkc fn b3DynamicTree_SetCategoryBits(tree: *b3DynamicTree, proxyId: i32, categoryBits: u64): void;
+#linkc fn b3DynamicTree_GetCategoryBits(tree: *b3DynamicTree, proxyId: i32): u64;
+#linkc fn b3DynamicTree_Query(tree: *const b3DynamicTree, aabb: b3AABB, maskBits: u64, requireAllBits: bool, callback: *b3TreeQueryCallbackFcn, context: *u8): b3TreeStats;
+#linkc fn b3DynamicTree_QueryClosest(tree: *const b3DynamicTree, point: b3Vec3, maskBits: u64, requireAllBits: bool, callback: *b3TreeQueryClosestCallbackFcn, context: *u8, minDistanceSqr: *f32): b3TreeStats;
+#linkc fn b3DynamicTree_RayCast(tree: *const b3DynamicTree, input: *const b3RayCastInput, maskBits: u64, requireAllBits: bool, callback: *b3TreeRayCastCallbackFcn, context: *u8): b3TreeStats;
+#linkc fn b3DynamicTree_BoxCast(tree: *const b3DynamicTree, input: *const b3BoxCastInput, maskBits: u64, requireAllBits: bool, callback: *b3TreeBoxCastCallbackFcn, context: *u8): b3TreeStats;
+#linkc fn b3DynamicTree_GetHeight(tree: *const b3DynamicTree): i32;
+#linkc fn b3DynamicTree_GetAreaRatio(tree: *const b3DynamicTree): f32;
+#linkc fn b3DynamicTree_GetRootBounds(tree: *const b3DynamicTree): b3AABB;
+#linkc fn b3DynamicTree_GetProxyCount(tree: *const b3DynamicTree): i32;
+#linkc fn b3DynamicTree_Rebuild(tree: *b3DynamicTree, fullBuild: bool): i32;
+#linkc fn b3DynamicTree_GetByteCount(tree: *const b3DynamicTree): i32;
+#linkc fn b3DynamicTree_Validate(tree: *const b3DynamicTree): void;
+#linkc fn b3DynamicTree_ValidateNoEnlarged(tree: *const b3DynamicTree): void;
+#linkc fn b3DynamicTree_Save(tree: *const b3DynamicTree, fileName: *const u8): void;
+#linkc fn b3DynamicTree_Load(fileName: *const u8, scale: f32): b3DynamicTree;
+#linkc fn b3CreateCylinder(height: f32, radius: f32, yOffset: f32, sides: i32): *b3HullData;
+#linkc fn b3CreateCone(height: f32, radius1: f32, radius2: f32, slices: i32): *b3HullData;
+#linkc fn b3CreateRock(radius: f32): *b3HullData;
+#linkc fn b3CreateHull(points: *const b3Vec3, pointCount: i32, maxVertexCount: i32): *b3HullData;
+#linkc fn b3CloneHull(hull: *const b3HullData): *b3HullData;
+#linkc fn b3CloneAndTransformHull(original: *const b3HullData, transform: b3Transform, scale: b3Vec3): *b3HullData;
+#linkc fn b3DestroyHull(hull: *b3HullData): void;
+#linkc fn b3MakeCubeHull(halfWidth: f32): b3BoxHull;
+#linkc fn b3MakeBoxHull(hx: f32, hy: f32, hz: f32): b3BoxHull;
+#linkc fn b3MakeOffsetBoxHull(hx: f32, hy: f32, hz: f32, offset: b3Vec3): b3BoxHull;
+#linkc fn b3MakeTransformedBoxHull(hx: f32, hy: f32, hz: f32, transform: b3Transform): b3BoxHull;
+#linkc fn b3MakeScaledBoxHull(halfWidths: b3Vec3, transform: b3Transform, postScale: b3Vec3): b3BoxHull;
+#linkc fn b3ScaleBox(halfWidths: *b3Vec3, transform: *b3Transform, postScale: b3Vec3, minHalfWidth: f32): void;
+#linkc fn b3CreateGridMesh(xCount: i32, zCount: i32, cellWidth: f32, materialCount: i32, identifyEdges: bool): *b3MeshData;
+#linkc fn b3CreateWaveMesh(xCount: i32, zCount: i32, cellWidth: f32, amplitude: f32, rowFrequency: f32, columnFrequency: f32): *b3MeshData;
+#linkc fn b3CreateTorusMesh(radialResolution: i32, tubularResolution: i32, radius: f32, thickness: f32): *b3MeshData;
+#linkc fn b3CreateBoxMesh(center: b3Vec3, extent: b3Vec3, identifyEdges: bool): *b3MeshData;
+#linkc fn b3CreateHollowBoxMesh(center: b3Vec3, extent: b3Vec3): *b3MeshData;
+#linkc fn b3CreatePlatformMesh(center: b3Vec3, height: f32, topWidth: f32, bottomWidth: f32): *b3MeshData;
+#linkc fn b3CreateMesh(def: *const b3MeshDef, degenerateTriangleIndices: *i32, degenerateCapacity: i32): *b3MeshData;
+#linkc fn b3DestroyMesh(mesh: *b3MeshData): void;
+#linkc fn b3GetHeight(mesh: *const b3MeshData): i32;
+#linkc fn b3CreateHeightField(data: *const b3HeightFieldDef): *b3HeightFieldData;
+#linkc fn b3CreateGrid(rowCount: i32, columnCount: i32, scale: b3Vec3, makeHoles: bool): *b3HeightFieldData;
+#linkc fn b3CreateWave(rowCount: i32, columnCount: i32, scale: b3Vec3, rowFrequency: f32, columnFrequency: f32, makeHoles: bool): *b3HeightFieldData;
+#linkc fn b3DestroyHeightField(heightField: *b3HeightFieldData): void;
+#linkc fn b3DumpHeightData(data: *const b3HeightFieldDef, fileName: *const u8): void;
+#linkc fn b3LoadHeightField(fileName: *const u8): *b3HeightFieldData;
+#linkc fn b3GetCompoundChild(compound: *const b3CompoundData, childIndex: i32): b3ChildShape;
+#linkc fn b3QueryCompound(compound: *const b3CompoundData, aabb: b3AABB, fcn: *b3CompoundQueryFcn, context: *u8): void;
+#linkc fn b3GetCompoundCapsule(compound: *const b3CompoundData, index: i32): b3CompoundCapsule;
+#linkc fn b3GetCompoundHull(compound: *const b3CompoundData, index: i32): b3CompoundHull;
+#linkc fn b3GetCompoundMesh(compound: *const b3CompoundData, index: i32): b3CompoundMesh;
+#linkc fn b3GetCompoundSphere(compound: *const b3CompoundData, index: i32): b3CompoundSphere;
+#linkc fn b3GetCompoundMaterials(compound: *const b3CompoundData): *const b3SurfaceMaterial;
+#linkc fn b3CreateCompound(def: *const b3CompoundDef): *b3CompoundData;
+#linkc fn b3DestroyCompound(compound: *b3CompoundData): void;
+#linkc fn b3ConvertCompoundToBytes(compound: *b3CompoundData): *u8;
+#linkc fn b3ConvertBytesToCompound(bytes: *u8, byteCount: i32): *b3CompoundData;
+#linkc fn b3ComputeSphereMass(shape: *const b3Sphere, density: f32): b3MassData;
+#linkc fn b3ComputeCapsuleMass(shape: *const b3Capsule, density: f32): b3MassData;
+#linkc fn b3ComputeHullMass(shape: *const b3HullData, density: f32): b3MassData;
+#linkc fn b3ComputeSphereAABB(shape: *const b3Sphere, transform: b3Transform): b3AABB;
+#linkc fn b3ComputeCapsuleAABB(shape: *const b3Capsule, transform: b3Transform): b3AABB;
+#linkc fn b3ComputeHullAABB(shape: *const b3HullData, transform: b3Transform): b3AABB;
+#linkc fn b3ComputeMeshAABB(shape: *const b3MeshData, transform: b3Transform, scale: b3Vec3): b3AABB;
+#linkc fn b3ComputeHeightFieldAABB(shape: *const b3HeightFieldData, transform: b3Transform): b3AABB;
+#linkc fn b3ComputeCompoundAABB(shape: *const b3CompoundData, transform: b3Transform): b3AABB;
+#linkc fn b3IsValidRay(input: *const b3RayCastInput): bool;
+#linkc fn b3OverlapCapsule(shape: *const b3Capsule, shapeTransform: b3Transform, proxy: *const b3ShapeProxy): bool;
+#linkc fn b3OverlapCompound(shape: *const b3CompoundData, shapeTransform: b3Transform, proxy: *const b3ShapeProxy): bool;
+#linkc fn b3OverlapHeightField(shape: *const b3HeightFieldData, shapeTransform: b3Transform, proxy: *const b3ShapeProxy): bool;
+#linkc fn b3OverlapHull(shape: *const b3HullData, shapeTransform: b3Transform, proxy: *const b3ShapeProxy): bool;
+#linkc fn b3OverlapMesh(shape: *const b3Mesh, shapeTransform: b3Transform, proxy: *const b3ShapeProxy): bool;
+#linkc fn b3OverlapSphere(shape: *const b3Sphere, shapeTransform: b3Transform, proxy: *const b3ShapeProxy): bool;
+#linkc fn b3RayCastSphere(shape: *const b3Sphere, input: *const b3RayCastInput): b3CastOutput;
+#linkc fn b3RayCastHollowSphere(shape: *const b3Sphere, input: *const b3RayCastInput): b3CastOutput;
+#linkc fn b3RayCastCapsule(shape: *const b3Capsule, input: *const b3RayCastInput): b3CastOutput;
+#linkc fn b3RayCastCompound(shape: *const b3CompoundData, input: *const b3RayCastInput): b3CastOutput;
+#linkc fn b3RayCastHull(shape: *const b3HullData, input: *const b3RayCastInput): b3CastOutput;
+#linkc fn b3RayCastMesh(shape: *const b3Mesh, input: *const b3RayCastInput): b3CastOutput;
+#linkc fn b3RayCastHeightField(shape: *const b3HeightFieldData, input: *const b3RayCastInput): b3CastOutput;
+#linkc fn b3ShapeCastSphere(shape: *const b3Sphere, input: *const b3ShapeCastInput): b3CastOutput;
+#linkc fn b3ShapeCastCapsule(shape: *const b3Capsule, input: *const b3ShapeCastInput): b3CastOutput;
+#linkc fn b3ShapeCastCompound(shape: *const b3CompoundData, input: *const b3ShapeCastInput): b3CastOutput;
+#linkc fn b3ShapeCastHull(shape: *const b3HullData, input: *const b3ShapeCastInput): b3CastOutput;
+#linkc fn b3ShapeCastMesh(shape: *const b3Mesh, input: *const b3ShapeCastInput): b3CastOutput;
+#linkc fn b3ShapeCastHeightField(shape: *const b3HeightFieldData, input: *const b3ShapeCastInput): b3CastOutput;
+const b3MeshQueryFcn : __type_ptr = #type fn(a: b3Vec3, b: b3Vec3, c: b3Vec3, triangleIndex: i32, context: *u8): bool;
+#linkc fn b3QueryMesh(mesh: *const b3Mesh, bounds: b3AABB, fcn: *b3MeshQueryFcn, context: *u8): void;
+#linkc fn b3QueryHeightField(heightField: *const b3HeightFieldData, bounds: b3AABB, fcn: *b3MeshQueryFcn, context: *u8): void;
+#linkc fn b3ShapeDistance(input: *const b3DistanceInput, cache: *b3SimplexCache, simplexes: *b3Simplex, simplexCapacity: i32): b3DistanceOutput;
+#linkc fn b3ShapeCast(input: *const b3ShapeCastPairInput): b3CastOutput;
+#linkc fn b3GetSweepTransform(sweep: *const b3Sweep, time: f32): b3Transform;
+#linkc fn b3TimeOfImpact(input: *const b3TOIInput): b3TOIOutput;
+#linkc fn b3CollideSpheres(manifold: *b3LocalManifold, capacity: i32, sphereA: *const b3Sphere, sphereB: *const b3Sphere, transformBtoA: b3Transform): void;
+#linkc fn b3CollideCapsuleAndSphere(manifold: *b3LocalManifold, capacity: i32, capsuleA: *const b3Capsule, sphereB: *const b3Sphere, transformBtoA: b3Transform): void;
+#linkc fn b3CollideHullAndSphere(manifold: *b3LocalManifold, capacity: i32, hullA: *const b3HullData, sphereB: *const b3Sphere, transformBtoA: b3Transform, cache: *b3SimplexCache): void;
+#linkc fn b3CollideCapsules(manifold: *b3LocalManifold, capacity: i32, capsuleA: *const b3Capsule, capsuleB: *const b3Capsule, transformBtoA: b3Transform): void;
+#linkc fn b3CollideHullAndCapsule(manifold: *b3LocalManifold, capacity: i32, hullA: *const b3HullData, capsuleB: *const b3Capsule, transformBtoA: b3Transform, cache: *b3SimplexCache): void;
+#linkc fn b3CollideHulls(manifold: *b3LocalManifold, capacity: i32, hullA: *const b3HullData, hullB: *const b3HullData, transformBtoA: b3Transform, cache: *b3SATCache): void;
+#linkc fn b3CollideTriangleAndCapsule(manifold: *b3LocalManifold, capacity: i32, triangleA: *const b3Vec3, capsuleB: *const b3Capsule, cache: *b3SimplexCache): void;
+#linkc fn b3CollideTriangleAndHull(manifold: *b3LocalManifold, capacity: i32, v1: b3Vec3, v2: b3Vec3, v3: b3Vec3, triangleFlags: i32, hullB: *const b3HullData, cache: *b3SATCache, enableSpeculative: bool): void;
+#linkc fn b3CollideTriangleAndSphere(manifold: *b3LocalManifold, capacity: i32, triangleA: *const b3Vec3, sphereB: *const b3Sphere): void;
+#linkc fn b3SolvePlanes(targetDelta: b3Vec3, planes: *b3CollisionPlane, count: i32): b3PlaneSolverResult;
+#linkc fn b3ClipVector(vector: b3Vec3, planes: *const b3CollisionPlane, count: i32): b3Vec3;
+#linkc fn b3CreateWorld(def: *const b3WorldDef): b3WorldId;
+#linkc fn b3DestroyWorld(worldId: b3WorldId): void;
+#linkc fn b3GetWorldCount(): i32;
+#linkc fn b3GetMaxWorldCount(): i32;
+#linkc fn b3World_IsValid(id: b3WorldId): bool;
+#linkc fn b3World_Step(worldId: b3WorldId, timeStep: f32, subStepCount: i32): void;
+#linkc fn b3World_Draw(worldId: b3WorldId, draw: *b3DebugDraw, maskBits: u64): void;
+#linkc fn b3World_GetBounds(worldId: b3WorldId): b3AABB;
+#linkc fn b3World_GetBodyEvents(worldId: b3WorldId): b3BodyEvents;
+#linkc fn b3World_GetSensorEvents(worldId: b3WorldId): b3SensorEvents;
+#linkc fn b3World_GetContactEvents(worldId: b3WorldId): b3ContactEvents;
+#linkc fn b3World_GetJointEvents(worldId: b3WorldId): b3JointEvents;
+#linkc fn b3World_OverlapAABB(worldId: b3WorldId, aabb: b3AABB, filter: b3QueryFilter, fcn: *b3OverlapResultFcn, context: *u8): b3TreeStats;
+#linkc fn b3World_OverlapShape(worldId: b3WorldId, origin: b3Pos, proxy: *const b3ShapeProxy, filter: b3QueryFilter, fcn: *b3OverlapResultFcn, context: *u8): b3TreeStats;
+#linkc fn b3World_CastRay(worldId: b3WorldId, origin: b3Pos, translation: b3Vec3, filter: b3QueryFilter, fcn: *b3CastResultFcn, context: *u8): b3TreeStats;
+#linkc fn b3World_CastRayClosest(worldId: b3WorldId, origin: b3Pos, translation: b3Vec3, filter: b3QueryFilter): b3RayResult;
+#linkc fn b3World_CastShape(worldId: b3WorldId, origin: b3Pos, proxy: *const b3ShapeProxy, translation: b3Vec3, filter: b3QueryFilter, fcn: *b3CastResultFcn, context: *u8): b3TreeStats;
+#linkc fn b3World_CastMover(worldId: b3WorldId, origin: b3Pos, mover: *const b3Capsule, translation: b3Vec3, filter: b3QueryFilter, fcn: *b3MoverFilterFcn, context: *u8): f32;
+#linkc fn b3World_CollideMover(worldId: b3WorldId, origin: b3Pos, mover: *const b3Capsule, filter: b3QueryFilter, fcn: *b3PlaneResultFcn, context: *u8): void;
+#linkc fn b3World_EnableSleeping(worldId: b3WorldId, flag: bool): void;
+#linkc fn b3World_IsSleepingEnabled(worldId: b3WorldId): bool;
+#linkc fn b3World_EnableContinuous(worldId: b3WorldId, flag: bool): void;
+#linkc fn b3World_IsContinuousEnabled(worldId: b3WorldId): bool;
+#linkc fn b3World_SetRestitutionThreshold(worldId: b3WorldId, value: f32): void;
+#linkc fn b3World_GetRestitutionThreshold(worldId: b3WorldId): f32;
+#linkc fn b3World_SetHitEventThreshold(worldId: b3WorldId, value: f32): void;
+#linkc fn b3World_GetHitEventThreshold(worldId: b3WorldId): f32;
+#linkc fn b3World_SetCustomFilterCallback(worldId: b3WorldId, fcn: *b3CustomFilterFcn, context: *u8): void;
+#linkc fn b3World_SetPreSolveCallback(worldId: b3WorldId, fcn: *b3PreSolveFcn, context: *u8): void;
+#linkc fn b3World_SetGravity(worldId: b3WorldId, gravity: b3Vec3): void;
+#linkc fn b3World_GetGravity(worldId: b3WorldId): b3Vec3;
+#linkc fn b3World_Explode(worldId: b3WorldId, explosionDef: *const b3ExplosionDef): void;
+#linkc fn b3World_SetContactTuning(worldId: b3WorldId, hertz: f32, dampingRatio: f32, contactSpeed: f32): void;
+#linkc fn b3World_SetContactRecycleDistance(worldId: b3WorldId, recycleDistance: f32): void;
+#linkc fn b3World_GetContactRecycleDistance(worldId: b3WorldId): f32;
+#linkc fn b3World_SetMaximumLinearSpeed(worldId: b3WorldId, maximumLinearSpeed: f32): void;
+#linkc fn b3World_GetMaximumLinearSpeed(worldId: b3WorldId): f32;
+#linkc fn b3World_EnableWarmStarting(worldId: b3WorldId, flag: bool): void;
+#linkc fn b3World_IsWarmStartingEnabled(worldId: b3WorldId): bool;
+#linkc fn b3World_GetAwakeBodyCount(worldId: b3WorldId): i32;
+#linkc fn b3World_GetProfile(worldId: b3WorldId): b3Profile;
+#linkc fn b3World_GetCounters(worldId: b3WorldId): b3Counters;
+#linkc fn b3World_GetMaxCapacity(worldId: b3WorldId): b3Capacity;
+#linkc fn b3World_SetUserData(worldId: b3WorldId, userData: *u8): void;
+#linkc fn b3World_GetUserData(worldId: b3WorldId): *u8;
+#linkc fn b3World_SetFrictionCallback(worldId: b3WorldId, callback: *b3FrictionCallback): void;
+#linkc fn b3World_SetRestitutionCallback(worldId: b3WorldId, callback: *b3RestitutionCallback): void;
+#linkc fn b3World_SetWorkerCount(worldId: b3WorldId, count: i32): void;
+#linkc fn b3World_GetWorkerCount(worldId: b3WorldId): i32;
+#linkc fn b3World_DumpMemoryStats(worldId: b3WorldId): void;
+#linkc fn b3World_DumpShapeBounds(worldId: b3WorldId, type: b3BodyType): void;
+#linkc fn b3World_RebuildStaticTree(worldId: b3WorldId): void;
+#linkc fn b3World_EnableSpeculative(worldId: b3WorldId, flag: bool): void;
+#linkc fn b3CreateRecording(byteCapacity: i32): *b3Recording;
+#linkc fn b3DestroyRecording(recording: *b3Recording): void;
+#linkc fn b3Recording_GetData(recording: *const b3Recording): *const u8;
+#linkc fn b3Recording_GetSize(recording: *const b3Recording): i32;
+#linkc fn b3World_StartRecording(worldId: b3WorldId, recording: *b3Recording): void;
+#linkc fn b3World_StopRecording(worldId: b3WorldId): void;
+#linkc fn b3SaveRecordingToFile(recording: *const b3Recording, path: *const u8): bool;
+#linkc fn b3LoadRecordingFromFile(path: *const u8): *b3Recording;
+#linkc fn b3ValidateReplay(data: *const u8, size: i32, workerCount: i32): bool;
+struct b3RecPlayerInfo {
+    frameCount: i32;
+    workerCount: i32;
+    timeStep: f32;
+    subStepCount: i32;
+    lengthScale: f32;
+    bounds: b3AABB;
+};
+
+#linkc fn b3RecPlayer_Create(data: *const u8, size: i32, workerCount: i32): *b3RecPlayer;
+#linkc fn b3RecPlayer_Destroy(player: *b3RecPlayer): void;
+#linkc fn b3RecPlayer_StepFrame(player: *b3RecPlayer): bool;
+#linkc fn b3RecPlayer_SubStepFrame(player: *b3RecPlayer): void;
+#linkc fn b3RecPlayer_Restart(player: *b3RecPlayer): void;
+#linkc fn b3RecPlayer_SeekFrame(player: *b3RecPlayer, targetFrame: i32): void;
+#linkc fn b3RecPlayer_GetWorldId(player: *const b3RecPlayer): b3WorldId;
+#linkc fn b3RecPlayer_GetFrame(player: *const b3RecPlayer): i32;
+#linkc fn b3RecPlayer_GetFrameCount(player: *const b3RecPlayer): i32;
+#linkc fn b3RecPlayer_IsAtEnd(player: *const b3RecPlayer): bool;
+#linkc fn b3RecPlayer_IsAtPreStep(player: *const b3RecPlayer): bool;
+#linkc fn b3RecPlayer_HasDiverged(player: *const b3RecPlayer): bool;
+#linkc fn b3RecPlayer_GetInfo(player: *const b3RecPlayer): b3RecPlayerInfo;
+#linkc fn b3RecPlayer_GetDivergeFrame(player: *const b3RecPlayer): i32;
+#linkc fn b3RecPlayer_SetWorkerCount(player: *b3RecPlayer, count: i32): void;
+#linkc fn b3RecPlayer_SetKeyframePolicy(player: *b3RecPlayer, budgetBytes: usize, minIntervalFrames: i32): void;
+#linkc fn b3RecPlayer_GetKeyframeBudget(player: *const b3RecPlayer): usize;
+#linkc fn b3RecPlayer_GetKeyframeMinInterval(player: *const b3RecPlayer): i32;
+#linkc fn b3RecPlayer_GetKeyframeInterval(player: *const b3RecPlayer): i32;
+#linkc fn b3RecPlayer_GetKeyframeBytes(player: *const b3RecPlayer): usize;
+#linkc fn b3RecPlayer_GetBodyCount(player: *const b3RecPlayer): i32;
+#linkc fn b3RecPlayer_GetBodyId(player: *const b3RecPlayer, index: i32): b3BodyId;
+#linkc fn b3RecPlayer_SetDebugShapeCallbacks(player: *b3RecPlayer, createDebugShape: *b3CreateDebugShapeCallback, destroyDebugShape: *b3DestroyDebugShapeCallback, context: *u8): void;
+#linkc fn b3RecPlayer_DrawFrameQueries(player: *b3RecPlayer, draw: *b3DebugDraw, queryIndex: i32, selectedIndex: i32): void;
+enum b3RecQueryType : i32 {
+    b3_recQueryOverlapAABB;
+    b3_recQueryOverlapShape;
+    b3_recQueryCastRay;
+    b3_recQueryCastShape;
+    b3_recQueryCastRayClosest;
+    b3_recQueryCastMover;
+    b3_recQueryCollideMover;
+};
+
+struct b3RecQueryInfo {
+    type: b3RecQueryType;
+    filter: b3QueryFilter;
+    aabb: b3AABB;
+    origin: b3Pos;
+    translation: b3Vec3;
+    hitCount: i32;
+    key: u64;
+    id: u64;
+    name: *const u8;
+};
+
+struct b3RecQueryHit {
+    shape: b3ShapeId;
+    point: b3Pos;
+    normal: b3Vec3;
+    fraction: f32;
+};
+
+#linkc fn b3RecPlayer_GetFrameQueryCount(player: *const b3RecPlayer): i32;
+#linkc fn b3RecPlayer_GetFrameQuery(player: *const b3RecPlayer, index: i32): b3RecQueryInfo;
+#linkc fn b3RecPlayer_GetFrameQueryHit(player: *const b3RecPlayer, queryIndex: i32, hitIndex: i32): b3RecQueryHit;
+#linkc fn b3CreateBody(worldId: b3WorldId, def: *const b3BodyDef): b3BodyId;
+#linkc fn b3DestroyBody(bodyId: b3BodyId): void;
+#linkc fn b3Body_IsValid(id: b3BodyId): bool;
+#linkc fn b3Body_GetType(bodyId: b3BodyId): b3BodyType;
+#linkc fn b3Body_SetType(bodyId: b3BodyId, type: b3BodyType): void;
+#linkc fn b3Body_SetName(bodyId: b3BodyId, name: *const u8): void;
+#linkc fn b3Body_GetName(bodyId: b3BodyId): *const u8;
+#linkc fn b3Body_SetUserData(bodyId: b3BodyId, userData: *u8): void;
+#linkc fn b3Body_GetUserData(bodyId: b3BodyId): *u8;
+#linkc fn b3Body_GetPosition(bodyId: b3BodyId): b3Pos;
+#linkc fn b3Body_GetRotation(bodyId: b3BodyId): b3Quat;
+#linkc fn b3Body_GetTransform(bodyId: b3BodyId): b3WorldTransform;
+#linkc fn b3Body_SetTransform(bodyId: b3BodyId, position: b3Pos, rotation: b3Quat): void;
+#linkc fn b3Body_GetLocalPoint(bodyId: b3BodyId, worldPoint: b3Pos): b3Vec3;
+#linkc fn b3Body_GetWorldPoint(bodyId: b3BodyId, localPoint: b3Vec3): b3Pos;
+#linkc fn b3Body_GetLocalVector(bodyId: b3BodyId, worldVector: b3Vec3): b3Vec3;
+#linkc fn b3Body_GetWorldVector(bodyId: b3BodyId, localVector: b3Vec3): b3Vec3;
+#linkc fn b3Body_GetLinearVelocity(bodyId: b3BodyId): b3Vec3;
+#linkc fn b3Body_GetAngularVelocity(bodyId: b3BodyId): b3Vec3;
+#linkc fn b3Body_SetLinearVelocity(bodyId: b3BodyId, linearVelocity: b3Vec3): void;
+#linkc fn b3Body_SetAngularVelocity(bodyId: b3BodyId, angularVelocity: b3Vec3): void;
+#linkc fn b3Body_SetTargetTransform(bodyId: b3BodyId, target: b3WorldTransform, timeStep: f32, wake: bool): void;
+#linkc fn b3Body_GetLocalPointVelocity(bodyId: b3BodyId, localPoint: b3Vec3): b3Vec3;
+#linkc fn b3Body_GetWorldPointVelocity(bodyId: b3BodyId, worldPoint: b3Pos): b3Vec3;
+#linkc fn b3Body_ApplyForce(bodyId: b3BodyId, force: b3Vec3, point: b3Pos, wake: bool): void;
+#linkc fn b3Body_ApplyForceToCenter(bodyId: b3BodyId, force: b3Vec3, wake: bool): void;
+#linkc fn b3Body_ApplyTorque(bodyId: b3BodyId, torque: b3Vec3, wake: bool): void;
+#linkc fn b3Body_ApplyLinearImpulse(bodyId: b3BodyId, impulse: b3Vec3, point: b3Pos, wake: bool): void;
+#linkc fn b3Body_ApplyLinearImpulseToCenter(bodyId: b3BodyId, impulse: b3Vec3, wake: bool): void;
+#linkc fn b3Body_ApplyAngularImpulse(bodyId: b3BodyId, impulse: b3Vec3, wake: bool): void;
+#linkc fn b3Body_GetMass(bodyId: b3BodyId): f32;
+#linkc fn b3Body_GetLocalRotationalInertia(bodyId: b3BodyId): b3Matrix3;
+#linkc fn b3Body_GetInverseMass(bodyId: b3BodyId): f32;
+#linkc fn b3Body_GetWorldInverseRotationalInertia(bodyId: b3BodyId): b3Matrix3;
+#linkc fn b3Body_GetLocalCenter(bodyId: b3BodyId): b3Vec3;
+#linkc fn b3Body_GetWorldCenter(bodyId: b3BodyId): b3Pos;
+#linkc fn b3Body_SetMassData(bodyId: b3BodyId, massData: b3MassData): void;
+#linkc fn b3Body_GetMassData(bodyId: b3BodyId): b3MassData;
+#linkc fn b3Body_ApplyMassFromShapes(bodyId: b3BodyId): void;
+#linkc fn b3Body_SetLinearDamping(bodyId: b3BodyId, linearDamping: f32): void;
+#linkc fn b3Body_GetLinearDamping(bodyId: b3BodyId): f32;
+#linkc fn b3Body_SetAngularDamping(bodyId: b3BodyId, angularDamping: f32): void;
+#linkc fn b3Body_GetAngularDamping(bodyId: b3BodyId): f32;
+#linkc fn b3Body_SetGravityScale(bodyId: b3BodyId, gravityScale: f32): void;
+#linkc fn b3Body_GetGravityScale(bodyId: b3BodyId): f32;
+#linkc fn b3Body_IsAwake(bodyId: b3BodyId): bool;
+#linkc fn b3Body_SetAwake(bodyId: b3BodyId, awake: bool): void;
+#linkc fn b3Body_EnableSleep(bodyId: b3BodyId, enableSleep: bool): void;
+#linkc fn b3Body_IsSleepEnabled(bodyId: b3BodyId): bool;
+#linkc fn b3Body_SetSleepThreshold(bodyId: b3BodyId, sleepThreshold: f32): void;
+#linkc fn b3Body_GetSleepThreshold(bodyId: b3BodyId): f32;
+#linkc fn b3Body_IsEnabled(bodyId: b3BodyId): bool;
+#linkc fn b3Body_Disable(bodyId: b3BodyId): void;
+#linkc fn b3Body_Enable(bodyId: b3BodyId): void;
+#linkc fn b3Body_SetMotionLocks(bodyId: b3BodyId, locks: b3MotionLocks): void;
+#linkc fn b3Body_GetMotionLocks(bodyId: b3BodyId): b3MotionLocks;
+#linkc fn b3Body_SetBullet(bodyId: b3BodyId, flag: bool): void;
+#linkc fn b3Body_IsBullet(bodyId: b3BodyId): bool;
+#linkc fn b3Body_AllowFastRotation(bodyId: b3BodyId, flag: bool): void;
+#linkc fn b3Body_IsFastRotationAllowed(bodyId: b3BodyId): bool;
+#linkc fn b3Body_EnableContactRecycling(bodyId: b3BodyId, flag: bool): void;
+#linkc fn b3Body_IsContactRecyclingEnabled(bodyId: b3BodyId): bool;
+#linkc fn b3Body_EnableHitEvents(bodyId: b3BodyId, flag: bool): void;
+#linkc fn b3Body_GetWorld(bodyId: b3BodyId): b3WorldId;
+#linkc fn b3Body_GetShapeCount(bodyId: b3BodyId): i32;
+#linkc fn b3Body_GetShapes(bodyId: b3BodyId, shapeArray: *b3ShapeId, capacity: i32): i32;
+#linkc fn b3Body_GetJointCount(bodyId: b3BodyId): i32;
+#linkc fn b3Body_GetJoints(bodyId: b3BodyId, jointArray: *b3JointId, capacity: i32): i32;
+#linkc fn b3Body_GetContactCapacity(bodyId: b3BodyId): i32;
+#linkc fn b3Body_GetContactData(bodyId: b3BodyId, contactData: *b3ContactData, capacity: i32): i32;
+#linkc fn b3Body_ComputeAABB(bodyId: b3BodyId): b3AABB;
+#linkc fn b3Body_GetClosestPoint(bodyId: b3BodyId, result: *b3Vec3, target: b3Vec3): f32;
+#linkc fn b3Body_CastRay(bodyId: b3BodyId, origin: b3Pos, translation: b3Vec3, filter: b3QueryFilter, maxFraction: f32, bodyTransform: b3WorldTransform): b3BodyCastResult;
+#linkc fn b3Body_CastShape(bodyId: b3BodyId, origin: b3Pos, proxy: *const b3ShapeProxy, translation: b3Vec3, filter: b3QueryFilter, maxFraction: f32, canEncroach: bool, bodyTransform: b3WorldTransform): b3BodyCastResult;
+#linkc fn b3Body_OverlapShape(bodyId: b3BodyId, origin: b3Pos, proxy: *const b3ShapeProxy, filter: b3QueryFilter, bodyTransform: b3WorldTransform): bool;
+#linkc fn b3Body_CollideMover(bodyId: b3BodyId, bodyPlanes: *b3BodyPlaneResult, planeCapacity: i32, origin: b3Pos, mover: *const b3Capsule, filter: b3QueryFilter, bodyTransform: b3WorldTransform): i32;
+#linkc fn b3CreateSphereShape(bodyId: b3BodyId, def: *const b3ShapeDef, sphere: *const b3Sphere): b3ShapeId;
+#linkc fn b3CreateCapsuleShape(bodyId: b3BodyId, def: *const b3ShapeDef, capsule: *const b3Capsule): b3ShapeId;
+#linkc fn b3CreateHullShape(bodyId: b3BodyId, def: *const b3ShapeDef, hull: *const b3HullData): b3ShapeId;
+#linkc fn b3CreateTransformedHullShape(bodyId: b3BodyId, def: *const b3ShapeDef, hull: *const b3HullData, transform: b3Transform, scale: b3Vec3): b3ShapeId;
+#linkc fn b3CreateMeshShape(bodyId: b3BodyId, def: *const b3ShapeDef, mesh: *const b3MeshData, scale: b3Vec3): b3ShapeId;
+#linkc fn b3CreateHeightFieldShape(bodyId: b3BodyId, def: *const b3ShapeDef, heightField: *const b3HeightFieldData): b3ShapeId;
+#linkc fn b3CreateBakedCompoundShape(bodyId: b3BodyId, def: *b3ShapeDef, compound: *const b3CompoundData): b3ShapeId;
+#linkc fn b3DestroyShape(shapeId: b3ShapeId, updateBodyMass: bool): void;
+#linkc fn b3Shape_IsValid(id: b3ShapeId): bool;
+#linkc fn b3Shape_GetType(shapeId: b3ShapeId): b3ShapeType;
+#linkc fn b3Shape_GetBody(shapeId: b3ShapeId): b3BodyId;
+#linkc fn b3Shape_GetWorld(shapeId: b3ShapeId): b3WorldId;
+#linkc fn b3Shape_IsSensor(shapeId: b3ShapeId): bool;
+#linkc fn b3Shape_SetName(shapeId: b3ShapeId, name: *const u8): void;
+#linkc fn b3Shape_GetName(shapeId: b3ShapeId): *const u8;
+#linkc fn b3Shape_SetUserData(shapeId: b3ShapeId, userData: *u8): void;
+#linkc fn b3Shape_GetUserData(shapeId: b3ShapeId): *u8;
+#linkc fn b3Shape_SetDensity(shapeId: b3ShapeId, density: f32, updateBodyMass: bool): void;
+#linkc fn b3Shape_GetDensity(shapeId: b3ShapeId): f32;
+#linkc fn b3Shape_SetFriction(shapeId: b3ShapeId, friction: f32): void;
+#linkc fn b3Shape_GetFriction(shapeId: b3ShapeId): f32;
+#linkc fn b3Shape_SetRestitution(shapeId: b3ShapeId, restitution: f32): void;
+#linkc fn b3Shape_GetRestitution(shapeId: b3ShapeId): f32;
+#linkc fn b3Shape_SetSurfaceMaterial(shapeId: b3ShapeId, surfaceMaterial: b3SurfaceMaterial): void;
+#linkc fn b3Shape_GetSurfaceMaterial(shapeId: b3ShapeId): b3SurfaceMaterial;
+#linkc fn b3Shape_GetMeshMaterialCount(shapeId: b3ShapeId): i32;
+#linkc fn b3Shape_SetMeshMaterial(shapeId: b3ShapeId, surfaceMaterial: b3SurfaceMaterial, index: i32): void;
+#linkc fn b3Shape_GetMeshSurfaceMaterial(shapeId: b3ShapeId, index: i32): b3SurfaceMaterial;
+#linkc fn b3Shape_GetFilter(shapeId: b3ShapeId): b3Filter;
+#linkc fn b3Shape_SetFilter(shapeId: b3ShapeId, filter: b3Filter, invokeContacts: bool): void;
+#linkc fn b3Shape_EnableSensorEvents(shapeId: b3ShapeId, flag: bool): void;
+#linkc fn b3Shape_AreSensorEventsEnabled(shapeId: b3ShapeId): bool;
+#linkc fn b3Shape_EnableContactEvents(shapeId: b3ShapeId, flag: bool): void;
+#linkc fn b3Shape_AreContactEventsEnabled(shapeId: b3ShapeId): bool;
+#linkc fn b3Shape_EnablePreSolveEvents(shapeId: b3ShapeId, flag: bool): void;
+#linkc fn b3Shape_ArePreSolveEventsEnabled(shapeId: b3ShapeId): bool;
+#linkc fn b3Shape_EnableHitEvents(shapeId: b3ShapeId, flag: bool): void;
+#linkc fn b3Shape_AreHitEventsEnabled(shapeId: b3ShapeId): bool;
+#linkc fn b3Shape_RayCast(shapeId: b3ShapeId, origin: b3Pos, translation: b3Vec3): b3WorldCastOutput;
+#linkc fn b3Shape_GetSphere(shapeId: b3ShapeId): b3Sphere;
+#linkc fn b3Shape_GetCapsule(shapeId: b3ShapeId): b3Capsule;
+#linkc fn b3Shape_GetHull(shapeId: b3ShapeId): *const b3HullData;
+#linkc fn b3Shape_GetMesh(shapeId: b3ShapeId): b3Mesh;
+#linkc fn b3Shape_GetHeightField(shapeId: b3ShapeId): *const b3HeightFieldData;
+#linkc fn b3Shape_SetSphere(shapeId: b3ShapeId, sphere: *const b3Sphere): void;
+#linkc fn b3Shape_SetCapsule(shapeId: b3ShapeId, capsule: *const b3Capsule): void;
+#linkc fn b3Shape_SetHull(shapeId: b3ShapeId, hull: *const b3HullData): void;
+#linkc fn b3Shape_SetMesh(shapeId: b3ShapeId, meshData: *const b3MeshData, scale: b3Vec3): void;
+#linkc fn b3Shape_GetContactCapacity(shapeId: b3ShapeId): i32;
+#linkc fn b3Shape_GetContactData(shapeId: b3ShapeId, contactData: *b3ContactData, capacity: i32): i32;
+#linkc fn b3Shape_GetSensorCapacity(shapeId: b3ShapeId): i32;
+#linkc fn b3Shape_GetSensorData(shapeId: b3ShapeId, visitorIds: *b3ShapeId, capacity: i32): i32;
+#linkc fn b3Shape_GetAABB(shapeId: b3ShapeId): b3AABB;
+#linkc fn b3Shape_ComputeMassData(shapeId: b3ShapeId): b3MassData;
+#linkc fn b3Shape_GetClosestPoint(shapeId: b3ShapeId, target: b3Vec3): b3Vec3;
+#linkc fn b3Shape_ApplyWind(shapeId: b3ShapeId, wind: b3Vec3, drag: f32, lift: f32, maxSpeed: f32, wake: bool): void;
+#linkc fn b3DestroyJoint(jointId: b3JointId, wakeAttached: bool): void;
+#linkc fn b3Joint_IsValid(id: b3JointId): bool;
+#linkc fn b3Joint_GetType(jointId: b3JointId): b3JointType;
+#linkc fn b3Joint_GetBodyA(jointId: b3JointId): b3BodyId;
+#linkc fn b3Joint_GetBodyB(jointId: b3JointId): b3BodyId;
+#linkc fn b3Joint_GetWorld(jointId: b3JointId): b3WorldId;
+#linkc fn b3Joint_SetLocalFrameA(jointId: b3JointId, localFrame: b3Transform): void;
+#linkc fn b3Joint_GetLocalFrameA(jointId: b3JointId): b3Transform;
+#linkc fn b3Joint_SetLocalFrameB(jointId: b3JointId, localFrame: b3Transform): void;
+#linkc fn b3Joint_GetLocalFrameB(jointId: b3JointId): b3Transform;
+#linkc fn b3Joint_SetCollideConnected(jointId: b3JointId, shouldCollide: bool): void;
+#linkc fn b3Joint_GetCollideConnected(jointId: b3JointId): bool;
+#linkc fn b3Joint_SetUserData(jointId: b3JointId, userData: *u8): void;
+#linkc fn b3Joint_GetUserData(jointId: b3JointId): *u8;
+#linkc fn b3Joint_WakeBodies(jointId: b3JointId): void;
+#linkc fn b3Joint_GetConstraintForce(jointId: b3JointId): b3Vec3;
+#linkc fn b3Joint_GetConstraintTorque(jointId: b3JointId): b3Vec3;
+#linkc fn b3Joint_GetLinearSeparation(jointId: b3JointId): f32;
+#linkc fn b3Joint_GetAngularSeparation(jointId: b3JointId): f32;
+#linkc fn b3Joint_SetConstraintTuning(jointId: b3JointId, hertz: f32, dampingRatio: f32): void;
+#linkc fn b3Joint_GetConstraintTuning(jointId: b3JointId, hertz: *f32, dampingRatio: *f32): void;
+#linkc fn b3Joint_SetForceThreshold(jointId: b3JointId, threshold: f32): void;
+#linkc fn b3Joint_GetForceThreshold(jointId: b3JointId): f32;
+#linkc fn b3Joint_SetTorqueThreshold(jointId: b3JointId, threshold: f32): void;
+#linkc fn b3Joint_GetTorqueThreshold(jointId: b3JointId): f32;
+#linkc fn b3CreateParallelJoint(worldId: b3WorldId, def: *const b3ParallelJointDef): b3JointId;
+#linkc fn b3ParallelJoint_SetSpringHertz(jointId: b3JointId, hertz: f32): void;
+#linkc fn b3ParallelJoint_SetSpringDampingRatio(jointId: b3JointId, dampingRatio: f32): void;
+#linkc fn b3ParallelJoint_GetSpringHertz(jointId: b3JointId): f32;
+#linkc fn b3ParallelJoint_GetSpringDampingRatio(jointId: b3JointId): f32;
+#linkc fn b3ParallelJoint_SetMaxTorque(jointId: b3JointId, force: f32): void;
+#linkc fn b3ParallelJoint_GetMaxTorque(jointId: b3JointId): f32;
+#linkc fn b3CreateDistanceJoint(worldId: b3WorldId, def: *const b3DistanceJointDef): b3JointId;
+#linkc fn b3DistanceJoint_SetLength(jointId: b3JointId, length: f32): void;
+#linkc fn b3DistanceJoint_GetLength(jointId: b3JointId): f32;
+#linkc fn b3DistanceJoint_EnableSpring(jointId: b3JointId, enableSpring: bool): void;
+#linkc fn b3DistanceJoint_IsSpringEnabled(jointId: b3JointId): bool;
+#linkc fn b3DistanceJoint_SetSpringForceRange(jointId: b3JointId, lowerForce: f32, upperForce: f32): void;
+#linkc fn b3DistanceJoint_GetSpringForceRange(jointId: b3JointId, lowerForce: *f32, upperForce: *f32): void;
+#linkc fn b3DistanceJoint_SetSpringHertz(jointId: b3JointId, hertz: f32): void;
+#linkc fn b3DistanceJoint_SetSpringDampingRatio(jointId: b3JointId, dampingRatio: f32): void;
+#linkc fn b3DistanceJoint_GetSpringHertz(jointId: b3JointId): f32;
+#linkc fn b3DistanceJoint_GetSpringDampingRatio(jointId: b3JointId): f32;
+#linkc fn b3DistanceJoint_EnableLimit(jointId: b3JointId, enableLimit: bool): void;
+#linkc fn b3DistanceJoint_IsLimitEnabled(jointId: b3JointId): bool;
+#linkc fn b3DistanceJoint_SetLengthRange(jointId: b3JointId, minLength: f32, maxLength: f32): void;
+#linkc fn b3DistanceJoint_GetMinLength(jointId: b3JointId): f32;
+#linkc fn b3DistanceJoint_GetMaxLength(jointId: b3JointId): f32;
+#linkc fn b3DistanceJoint_GetCurrentLength(jointId: b3JointId): f32;
+#linkc fn b3DistanceJoint_EnableMotor(jointId: b3JointId, enableMotor: bool): void;
+#linkc fn b3DistanceJoint_IsMotorEnabled(jointId: b3JointId): bool;
+#linkc fn b3DistanceJoint_SetMotorSpeed(jointId: b3JointId, motorSpeed: f32): void;
+#linkc fn b3DistanceJoint_GetMotorSpeed(jointId: b3JointId): f32;
+#linkc fn b3DistanceJoint_SetMaxMotorForce(jointId: b3JointId, force: f32): void;
+#linkc fn b3DistanceJoint_GetMaxMotorForce(jointId: b3JointId): f32;
+#linkc fn b3DistanceJoint_GetMotorForce(jointId: b3JointId): f32;
+#linkc fn b3CreateMotorJoint(worldId: b3WorldId, def: *const b3MotorJointDef): b3JointId;
+#linkc fn b3MotorJoint_SetLinearVelocity(jointId: b3JointId, velocity: b3Vec3): void;
+#linkc fn b3MotorJoint_GetLinearVelocity(jointId: b3JointId): b3Vec3;
+#linkc fn b3MotorJoint_SetAngularVelocity(jointId: b3JointId, velocity: b3Vec3): void;
+#linkc fn b3MotorJoint_GetAngularVelocity(jointId: b3JointId): b3Vec3;
+#linkc fn b3MotorJoint_SetMaxVelocityForce(jointId: b3JointId, maxForce: f32): void;
+#linkc fn b3MotorJoint_GetMaxVelocityForce(jointId: b3JointId): f32;
+#linkc fn b3MotorJoint_SetMaxVelocityTorque(jointId: b3JointId, maxTorque: f32): void;
+#linkc fn b3MotorJoint_GetMaxVelocityTorque(jointId: b3JointId): f32;
+#linkc fn b3MotorJoint_SetLinearHertz(jointId: b3JointId, hertz: f32): void;
+#linkc fn b3MotorJoint_GetLinearHertz(jointId: b3JointId): f32;
+#linkc fn b3MotorJoint_SetLinearDampingRatio(jointId: b3JointId, damping: f32): void;
+#linkc fn b3MotorJoint_GetLinearDampingRatio(jointId: b3JointId): f32;
+#linkc fn b3MotorJoint_SetAngularHertz(jointId: b3JointId, hertz: f32): void;
+#linkc fn b3MotorJoint_GetAngularHertz(jointId: b3JointId): f32;
+#linkc fn b3MotorJoint_SetAngularDampingRatio(jointId: b3JointId, damping: f32): void;
+#linkc fn b3MotorJoint_GetAngularDampingRatio(jointId: b3JointId): f32;
+#linkc fn b3MotorJoint_SetMaxSpringForce(jointId: b3JointId, maxForce: f32): void;
+#linkc fn b3MotorJoint_GetMaxSpringForce(jointId: b3JointId): f32;
+#linkc fn b3MotorJoint_SetMaxSpringTorque(jointId: b3JointId, maxTorque: f32): void;
+#linkc fn b3MotorJoint_GetMaxSpringTorque(jointId: b3JointId): f32;
+#linkc fn b3CreateFilterJoint(worldId: b3WorldId, def: *const b3FilterJointDef): b3JointId;
+#linkc fn b3CreatePrismaticJoint(worldId: b3WorldId, def: *const b3PrismaticJointDef): b3JointId;
+#linkc fn b3PrismaticJoint_EnableSpring(jointId: b3JointId, enableSpring: bool): void;
+#linkc fn b3PrismaticJoint_IsSpringEnabled(jointId: b3JointId): bool;
+#linkc fn b3PrismaticJoint_SetSpringHertz(jointId: b3JointId, hertz: f32): void;
+#linkc fn b3PrismaticJoint_GetSpringHertz(jointId: b3JointId): f32;
+#linkc fn b3PrismaticJoint_SetSpringDampingRatio(jointId: b3JointId, dampingRatio: f32): void;
+#linkc fn b3PrismaticJoint_GetSpringDampingRatio(jointId: b3JointId): f32;
+#linkc fn b3PrismaticJoint_SetTargetTranslation(jointId: b3JointId, targetTranslation: f32): void;
+#linkc fn b3PrismaticJoint_GetTargetTranslation(jointId: b3JointId): f32;
+#linkc fn b3PrismaticJoint_EnableLimit(jointId: b3JointId, enableLimit: bool): void;
+#linkc fn b3PrismaticJoint_IsLimitEnabled(jointId: b3JointId): bool;
+#linkc fn b3PrismaticJoint_GetLowerLimit(jointId: b3JointId): f32;
+#linkc fn b3PrismaticJoint_GetUpperLimit(jointId: b3JointId): f32;
+#linkc fn b3PrismaticJoint_SetLimits(jointId: b3JointId, lower: f32, upper: f32): void;
+#linkc fn b3PrismaticJoint_EnableMotor(jointId: b3JointId, enableMotor: bool): void;
+#linkc fn b3PrismaticJoint_IsMotorEnabled(jointId: b3JointId): bool;
+#linkc fn b3PrismaticJoint_SetMotorSpeed(jointId: b3JointId, motorSpeed: f32): void;
+#linkc fn b3PrismaticJoint_GetMotorSpeed(jointId: b3JointId): f32;
+#linkc fn b3PrismaticJoint_SetMaxMotorForce(jointId: b3JointId, force: f32): void;
+#linkc fn b3PrismaticJoint_GetMaxMotorForce(jointId: b3JointId): f32;
+#linkc fn b3PrismaticJoint_GetMotorForce(jointId: b3JointId): f32;
+#linkc fn b3PrismaticJoint_GetTranslation(jointId: b3JointId): f32;
+#linkc fn b3PrismaticJoint_GetSpeed(jointId: b3JointId): f32;
+#linkc fn b3CreateRevoluteJoint(worldId: b3WorldId, def: *const b3RevoluteJointDef): b3JointId;
+#linkc fn b3RevoluteJoint_EnableSpring(jointId: b3JointId, enableSpring: bool): void;
+#linkc fn b3RevoluteJoint_IsSpringEnabled(jointId: b3JointId): bool;
+#linkc fn b3RevoluteJoint_SetSpringHertz(jointId: b3JointId, hertz: f32): void;
+#linkc fn b3RevoluteJoint_GetSpringHertz(jointId: b3JointId): f32;
+#linkc fn b3RevoluteJoint_SetSpringDampingRatio(jointId: b3JointId, dampingRatio: f32): void;
+#linkc fn b3RevoluteJoint_GetSpringDampingRatio(jointId: b3JointId): f32;
+#linkc fn b3RevoluteJoint_SetTargetAngle(jointId: b3JointId, targetRadians: f32): void;
+#linkc fn b3RevoluteJoint_GetTargetAngle(jointId: b3JointId): f32;
+#linkc fn b3RevoluteJoint_GetAngle(jointId: b3JointId): f32;
+#linkc fn b3RevoluteJoint_EnableLimit(jointId: b3JointId, enableLimit: bool): void;
+#linkc fn b3RevoluteJoint_IsLimitEnabled(jointId: b3JointId): bool;
+#linkc fn b3RevoluteJoint_GetLowerLimit(jointId: b3JointId): f32;
+#linkc fn b3RevoluteJoint_GetUpperLimit(jointId: b3JointId): f32;
+#linkc fn b3RevoluteJoint_SetLimits(jointId: b3JointId, lowerLimitRadians: f32, upperLimitRadians: f32): void;
+#linkc fn b3RevoluteJoint_EnableMotor(jointId: b3JointId, enableMotor: bool): void;
+#linkc fn b3RevoluteJoint_IsMotorEnabled(jointId: b3JointId): bool;
+#linkc fn b3RevoluteJoint_SetMotorSpeed(jointId: b3JointId, motorSpeed: f32): void;
+#linkc fn b3RevoluteJoint_GetMotorSpeed(jointId: b3JointId): f32;
+#linkc fn b3RevoluteJoint_GetMotorTorque(jointId: b3JointId): f32;
+#linkc fn b3RevoluteJoint_SetMaxMotorTorque(jointId: b3JointId, torque: f32): void;
+#linkc fn b3RevoluteJoint_GetMaxMotorTorque(jointId: b3JointId): f32;
+#linkc fn b3CreateSphericalJoint(worldId: b3WorldId, def: *const b3SphericalJointDef): b3JointId;
+#linkc fn b3SphericalJoint_EnableConeLimit(jointId: b3JointId, enableLimit: bool): void;
+#linkc fn b3SphericalJoint_IsConeLimitEnabled(jointId: b3JointId): bool;
+#linkc fn b3SphericalJoint_GetConeLimit(jointId: b3JointId): f32;
+#linkc fn b3SphericalJoint_SetConeLimit(jointId: b3JointId, angleRadians: f32): void;
+#linkc fn b3SphericalJoint_GetConeAngle(jointId: b3JointId): f32;
+#linkc fn b3SphericalJoint_EnableTwistLimit(jointId: b3JointId, enableLimit: bool): void;
+#linkc fn b3SphericalJoint_IsTwistLimitEnabled(jointId: b3JointId): bool;
+#linkc fn b3SphericalJoint_GetLowerTwistLimit(jointId: b3JointId): f32;
+#linkc fn b3SphericalJoint_GetUpperTwistLimit(jointId: b3JointId): f32;
+#linkc fn b3SphericalJoint_SetTwistLimits(jointId: b3JointId, lowerLimitRadians: f32, upperLimitRadians: f32): void;
+#linkc fn b3SphericalJoint_GetTwistAngle(jointId: b3JointId): f32;
+#linkc fn b3SphericalJoint_EnableSpring(jointId: b3JointId, enableSpring: bool): void;
+#linkc fn b3SphericalJoint_IsSpringEnabled(jointId: b3JointId): bool;
+#linkc fn b3SphericalJoint_SetSpringHertz(jointId: b3JointId, hertz: f32): void;
+#linkc fn b3SphericalJoint_GetSpringHertz(jointId: b3JointId): f32;
+#linkc fn b3SphericalJoint_SetSpringDampingRatio(jointId: b3JointId, dampingRatio: f32): void;
+#linkc fn b3SphericalJoint_GetSpringDampingRatio(jointId: b3JointId): f32;
+#linkc fn b3SphericalJoint_SetTargetRotation(jointId: b3JointId, targetRotation: b3Quat): void;
+#linkc fn b3SphericalJoint_GetTargetRotation(jointId: b3JointId): b3Quat;
+#linkc fn b3SphericalJoint_EnableMotor(jointId: b3JointId, enableMotor: bool): void;
+#linkc fn b3SphericalJoint_IsMotorEnabled(jointId: b3JointId): bool;
+#linkc fn b3SphericalJoint_SetMotorVelocity(jointId: b3JointId, motorVelocity: b3Vec3): void;
+#linkc fn b3SphericalJoint_GetMotorVelocity(jointId: b3JointId): b3Vec3;
+#linkc fn b3SphericalJoint_GetMotorTorque(jointId: b3JointId): b3Vec3;
+#linkc fn b3SphericalJoint_SetMaxMotorTorque(jointId: b3JointId, torque: f32): void;
+#linkc fn b3SphericalJoint_GetMaxMotorTorque(jointId: b3JointId): f32;
+#linkc fn b3CreateWeldJoint(worldId: b3WorldId, def: *const b3WeldJointDef): b3JointId;
+#linkc fn b3WeldJoint_SetLinearHertz(jointId: b3JointId, hertz: f32): void;
+#linkc fn b3WeldJoint_GetLinearHertz(jointId: b3JointId): f32;
+#linkc fn b3WeldJoint_SetLinearDampingRatio(jointId: b3JointId, dampingRatio: f32): void;
+#linkc fn b3WeldJoint_GetLinearDampingRatio(jointId: b3JointId): f32;
+#linkc fn b3WeldJoint_SetAngularHertz(jointId: b3JointId, hertz: f32): void;
+#linkc fn b3WeldJoint_GetAngularHertz(jointId: b3JointId): f32;
+#linkc fn b3WeldJoint_SetAngularDampingRatio(jointId: b3JointId, dampingRatio: f32): void;
+#linkc fn b3WeldJoint_GetAngularDampingRatio(jointId: b3JointId): f32;
+#linkc fn b3CreateWheelJoint(worldId: b3WorldId, def: *const b3WheelJointDef): b3JointId;
+#linkc fn b3WheelJoint_EnableSuspension(jointId: b3JointId, flag: bool): void;
+#linkc fn b3WheelJoint_IsSuspensionEnabled(jointId: b3JointId): bool;
+#linkc fn b3WheelJoint_SetSuspensionHertz(jointId: b3JointId, hertz: f32): void;
+#linkc fn b3WheelJoint_GetSuspensionHertz(jointId: b3JointId): f32;
+#linkc fn b3WheelJoint_SetSuspensionDampingRatio(jointId: b3JointId, dampingRatio: f32): void;
+#linkc fn b3WheelJoint_GetSuspensionDampingRatio(jointId: b3JointId): f32;
+#linkc fn b3WheelJoint_EnableSuspensionLimit(jointId: b3JointId, flag: bool): void;
+#linkc fn b3WheelJoint_IsSuspensionLimitEnabled(jointId: b3JointId): bool;
+#linkc fn b3WheelJoint_GetLowerSuspensionLimit(jointId: b3JointId): f32;
+#linkc fn b3WheelJoint_GetUpperSuspensionLimit(jointId: b3JointId): f32;
+#linkc fn b3WheelJoint_SetSuspensionLimits(jointId: b3JointId, lower: f32, upper: f32): void;
+#linkc fn b3WheelJoint_EnableSpinMotor(jointId: b3JointId, flag: bool): void;
+#linkc fn b3WheelJoint_IsSpinMotorEnabled(jointId: b3JointId): bool;
+#linkc fn b3WheelJoint_SetSpinMotorSpeed(jointId: b3JointId, speed: f32): void;
+#linkc fn b3WheelJoint_GetSpinMotorSpeed(jointId: b3JointId): f32;
+#linkc fn b3WheelJoint_SetMaxSpinTorque(jointId: b3JointId, torque: f32): void;
+#linkc fn b3WheelJoint_GetMaxSpinTorque(jointId: b3JointId): f32;
+#linkc fn b3WheelJoint_GetSpinSpeed(jointId: b3JointId): f32;
+#linkc fn b3WheelJoint_GetSpinTorque(jointId: b3JointId): f32;
+#linkc fn b3WheelJoint_EnableSteering(jointId: b3JointId, flag: bool): void;
+#linkc fn b3WheelJoint_IsSteeringEnabled(jointId: b3JointId): bool;
+#linkc fn b3WheelJoint_SetSteeringHertz(jointId: b3JointId, hertz: f32): void;
+#linkc fn b3WheelJoint_GetSteeringHertz(jointId: b3JointId): f32;
+#linkc fn b3WheelJoint_SetSteeringDampingRatio(jointId: b3JointId, dampingRatio: f32): void;
+#linkc fn b3WheelJoint_GetSteeringDampingRatio(jointId: b3JointId): f32;
+#linkc fn b3WheelJoint_SetMaxSteeringTorque(jointId: b3JointId, torque: f32): void;
+#linkc fn b3WheelJoint_GetMaxSteeringTorque(jointId: b3JointId): f32;
+#linkc fn b3WheelJoint_EnableSteeringLimit(jointId: b3JointId, flag: bool): void;
+#linkc fn b3WheelJoint_IsSteeringLimitEnabled(jointId: b3JointId): bool;
+#linkc fn b3WheelJoint_GetLowerSteeringLimit(jointId: b3JointId): f32;
+#linkc fn b3WheelJoint_GetUpperSteeringLimit(jointId: b3JointId): f32;
+#linkc fn b3WheelJoint_SetSteeringLimits(jointId: b3JointId, lowerRadians: f32, upperRadians: f32): void;
+#linkc fn b3WheelJoint_SetTargetSteeringAngle(jointId: b3JointId, radians: f32): void;
+#linkc fn b3WheelJoint_GetTargetSteeringAngle(jointId: b3JointId): f32;
+#linkc fn b3WheelJoint_GetSteeringAngle(jointId: b3JointId): f32;
+#linkc fn b3WheelJoint_GetSteeringTorque(jointId: b3JointId): f32;
+#linkc fn b3Contact_IsValid(id: b3ContactId): bool;
+#linkc fn b3Contact_GetData(contactId: b3ContactId): b3ContactData;
+
+// Numeric macro constants
+const B3_ENABLE_VALIDATION : i32 = 0;
+const B3_NULL_INDEX : i32 = -1;
+const B3_HASH_INIT : i32 = 5381;
+const B3_PI : f32 = 3.14159265359f;
+const B3_DEG_TO_RAD : f32 = 0.01745329251f;
+const B3_RAD_TO_DEG : f32 = 57.2957795131f;
+const B3_MIN_SCALE : f32 = 0.01f;
+const B3_MAX_WORKERS : i32 = 32;
+const B3_MAX_TASKS : i32 = 256;
+const B3_GRAPH_COLOR_COUNT : i32 = 24;
+const B3_CONTACT_MANIFOLD_COUNT_BUCKETS : i32 = 8;
+const B3_MIN_FRICTION_WEIGHT : f32 = ( 1e-10f );
+const B3_MAX_WORLDS : i32 = 128;
+const B3_CONTACT_RECYCLE_ANGULAR_DISTANCE : f32 = ( 0.99240388f );
+const B3_AABB_MARGIN_FRACTION : f32 = 0.125f;
+const B3_TIME_TO_SLEEP : f32 = 0.5f;
+const B3_MAX_MANIFOLD_POINTS : i32 = 4;
+const B3_GYROSCOPIC_ITERATIONS : i32 = 1;
+const B3_MAX_HULL_VERTICES : i32 = 128;
+const B3_MAX_HULL_FACES : i32 = 128;
+const B3_MAX_HULL_EDGES : i32 = 128;
+const B3_PARALLEL_EDGE_TOL : f32 = 0.005f;
+const B3_SHAPE_POWER : i32 = 22;
+const B3_RESTITUTION_ITERATIONS : i32 = 1;
+const B3_DYNAMIC_TREE_VERSION : u64 = 0x93EDAF889FD30B4A;
+const B3_HULL_VERSION : u64 = 0xDA5150191B994C01;
+const B3_MESH_VERSION : u64 = 0xABD11AB62A6E886D;
+const B3_HEIGHT_FIELD_HOLE : i32 = 0xFF;
+const B3_HEIGHT_FIELD_VERSION : u64 = 0x8B18CBD138A6BC84;
+const B3_MAX_COMPOUND_MESH_MATERIALS : i32 = 4;

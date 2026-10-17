@@ -1,5 +1,6 @@
 import "./internal.mox";
 import "./alloc.mox";
+import "./context.mox";
 
 // growth factor drops as the array gets bigger: x3 under 1000, x2 under 10000, x1.5 after, see _dynarr_grow
 
@@ -86,7 +87,7 @@ fn _dynarr_grow(arr: *DynArr($T), add: i64): void {
     _dynarr_realloc(arr, newcap);
 }
 
-fn dynarr_init(arr: *DynArr($T), alloc: *Alloc, cap: i64 = 0): void {
+fn dynarr_init(arr: *DynArr($T), alloc: *Alloc = get_context_alloc(), cap: i64 = 0): void {
     arr.alloc = alloc;
     arr.storage = nullptr(#type DynArrStorage($T));
     if (cap > 0) {

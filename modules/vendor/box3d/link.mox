@@ -1,0 +1,43 @@
+import "internal.mox";
+import "build.mox";
+import "format.mox";
+
+// box3d binaries are built from the box3d sources as shared libraries:
+// win64/box3d.dll (+ libbox3d.dll.a import lib) with clang (x86_64-w64-windows-gnu, UCRT only),
+// linux64/libbox3d.so with gcc (needs glibc 2.34+)
+
+fn link_box3d($link_comptime: bool): void {
+    if (!#is_comptime) { return; }
+
+    link_path := "";
+    dll_path := "";
+
+    switch (MOX_OS) {
+        case .Windows:
+            link_path = "./win64/libbox3d.dll.a";
+            dll_path = "./win64/box3d.dll";
+        case .Linux:
+            link_path = "./linux64/libbox3d.so";
+            dll_path = "./linux64/libbox3d.so";
+            __compiler_link_lib("m", false);
+            __compiler_append_linker("-Wl,-rpath,'$ORIGIN'");
+        case .Darwin:
+            println("\n\nbox3d binaries on Darwin is not shipped yet, link it manually\n\n");
+            return;
+        case .Unknown:
+    }
+
+    __compiler_link_lib(build_resolve_path(link_path), false);
+    if ($link_comptime) {
+        __compiler_link_lib(build_resolve_path(dll_path), true);
+    }
+    build_copy_to_output(build_resolve_path(dll_path));
+}
+
+#run link_box3d(false);
+
+// example of comptime usage:
+// #run {
+//     link_box3d(true);
+//     use box3d here
+// }

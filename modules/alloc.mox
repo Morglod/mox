@@ -46,12 +46,14 @@ fn mem_alloc(allocator: *Alloc, size: i64, align: u32 = 1): *u8 {
     return mem;
 }
 
-fn mem_alloc(allocator: *Alloc, $T: __type_ptr, align: u32 = 1): *$T {
+fn mem_alloc(allocator: *Alloc, $T: __type_ptr, align: u32 = 0): *$T {
+    if (align == 0) { align = alignof_type($T); }
     return mem_alloc(allocator, sizeof_type($T), align).cast(*$T);
 }
 
 // len is element count, not byte size
-fn mem_alloc_slice(allocator: *Alloc, $T: __type_ptr, len: i64, align: u32 = 1): []$T {
+fn mem_alloc_slice(allocator: *Alloc, $T: __type_ptr, len: i64, align: u32 = 0): []$T {
+    if (align == 0) { align = alignof_type($T); }
     mem := mem_alloc(allocator, sizeof_type($T) * len, align);
     slice : []$T = #memory_garbage;
     slice.ptr = mem.cast(*$T);
@@ -59,13 +61,15 @@ fn mem_alloc_slice(allocator: *Alloc, $T: __type_ptr, len: i64, align: u32 = 1):
     return slice;
 }
 
-fn mem_realloc(allocator: *Alloc, old_mem: *$T, new_size: i64, align: u32 = 1): *$T {
+fn mem_realloc(allocator: *Alloc, old_mem: *$T, new_size: i64, align: u32 = 0): *$T {
+    if (align == 0) { align = alignof_type($T); }
     mem := allocator.func(allocator.data, .realloc, new_size, align, old_mem.cast(*u8));
     return mem.cast(*$T);
 }
 
 // new_len is new element count, not byte size
-fn mem_realloc_slice(allocator: *Alloc, old_mem: []$T, new_len: i64, align: u32 = 1): []$T {
+fn mem_realloc_slice(allocator: *Alloc, old_mem: []$T, new_len: i64, align: u32 = 0): []$T {
+    if (align == 0) { align = alignof_type($T); }
     mem := allocator.func(allocator.data, .realloc, sizeof_type($T) * new_len, align, old_mem.ptr.cast(*u8));
     slice : []$T = #memory_garbage;
     slice.ptr = mem.cast(*$T);

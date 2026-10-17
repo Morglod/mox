@@ -1,0 +1,291 @@
+// microui (vendor/microui.mox) drawn with raylib - a port of the microui demo.
+// microui only produces commands; the raylib part is the ~60 lines of "backend" (input + mu_atlas quads), any other renderer works the same way.
+//
+// run: ./mox ./examples/microui.mox
+
+import "std.mox";
+import "vendor/raylib.mox";
+import "vendor/microui.mox";
+import "vendor/microui_atlas.mox";
+
+// ---- the UI ----
+
+struct Demo {
+    bg: [3]f32;
+    checks: [3]bool;
+    log: [4096]u8;
+    log_len: i64;
+    log_updated: bool;
+    input: [128]u8;
+    input_len: i64;
+};
+
+fn fmt_buf(buf: []u8, $fmt_str: []u8, values: $T): []u8 {
+    return slice(buf, 0, format(buf, 0, $fmt_str, values));
+}
+
+fn write_log(d: *Demo, text: []u8): void {
+    if ((d.log_len + text.len + 1) > 4096) { d.log_len = 0; }
+    if (d.log_len > 0) {
+        d.log[d.log_len] = 10;
+        d.log_len += 1;
+    }
+    for (i : it_range(text.len)) { d.log[d.log_len + i] = text[i]; }
+    d.log_len += text.len;
+    d.log_updated = true;
+}
+
+fn test_window(ctx: *MuContext, d: *Demo): void {
+    if (!mu_begin_window(ctx, "Demo Window", mu_rect(40, 40, 300, 450))) { return; }
+    win := mu_get_current_container(ctx);
+    win.rect.w = max(win.rect.w, 240);
+    win.rect.h = max(win.rect.h, 300);
+
+    // window info
+    if ((mu_header(ctx, "Window Info") & MU_RES_ACTIVE) != 0) {
+        buf : [64]u8 = #memory_garbage;
+        mu_layout_row(ctx, [?]i32.{ 54; -1; }, 0);
+        mu_label(ctx, "Position:");
+        mu_label(ctx, fmt_buf(buf.^ |> slice(), "{}, {}", .{ win.rect.x; win.rect.y; }));
+        mu_label(ctx, "Size:");
+        mu_label(ctx, fmt_buf(buf.^ |> slice(), "{}, {}", .{ win.rect.w; win.rect.h; }));
+    }
+
+    // buttons
+    if ((mu_header(ctx, "Test Buttons", MU_OPT_EXPANDED) & MU_RES_ACTIVE) != 0) {
+        mu_layout_row(ctx, [?]i32.{ 86; -110; -1; }, 0);
+        mu_label(ctx, "Test buttons 1:");
+        if ((mu_button(ctx, "Button 1") & MU_RES_SUBMIT) != 0) { write_log(d, "Pressed button 1"); }
+        if ((mu_button(ctx, "Button 2") & MU_RES_SUBMIT) != 0) { write_log(d, "Pressed button 2"); }
+        mu_label(ctx, "Test buttons 2:");
+        if ((mu_button(ctx, "Button 3") & MU_RES_SUBMIT) != 0) { write_log(d, "Pressed button 3"); }
+        if ((mu_button(ctx, "Popup") & MU_RES_SUBMIT) != 0) { mu_open_popup(ctx, "Test Popup"); }
+        if (mu_begin_popup(ctx, "Test Popup")) {
+            mu_button(ctx, "Hello");
+            mu_button(ctx, "World");
+            mu_end_popup(ctx);
+        }
+    }
+
+    // tree and text
+    if ((mu_header(ctx, "Tree and Text", MU_OPT_EXPANDED) & MU_RES_ACTIVE) != 0) {
+        mu_layout_row(ctx, [?]i32.{ 140; -1; }, 0);
+        mu_layout_begin_column(ctx);
+        if ((mu_begin_treenode(ctx, "Test 1") & MU_RES_ACTIVE) != 0) {
+            if ((mu_begin_treenode(ctx, "Test 1a") & MU_RES_ACTIVE) != 0) {
+                mu_label(ctx, "Hello");
+                mu_label(ctx, "world");
+                mu_end_treenode(ctx);
+            }
+            if ((mu_begin_treenode(ctx, "Test 1b") & MU_RES_ACTIVE) != 0) {
+                if ((mu_button(ctx, "Button 1") & MU_RES_SUBMIT) != 0) { write_log(d, "Pressed button 1"); }
+                if ((mu_button(ctx, "Button 2") & MU_RES_SUBMIT) != 0) { write_log(d, "Pressed button 2"); }
+                mu_end_treenode(ctx);
+            }
+            mu_end_treenode(ctx);
+        }
+        if ((mu_begin_treenode(ctx, "Test 2") & MU_RES_ACTIVE) != 0) {
+            mu_layout_row(ctx, [?]i32.{ 54; 54; }, 0);
+            if ((mu_button(ctx, "Button 3") & MU_RES_SUBMIT) != 0) { write_log(d, "Pressed button 3"); }
+            if ((mu_button(ctx, "Button 4") & MU_RES_SUBMIT) != 0) { write_log(d, "Pressed button 4"); }
+            if ((mu_button(ctx, "Button 5") & MU_RES_SUBMIT) != 0) { write_log(d, "Pressed button 5"); }
+            if ((mu_button(ctx, "Button 6") & MU_RES_SUBMIT) != 0) { write_log(d, "Pressed button 6"); }
+            mu_end_treenode(ctx);
+        }
+        if ((mu_begin_treenode(ctx, "Test 3") & MU_RES_ACTIVE) != 0) {
+            mu_checkbox(ctx, "Checkbox 1", d.checks[0].^);
+            mu_checkbox(ctx, "Checkbox 2", d.checks[1].^);
+            mu_checkbox(ctx, "Checkbox 3", d.checks[2].^);
+            mu_end_treenode(ctx);
+        }
+        mu_layout_end_column(ctx);
+
+        mu_layout_begin_column(ctx);
+        mu_layout_row(ctx, [?]i32.{ -1; }, 0);
+        mu_text(ctx, "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla.");
+        mu_layout_end_column(ctx);
+    }
+
+    // background color sliders
+    if ((mu_header(ctx, "Background Color", MU_OPT_EXPANDED) & MU_RES_ACTIVE) != 0) {
+        mu_layout_row(ctx, [?]i32.{ -78; -1; }, 74);
+        // sliders
+        mu_layout_begin_column(ctx);
+        mu_layout_row(ctx, [?]i32.{ 46; -1; }, 0);
+        mu_label(ctx, "Red:");   mu_slider(ctx, d.bg[0].^, 0.0f, 255.0f, 1.0f, 0);
+        mu_label(ctx, "Green:"); mu_slider(ctx, d.bg[1].^, 0.0f, 255.0f, 1.0f, 0);
+        mu_label(ctx, "Blue:");  mu_slider(ctx, d.bg[2].^, 0.0f, 255.0f, 1.0f, 0);
+        mu_layout_end_column(ctx);
+        // color preview
+        r := mu_layout_next(ctx);
+        mu_draw_rect(ctx, r, mu_color(d.bg[0].cast(u8), d.bg[1].cast(u8), d.bg[2].cast(u8), 255));
+        buf : [32]u8 = #memory_garbage;
+        hex := fmt_buf(buf.^ |> slice(), "#{}", .{ (#shl(d.bg[0].cast(u32), 16) | #shl(d.bg[1].cast(u32), 8) | d.bg[2].cast(u32)); });
+        mu_draw_control_text(ctx, hex, r, MU_COLOR_TEXT, MU_OPT_ALIGNCENTER);
+    }
+
+    mu_end_window(ctx);
+}
+
+fn log_window(ctx: *MuContext, d: *Demo): void {
+    if (!mu_begin_window(ctx, "Log Window", mu_rect(350, 40, 300, 200))) { return; }
+    // output text panel
+    mu_layout_row(ctx, [?]i32.{ -1; }, -25);
+    mu_begin_panel(ctx, "Log Output");
+    panel := mu_get_current_container(ctx);
+    mu_layout_row(ctx, [?]i32.{ -1; }, -1);
+    mu_text(ctx, slice(d.log.^ |> slice(), 0, d.log_len));
+    mu_end_panel(ctx);
+    if (d.log_updated) {
+        panel.scroll.y = panel.content_size.y;
+        d.log_updated = false;
+    }
+
+    // input textbox + submit button
+    submitted := false;
+    mu_layout_row(ctx, [?]i32.{ -70; -1; }, 0);
+    if ((mu_textbox(ctx, d.input.^ |> slice(), d.input_len.^) & MU_RES_SUBMIT) != 0) {
+        mu_set_focus(ctx, ctx.last_id);
+        submitted = true;
+    }
+    if ((mu_button(ctx, "Submit") & MU_RES_SUBMIT) != 0) { submitted = true; }
+    if (submitted) {
+        write_log(d, slice(d.input.^ |> slice(), 0, d.input_len));
+        d.input_len = 0;
+    }
+    mu_end_window(ctx);
+}
+
+fn build_ui(ctx: *MuContext, d: *Demo): void {
+    mu_begin(ctx);
+    test_window(ctx, d);
+    log_window(ctx, d);
+    mu_end(ctx);
+}
+
+// ---- raylib backend ----
+
+const RL_PIXELFORMAT_R8G8B8A8 : i32 = 7;
+const RL_MOUSE_LEFT   : i32 = 0;
+const RL_MOUSE_RIGHT  : i32 = 1;
+const RL_MOUSE_MIDDLE : i32 = 2;
+
+fn rl_quad(user: *u8, dst: MuRect, src: MuRect, color: MuColor): void {
+    tex := user.cast(*Texture2D).*;
+    DrawTexturePro(tex,
+        Rectangle.{ src.x.cast(f32); src.y.cast(f32); src.w.cast(f32); src.h.cast(f32); },
+        Rectangle.{ dst.x.cast(f32); dst.y.cast(f32); dst.w.cast(f32); dst.h.cast(f32); },
+        Vector2.{ 0.0f; 0.0f; }, 0.0f, Color.{ color.r; color.g; color.b; color.a; });
+}
+
+fn rl_atlas_texture(): Texture2D {
+    pixels := mem_alloc_slice(get_context_alloc(), u8, MU_ATLAS_WIDTH * MU_ATLAS_HEIGHT * 4);
+    defer mem_free(get_context_alloc(), pixels);
+    mu_atlas_rgba(pixels);
+    img := Image.{ pixels.ptr; MU_ATLAS_WIDTH.cast(i32); MU_ATLAS_HEIGHT.cast(i32); 1; RL_PIXELFORMAT_R8G8B8A8; };
+    return LoadTextureFromImage(img);   // copies the pixels to the GPU
+}
+
+fn rl_input(ctx: *MuContext): void {
+    m := GetMousePosition();
+    x := m[0].cast(i32);
+    y := m[1].cast(i32);
+    mu_input_mousemove(ctx, x, y);
+    wheel := GetMouseWheelMove();
+    if (wheel != 0.0f) { mu_input_scroll(ctx, 0, (wheel * -30.0f).cast(i32)); }
+
+    buttons := [?]i32.{ RL_MOUSE_LEFT; RL_MOUSE_RIGHT; RL_MOUSE_MIDDLE; };
+    mu_buttons := [?]u32.{ MU_MOUSE_LEFT; MU_MOUSE_RIGHT; MU_MOUSE_MIDDLE; };
+    for (i : it_range(3)) {
+        if (IsMouseButtonPressed(buttons[i])) { mu_input_mousedown(ctx, x, y, mu_buttons[i]); }
+        if (IsMouseButtonReleased(buttons[i])) { mu_input_mouseup(ctx, x, y, mu_buttons[i]); }
+    }
+
+    // held keys, and the ones that repeat while held
+    held := [?]i32.{ KEY_LEFT_SHIFT; KEY_RIGHT_SHIFT; KEY_LEFT_CONTROL; KEY_LEFT_ALT; };
+    held_mu := [?]u32.{ MU_KEY_SHIFT; MU_KEY_SHIFT; MU_KEY_CTRL; MU_KEY_ALT; };
+    for (i : it_range(4)) {
+        if (IsKeyPressed(held[i])) { mu_input_keydown(ctx, held_mu[i]); }
+        if (IsKeyReleased(held[i])) { mu_input_keyup(ctx, held_mu[i]); }
+    }
+    keys := [?]i32.{ KEY_BACKSPACE; KEY_ENTER; KEY_DELETE; KEY_LEFT; KEY_RIGHT; KEY_HOME; KEY_END; };
+    keys_mu := [?]u32.{ MU_KEY_BACKSPACE; MU_KEY_RETURN; MU_KEY_DELETE; MU_KEY_LEFT; MU_KEY_RIGHT; MU_KEY_HOME; MU_KEY_END; };
+    for (i : it_range(7)) {
+        if (IsKeyPressed(keys[i]) || IsKeyPressedRepeat(keys[i])) {
+            mu_input_keydown(ctx, keys_mu[i]);
+            mu_input_keyup(ctx, keys_mu[i]);
+        }
+    }
+
+    // typed characters, as utf-8
+    ch := GetCharPressed();
+    while (ch > 0) {
+        u := ch.cast(u32);
+        b : [4]u8 = 0;
+        n : i64 = 1;
+        if (u < 0x80) {
+            b[0] = u.cast(u8);
+        } else if (u < 0x800) {
+            b[0] = (0xC0 | #shr(u, 6)).cast(u8);
+            b[1] = (0x80 | (u & 0x3F)).cast(u8);
+            n = 2;
+        } else if (u < 0x10000) {
+            b[0] = (0xE0 | #shr(u, 12)).cast(u8);
+            b[1] = (0x80 | (#shr(u, 6) & 0x3F)).cast(u8);
+            b[2] = (0x80 | (u & 0x3F)).cast(u8);
+            n = 3;
+        } else {
+            b[0] = (0xF0 | #shr(u, 18)).cast(u8);
+            b[1] = (0x80 | (#shr(u, 12) & 0x3F)).cast(u8);
+            b[2] = (0x80 | (#shr(u, 6) & 0x3F)).cast(u8);
+            b[3] = (0x80 | (u & 0x3F)).cast(u8);
+            n = 4;
+        }
+        mu_input_text(ctx, slice(b.^ |> slice(), 0, n));
+        ch = GetCharPressed();
+    }
+}
+
+fn rl_draw(ctx: *MuContext, atlas: *Texture2D): void {
+    scissor := false;
+    for (cmd : mu_commands(ctx)) {
+        if (cmd.type == MU_COMMAND_CLIP) {
+            c := cmd.cast(*MuClipCommand).rect;
+            if (scissor) { EndScissorMode(); }
+            BeginScissorMode(c.x, c.y, c.w, c.h);
+            scissor = true;
+        } else {
+            mu_atlas_draw_command(cmd, rl_quad, atlas.cast(*u8));
+        }
+    }
+    if (scissor) { EndScissorMode(); }
+}
+
+#linkc fn main(): i32 {
+    InitWindow(800, 600, "microui");
+    defer CloseWindow();
+    SetTargetFPS(60);
+
+    atlas := rl_atlas_texture();
+    defer UnloadTexture(atlas);
+
+    commands := mem_alloc_slice(get_context_alloc(), u8, MU_COMMAND_LIST_SIZE, 8);
+    defer mem_free(get_context_alloc(), commands);
+    ctx : MuContext = #memory_garbage;
+    mu_init(ctx.^, commands);
+    ctx.text_width = mu_atlas_text_width;
+    ctx.text_height = mu_atlas_text_height;
+
+    d : Demo = 0;
+    d.bg = .{ 90.0f; 95.0f; 100.0f; };
+
+    while (!WindowShouldClose()) {
+        rl_input(ctx.^);
+        build_ui(ctx.^, d.^);
+        BeginDrawing();
+        ClearBackground(Color.{ d.bg[0].cast(u8); d.bg[1].cast(u8); d.bg[2].cast(u8); 255; });
+        rl_draw(ctx.^, atlas.^);
+        EndDrawing();
+    }
+    return 0;
+}

@@ -1,3 +1,42 @@
+## 0.1.10
+
+## Compiler
+
+`fn __compiler_alignof_type(TYPE): u32`
+
+Comptime `#for` support:
+
+```rust
+#for (i : it_range($N)) {
+    arr[i] = i;
+}
+
+// which is same as:
+
+#run {
+    for (i : it_range($N)) {
+        #emit {
+            arr[i] = i;
+        }
+    }
+}
+```
+
+Fix constraints pattern matching for poly functions and with baked values.
+
+Fix runtime continue/break inside #emit, inside comptime for loops, which should affect only runtime outer loop.
+
+Fix enum auto increment and type inferring for variants without specified value.
+
+## Modules
+
+`fn alignof_type(TYPE): u32`
+
+Proper alignment in alloc/arena
+
+`vendor/box3d.mox`  
+`vendor/microui.mox`
+
 ## 0.1.9
 
 Most major thing is that function pointers and slices now could be trasferred from comptime to runtime:

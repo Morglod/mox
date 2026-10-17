@@ -76,11 +76,9 @@ fn floor(x: f64): f64 { return c_floor(x); }
 
 fn floor(x: [$N]$T): [$N]$T {
     out: [$N]$T = #memory_garbage;
-    #run {
-        for (i : it_range($N)) {
-            #emit out[i] = floor(x[i]);
-        }
-    };
+    #for (i : it_range($N)) {
+        out[i] = floor(x[i]);
+    }
     return out;
 }
 
@@ -100,13 +98,9 @@ fn mod(a: f64, b: f64): f64 { return fmod(a, b); }
 fn mod(a: [$N]$T, b: [$N]$T): [$N]$T {
     out : [$N]$T = #memory_garbage;
 
-    #run {
-        for (i : it_range($N)) {
-            #emit {
-                out[i] = mod(a[i], b[i]);
-            };
-        }
-    };
+    #for (i : it_range($N)) {
+        out[i] = mod(a[i], b[i]);
+    }
 
     return out;
 }
@@ -138,22 +132,18 @@ fn mod_euclid(x: $T, m: $T): $T {
 
 fn mod_euclid(v: [$N]$T, m: [$N]$T): [$N]$T {
     out: [$N]$T = #memory_garbage;
-    #run {
-        for (i : it_range($N)) {
-            #emit out[i] = mod_euclid(v[i], m[i]);
-        }
-    };
+    #for (i : it_range($N)) {
+        out[i] = mod_euclid(v[i], m[i]);
+    }
     return out;
 }
 
 fn abs(x: [$N]$T): [$N]$T {
     out : [$N]$T = #memory_garbage;
 
-    #run {
-        for (i : it_range($N)) {
-            #emit out[i] = abs(x[i]);
-        }
-    };
+    #for (i : it_range($N)) {
+        out[i] = abs(x[i]);
+    }
 
     return out;
 }
@@ -241,11 +231,9 @@ const vec4d := #type [4]f64;
 
 fn dot(a: [$N]$T, b: [$N]$T): $T {
     acc: $T = 0;
-    #run {
-        for (i : it_range($N)) {
-            #emit acc += a[i] * b[i];
-        }
-    };
+    #for (i : it_range($N)) {
+        acc += a[i] * b[i];
+    }
     return acc;
 }
 
@@ -269,17 +257,17 @@ fn reflect(v: [$N]$T, n: [$N]$T): [$N]$T {
 
 fn min(a: [$N]$T, b: [$N]$T): [$N]$T {
     out: [$N]$T = a;
-    for (i : it_range($N)) { out[i] = min(a[i], b[i]); }
+    #for (i : it_range($N)) { out[i] = min(a[i], b[i]); }
     return out;
 }
 fn max(a: [$N]$T, b: [$N]$T): [$N]$T {
     out: [$N]$T = a;
-    for (i : it_range($N)) { out[i] = max(a[i], b[i]); }
+    #for (i : it_range($N)) { out[i] = max(a[i], b[i]); }
     return out;
 }
 fn clamp(v: [$N]$T, lo: [$N]$T, hi: [$N]$T): [$N]$T {
     out: [$N]$T = v;
-    for (i : it_range($N)) { out[i] = clamp(v[i], lo[i], hi[i]); }
+    #for (i : it_range($N)) { out[i] = clamp(v[i], lo[i], hi[i]); }
     return out;
 }
 
@@ -305,8 +293,8 @@ fn mget(m: $M / Matrix($T, $X, $Y), col: u32, row: u32): $T {
 
 fn identity($T: __type_ptr, $N: u32): Matrix($T, $N, $N) {
     out: Matrix($T, $N, $N) = #memory_garbage;
-    for (c : it_range(0u32, $N)) {
-        for (r : it_range(0u32, $N)) {
+    #for (c : it_range(0u32, $N)) {
+        #for (r : it_range(0u32, $N)) {
             if (c == r) { out.data[c][r] = 1; } else { out.data[c][r] = 0; }
         }
     }
@@ -316,7 +304,7 @@ fn identity($T: __type_ptr, $N: u32): Matrix($T, $N, $N) {
 fn mzero($T: __type_ptr, $X: u32, $Y: u32): Matrix($T, $X, $Y) {
     m: Matrix($T, $X, $Y) = #memory_garbage;
     z: $T = 0;
-    for (c : it_range(0u32, $X)) {
+    #for (c : it_range(0u32, $X)) {
         for (r : it_range(0u32, $Y)) { m.data[c][r] = z; }
     }
     return m;
@@ -326,10 +314,10 @@ fn mzero($T: __type_ptr, $X: u32, $Y: u32): Matrix($T, $X, $Y) {
 // TODO: Correct only for square matrices, other shapes mix up column and row indexes.
 fn mul(a: $MA / Matrix($T, $A, $B), b: $MB / Matrix($T2, $B2, $C)): Matrix($T, $A, $C) {
     out: Matrix($T, $A, $C) = #memory_garbage;
-    for (col : it_range(0u32, $C)) {
-        for (row : it_range(0u32, $A)) {
+    #for (col : it_range(0u32, $C)) {
+        #for (row : it_range(0u32, $A)) {
             acc: $T = 0;
-            for (k : it_range(0u32, $B)) {
+            #for (k : it_range(0u32, $B)) {
                 acc += a.data[k][row] * b.data[col][k];
             }
             out.data[col][row] = acc;
@@ -340,17 +328,19 @@ fn mul(a: $MA / Matrix($T, $A, $B), b: $MB / Matrix($T2, $B2, $C)): Matrix($T, $
 
 fn transpose(m: $M / Matrix($T, $X, $Y)): Matrix($T, $Y, $X) {
     out: Matrix($T, $Y, $X) = #memory_garbage;
-    for (c : it_range(0u32, $X)) {
-        for (r : it_range(0u32, $Y)) { out.data[r][c] = m.data[c][r]; }
+    #for (c : it_range(0u32, $X)) {
+        #for (r : it_range(0u32, $Y)) {
+            out.data[r][c] = m.data[c][r];
+        }
     }
     return out;
 }
 
 fn mul_vec(m: $M / Matrix($T, $X, $Y), v: [$X]$T): [$Y]$T {
     out: [$Y]$T = #memory_garbage;
-    for (r : it_range(0u32, $Y)) {
+    #for (r : it_range(0u32, $Y)) {
         acc: $T = 0;
-        for (c : it_range(0u32, $X)) {
+        #for (c : it_range(0u32, $X)) {
             acc += m.data[c][r] * v[c];
         }
         out[r] = acc;
@@ -645,11 +635,9 @@ fn sign(x: $T): $T {
 
 fn sign(x: [$N]$T): [$N]$T {
     out: [$N]$T = #memory_garbage;
-    #run {
-        for (i : it_range($N)) {
-            #emit out[i] = sign(x[i]);
-        }
-    };
+    #for (i : it_range($N)) {
+        out[i] = sign(x[i]);
+    }
     return out;
 }
 
@@ -659,11 +647,9 @@ fn saturate(x: $T): $T {
 
 fn saturate(x: [$N]$T): [$N]$T {
     out: [$N]$T = #memory_garbage;
-    #run {
-        for (i : it_range($N)) {
-            #emit out[i] = saturate(x[i]);
-        }
-    };
+    #for (i : it_range($N)) {
+        out[i] = saturate(x[i]);
+    }
     return out;
 }
 
@@ -680,11 +666,9 @@ fn trunc(x: $T): $T {
 
 fn trunc(x: [$N]$T): [$N]$T {
     out: [$N]$T = #memory_garbage;
-    #run {
-        for (i : it_range($N)) {
-            #emit out[i] = trunc(x[i]);
-        }
-    };
+    #for (i : it_range($N)) {
+        out[i] = trunc(x[i]);
+    }
     return out;
 }
 
@@ -753,11 +737,9 @@ fn damp(a: $T, b: $T, rate: $T, dt: $T): $T {
 
 fn damp(a: [$N]$T, b: [$N]$T, rate: $T, dt: $T): [$N]$T {
     out: [$N]$T = #memory_garbage;
-    #run {
-        for (i : it_range($N)) {
-            #emit out[i] = damp(a[i], b[i], rate, dt);
-        }
-    };
+    #for (i : it_range($N)) {
+        out[i] = damp(a[i], b[i], rate, dt);
+    }
     return out;
 }
 
@@ -767,11 +749,9 @@ fn damp_half(a: $T, b: $T, half: $T, dt: $T): $T {
 
 fn damp_half(a: [$N]$T, b: [$N]$T, half: $T, dt: $T): [$N]$T {
     out: [$N]$T = #memory_garbage;
-    #run {
-        for (i : it_range($N)) {
-            #emit out[i] = damp_half(a[i], b[i], half, dt);
-        }
-    };
+    #for (i : it_range($N)) {
+        out[i] = damp_half(a[i], b[i], half, dt);
+    }
     return out;
 }
 
@@ -835,16 +815,12 @@ fn smooth_damp(
     output := target + (change + temp) * e;
 
     // prevent overshooting
-    #run {
-        for (i : it_range($N)) {
-            #emit {
-                if ((original_target[i] - current[i] > 0.0) == (output[i] > original_target[i])) {
-                    output[i] = original_target[i];
-                    velocity.*[i] = (output[i] - original_target[i]) / dt;
-                }
-            };
+    #for (i : it_range($N)) {
+        if ((original_target[i] - current[i] > 0.0) == (output[i] > original_target[i])) {
+            output[i] = original_target[i];
+            velocity.*[i] = (output[i] - original_target[i]) / dt;
         }
-    };
+    }
 
     return output;
 }
@@ -868,11 +844,9 @@ fn snap(x: $T, step: $T): $T {
 fn snap(x: [$N]$T, step: $T): [$N]$T {
     if (step == 0) { return x; }
     out: [$N]$T = #memory_garbage;
-    #run {
-        for (i : it_range($N)) {
-            #emit out[i] = round(x[i] / step) * step;
-        }
-    };
+    #for (i : it_range($N)) {
+        out[i] = round(x[i] / step) * step;
+    }
     return out;
 }
 
@@ -929,10 +903,8 @@ fn cbrt(x: $T): $T {
 
 fn vec_cast($T_Dst: __type_ptr, src: [$N]$T): [$N]$T_Dst {
     out : [$N]$T_Dst = #memory_garbage;
-    #run {
-        for (i : it_range($N)) {
-            #emit out[i] = src[i].cast($T_Dst);
-        }
-    };
+    #for (i : it_range($N)) {
+        out[i] = src[i].cast($T_Dst);
+    }
     return out;
 }

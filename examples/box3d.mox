@@ -1,0 +1,175 @@
+// this example shows box3d physics rendered with raylib
+
+import "std.mox";
+import "vendor/raylib.mox";
+import "vendor/box3d.mox";
+
+// mox ./examples/box3d.mox
+// raylib and box3d dlls will be copied to output directory
+//
+// left click / space - shoot a cube
+// R - rebuild the pyramid
+
+const PYRAMID_BASE : i32 = 10;
+const CUBE_HALF : f32 = 0.5f;
+
+// raylib enums that are not in the bindings
+const CAMERA_ORBITAL : i32 = 2;
+const CAMERA_PERSPECTIVE : i32 = 0;
+const MOUSE_BUTTON_LEFT : i32 = 0;
+
+fn spawn_cube(world: b3WorldId, cube_hull: *b3BoxHull, pos: b3Vec3, vel: b3Vec3, bullet: bool): b3BodyId {
+    body_def := b3DefaultBodyDef();
+    body_def.type = .b3_dynamicBody;
+    body_def.position = pos;
+    body_def.linearVelocity = vel;
+    body_def.isBullet = bullet;
+    body := b3CreateBody(world, body_def.^);
+
+    shape_def := b3DefaultShapeDef();
+    shape_def.baseMaterial.friction = 0.6f;
+    b3CreateHullShape(body, shape_def.^, cube_hull.base.^);
+    return body;
+}
+
+fn build_pyramid(world: b3WorldId, cube_hull: *b3BoxHull, bodies: *DynArr(b3BodyId)) {
+    for (i : it_range(bodies.len)) {
+        b3DestroyBody(bodies.items[i]);
+    }
+    dynarr_reset(bodies);
+
+    size := CUBE_HALF * 2.0f;
+    for (row : it_range(PYRAMID_BASE)) {
+        count := PYRAMID_BASE - row;
+        for (ix : it_range(count)) {
+            for (iz : it_range(count)) {
+                pos := b3Vec3.{
+                    (ix.cast(f32) - (count - 1).cast(f32) * 0.5f) * size;
+                    CUBE_HALF + row.cast(f32) * size;
+                    (iz.cast(f32) - (count - 1).cast(f32) * 0.5f) * size;
+                };
+                push(bodies, spawn_cube(world, cube_hull, pos, b3Vec3_zero, false));
+            }
+        }
+    }
+}
+
+// raylib draws models rotated by axis-angle (degrees)
+fn quat_to_axis_angle(q: b3Quat, axis: *Vector3): f32 {
+    s := q.s;
+    if (s > 1.0f) { s = 1.0f; }
+    if (s < -1.0f) { s = -1.0f; }
+    k := sqrt(1.0f - s * s);
+    if (k < 0.0001f) {
+        axis.* = Vector3.{ 1.0f; 0.0f; 0.0f; };
+        return 0.0f;
+    }
+    axis.* = Vector3.{ q.v.x / k; q.v.y / k; q.v.z / k; };
+    return 2.0f * acos(s) * B3_RAD_TO_DEG;
+}
+
+fn run_demo() {
+    alloc := get_context_alloc();
+
+    InitWindow(1280, 800, "mox + box3d");
+    defer CloseWindow();
+    SetTargetFPS(60);
+
+    world_def := b3DefaultWorldDef();
+    world_def.gravity = b3Vec3.{ 0.0f; -10.0f; 0.0f; };
+    world := b3CreateWorld(world_def.^);
+    defer b3DestroyWorld(world);
+
+    // static ground, top surface at y = 0
+    ground_def := b3DefaultBodyDef();
+    ground_def.position = b3Vec3.{ 0.0f; -1.0f; 0.0f; };
+    ground := b3CreateBody(world, ground_def.^);
+    ground_hull := b3MakeBoxHull(40.0f, 1.0f, 40.0f);
+    ground_shape := b3DefaultShapeDef();
+    b3CreateHullShape(ground, ground_shape.^, ground_hull.base.^);
+
+    cube_hull := b3MakeCubeHull(CUBE_HALF);
+
+    bodies := mem_alloc(alloc, DynArr(b3BodyId));
+    defer mem_free(alloc, bodies);
+    dynarr_init(bodies, alloc);
+    defer dynarr_free(bodies);
+
+    build_pyramid(world, cube_hull.^, bodies);
+
+    cube := LoadModelFromMesh(GenMeshCube(CUBE_HALF * 2.0f, CUBE_HALF * 2.0f, CUBE_HALF * 2.0f));
+    defer UnloadModel(cube);
+
+    camera := Camera3D.{
+        Vector3.{ 18.0f; 12.0f; 18.0f; };
+        Vector3.{ 0.0f; 3.0f; 0.0f; };
+        Vector3.{ 0.0f; 1.0f; 0.0f; };
+        45.0f;
+        CAMERA_PERSPECTIVE;
+    };
+
+    dt := 1.0f / 60.0f;
+
+    while (!WindowShouldClose()) {
+        UpdateCamera(camera.^, CAMERA_ORBITAL);
+
+        if (IsKeyPressed(KEY_R)) {
+            build_pyramid(world, cube_hull.^, bodies);
+        }
+
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsKeyPressed(KEY_SPACE)) {
+            ray := GetScreenToWorldRay(GetMousePosition(), camera);
+            speed := 40.0f;
+            pos := b3Vec3.{ ray.position.x; ray.position.y; ray.position.z; };
+            vel := b3Vec3.{ ray.direction.x * speed; ray.direction.y * speed; ray.direction.z * speed; };
+            push(bodies, spawn_cube(world, cube_hull.^, pos, vel, true));
+        }
+
+        b3World_Step(world, dt, 4);
+
+        BeginDrawing();
+        defer EndDrawing();
+        ClearBackground(Color.{ 24; 24; 28; 255; });
+
+        BeginMode3D(camera);
+        DrawPlane(Vector3.{ 0.0f; 0.0f; 0.0f; }, Vector2.{ 80.0f; 80.0f; }, Color.{ 60; 60; 70; 255; });
+        DrawGrid(40, 2.0f);
+
+        for (i : it_range(bodies.len)) {
+            body := bodies.items[i];
+            t := b3Body_GetTransform(body);
+            axis := Vector3.{ 0.0f; 0.0f; 0.0f; };
+            angle := quat_to_axis_angle(t.q, axis.^);
+            pos := Vector3.{ t.p.x; t.p.y; t.p.z; };
+
+            color := COLOR_GRAY;
+            if (b3Body_IsAwake(body)) {
+                color = Color.{ (120 + (i * 37) % 136).cast(u8); (90 + (i * 53) % 120).cast(u8); 60; 255; };
+            }
+
+            DrawModelEx(cube, pos, axis, angle, Vector3.{ 1.0f; 1.0f; 1.0f; }, color);
+            DrawModelWiresEx(cube, pos, axis, angle, Vector3.{ 1.0f; 1.0f; 1.0f; }, Color.{ 20; 20; 20; 255; });
+        }
+        EndMode3D();
+
+        DrawFPS(10, 10);
+        text := #format_temp("bodies: {}  awake: {}\0", .{ bodies.len; b3World_GetAwakeBodyCount(world); });
+        DrawText(text.ptr, 10, 36, 20, COLOR_LIGHTGRAY);
+        DrawText("click / space: shoot   R: reset", 10, 60, 20, COLOR_LIGHTGRAY);
+    }
+}
+
+#linkc fn main(): i32 {
+    run_demo();
+
+    // or run it inside the compiler, at comptime:
+    // #run {
+    //     const raylib_link := import "vendor/raylib/link.mox";
+    //     const box3d_link := import "vendor/box3d/link.mox";
+    //     raylib_link.link_raylib(true);
+    //     box3d_link.link_box3d(true);
+    //     run_demo();
+    // };
+
+    return 0;
+}
