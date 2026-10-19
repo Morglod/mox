@@ -345,7 +345,7 @@ fn os_cwd(buf: *u8, cap: i64): i64 {
     if (posix_getcwd(buf, cap.cast(u64)) == 0) { return 0; }
     n: i64 = 0;
     while (n < cap) {
-        if (ty_offset(buf, n).* == 0) { break; }
+        if (type_offset(buf, n).* == 0) { break; }
         n += 1;
     }
     return n;
@@ -583,7 +583,7 @@ fn os_temp_dir(buf: *u8, cap: i64): i64 {
     n := dir.len + (!has_sep).cast(i64);
     if (n >= cap) { return 0; }
     mem_copy(buf, dir.ptr, dir.len);
-    if (!has_sep) { ty_offset(buf, dir.len).* = char("/"); }
+    if (!has_sep) { type_offset(buf, dir.len).* = char("/"); }
     return n;
 }
 

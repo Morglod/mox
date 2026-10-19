@@ -243,12 +243,12 @@ fn push(fb: *FixedBuf, s: []u8): void {
 
 fn push_byte(fb: *FixedBuf, b: u8): void {
     if (fb.len >= fb.cap) { return; }
-    ty_offset(fb.ptr, fb.len.cast(u64)).* = b;
+    type_offset(fb.ptr, fb.len.cast(u64)).* = b;
     fb.len += 1;
 }
 
 fn push_null(fb: *FixedBuf): void {
     if (fb.cap == 0) { return; }
     at := min(fb.len, fb.cap - 1);
-    ty_offset(fb.ptr, at.cast(u64)).* = 0;
+    type_offset(fb.ptr, at.cast(u64)).* = 0;
 }

@@ -114,7 +114,7 @@ fn rapid_mix(A: u64, B: u64): u64 {
   */
 fn rapidhash_internal(key: *u8, len: i64, seed: u64, secret: *u64): u64 {
     p : *u8 = key;
-    seed ^= rapid_mix(seed ^ (secret |> ty_offset(2) .*), (secret |> ty_offset(1) .*));
+    seed ^= rapid_mix(seed ^ (secret |> type_offset(2) .*), (secret |> type_offset(1) .*));
     a: u64 = 0; b: u64 = 0;
     i : i64 = len;
     if (_rapid_likely_(len <= 16)) {
@@ -142,43 +142,43 @@ fn rapidhash_internal(key: *u8, len: i64, seed: u64, secret: *u64): u64 {
             see5 : u64 = seed; see6 : u64 = seed;
             #if (RAPIDHASH_COMPACT) {
                 while(i > 112) {
-                    seed = rapid_mix(rapid_read64(p) ^ (secret |> ty_offset(0) .*), rapid_read64(p |> byte_offset(8)) ^ seed);
-                    see1 = rapid_mix(rapid_read64(p |> byte_offset(16)) ^ (secret |> ty_offset(1) .*), rapid_read64(p |> byte_offset(24)) ^ see1);
-                    see2 = rapid_mix(rapid_read64(p |> byte_offset(32)) ^ (secret |> ty_offset(2) .*), rapid_read64(p |> byte_offset(40)) ^ see2);
-                    see3 = rapid_mix(rapid_read64(p |> byte_offset(48)) ^ (secret |> ty_offset(3) .*), rapid_read64(p |> byte_offset(56)) ^ see3);
-                    see4 = rapid_mix(rapid_read64(p |> byte_offset(64)) ^ (secret |> ty_offset(4) .*), rapid_read64(p |> byte_offset(72)) ^ see4);
-                    see5 = rapid_mix(rapid_read64(p |> byte_offset(80)) ^ (secret |> ty_offset(5) .*), rapid_read64(p |> byte_offset(88)) ^ see5);
-                    see6 = rapid_mix(rapid_read64(p |> byte_offset(96)) ^ (secret |> ty_offset(6) .*), rapid_read64(p |> byte_offset(104)) ^ see6);
+                    seed = rapid_mix(rapid_read64(p) ^ (secret |> type_offset(0) .*), rapid_read64(p |> byte_offset(8)) ^ seed);
+                    see1 = rapid_mix(rapid_read64(p |> byte_offset(16)) ^ (secret |> type_offset(1) .*), rapid_read64(p |> byte_offset(24)) ^ see1);
+                    see2 = rapid_mix(rapid_read64(p |> byte_offset(32)) ^ (secret |> type_offset(2) .*), rapid_read64(p |> byte_offset(40)) ^ see2);
+                    see3 = rapid_mix(rapid_read64(p |> byte_offset(48)) ^ (secret |> type_offset(3) .*), rapid_read64(p |> byte_offset(56)) ^ see3);
+                    see4 = rapid_mix(rapid_read64(p |> byte_offset(64)) ^ (secret |> type_offset(4) .*), rapid_read64(p |> byte_offset(72)) ^ see4);
+                    see5 = rapid_mix(rapid_read64(p |> byte_offset(80)) ^ (secret |> type_offset(5) .*), rapid_read64(p |> byte_offset(88)) ^ see5);
+                    see6 = rapid_mix(rapid_read64(p |> byte_offset(96)) ^ (secret |> type_offset(6) .*), rapid_read64(p |> byte_offset(104)) ^ see6);
                     p = p |> byte_offset(112);
                     i -= 112;
                 }
             } else {
                 while (i > 224) {
-                    seed = rapid_mix(rapid_read64(p) ^ (secret |> ty_offset(0) .*), rapid_read64(p |> byte_offset(8)) ^ seed);
-                    see1 = rapid_mix(rapid_read64(p |> byte_offset(16)) ^ (secret |> ty_offset(1) .*), rapid_read64(p |> byte_offset(24)) ^ see1);
-                    see2 = rapid_mix(rapid_read64(p |> byte_offset(32)) ^ (secret |> ty_offset(2) .*), rapid_read64(p |> byte_offset(40)) ^ see2);
-                    see3 = rapid_mix(rapid_read64(p |> byte_offset(48)) ^ (secret |> ty_offset(3) .*), rapid_read64(p |> byte_offset(56)) ^ see3);
-                    see4 = rapid_mix(rapid_read64(p |> byte_offset(64)) ^ (secret |> ty_offset(4) .*), rapid_read64(p |> byte_offset(72)) ^ see4);
-                    see5 = rapid_mix(rapid_read64(p |> byte_offset(80)) ^ (secret |> ty_offset(5) .*), rapid_read64(p |> byte_offset(88)) ^ see5);
-                    see6 = rapid_mix(rapid_read64(p |> byte_offset(96)) ^ (secret |> ty_offset(6) .*), rapid_read64(p |> byte_offset(104)) ^ see6);
-                    seed = rapid_mix(rapid_read64(p |> byte_offset(112)) ^ (secret |> ty_offset(0) .*), rapid_read64(p |> byte_offset(120)) ^ seed);
-                    see1 = rapid_mix(rapid_read64(p |> byte_offset(128)) ^ (secret |> ty_offset(1) .*), rapid_read64(p |> byte_offset(136)) ^ see1);
-                    see2 = rapid_mix(rapid_read64(p |> byte_offset(144)) ^ (secret |> ty_offset(2) .*), rapid_read64(p |> byte_offset(152)) ^ see2);
-                    see3 = rapid_mix(rapid_read64(p |> byte_offset(160)) ^ (secret |> ty_offset(3) .*), rapid_read64(p |> byte_offset(168)) ^ see3);
-                    see4 = rapid_mix(rapid_read64(p |> byte_offset(176)) ^ (secret |> ty_offset(4) .*), rapid_read64(p |> byte_offset(184)) ^ see4);
-                    see5 = rapid_mix(rapid_read64(p |> byte_offset(192)) ^ (secret |> ty_offset(5) .*), rapid_read64(p |> byte_offset(200)) ^ see5);
-                    see6 = rapid_mix(rapid_read64(p |> byte_offset(208)) ^ (secret |> ty_offset(6) .*), rapid_read64(p |> byte_offset(216)) ^ see6);
+                    seed = rapid_mix(rapid_read64(p) ^ (secret |> type_offset(0) .*), rapid_read64(p |> byte_offset(8)) ^ seed);
+                    see1 = rapid_mix(rapid_read64(p |> byte_offset(16)) ^ (secret |> type_offset(1) .*), rapid_read64(p |> byte_offset(24)) ^ see1);
+                    see2 = rapid_mix(rapid_read64(p |> byte_offset(32)) ^ (secret |> type_offset(2) .*), rapid_read64(p |> byte_offset(40)) ^ see2);
+                    see3 = rapid_mix(rapid_read64(p |> byte_offset(48)) ^ (secret |> type_offset(3) .*), rapid_read64(p |> byte_offset(56)) ^ see3);
+                    see4 = rapid_mix(rapid_read64(p |> byte_offset(64)) ^ (secret |> type_offset(4) .*), rapid_read64(p |> byte_offset(72)) ^ see4);
+                    see5 = rapid_mix(rapid_read64(p |> byte_offset(80)) ^ (secret |> type_offset(5) .*), rapid_read64(p |> byte_offset(88)) ^ see5);
+                    see6 = rapid_mix(rapid_read64(p |> byte_offset(96)) ^ (secret |> type_offset(6) .*), rapid_read64(p |> byte_offset(104)) ^ see6);
+                    seed = rapid_mix(rapid_read64(p |> byte_offset(112)) ^ (secret |> type_offset(0) .*), rapid_read64(p |> byte_offset(120)) ^ seed);
+                    see1 = rapid_mix(rapid_read64(p |> byte_offset(128)) ^ (secret |> type_offset(1) .*), rapid_read64(p |> byte_offset(136)) ^ see1);
+                    see2 = rapid_mix(rapid_read64(p |> byte_offset(144)) ^ (secret |> type_offset(2) .*), rapid_read64(p |> byte_offset(152)) ^ see2);
+                    see3 = rapid_mix(rapid_read64(p |> byte_offset(160)) ^ (secret |> type_offset(3) .*), rapid_read64(p |> byte_offset(168)) ^ see3);
+                    see4 = rapid_mix(rapid_read64(p |> byte_offset(176)) ^ (secret |> type_offset(4) .*), rapid_read64(p |> byte_offset(184)) ^ see4);
+                    see5 = rapid_mix(rapid_read64(p |> byte_offset(192)) ^ (secret |> type_offset(5) .*), rapid_read64(p |> byte_offset(200)) ^ see5);
+                    see6 = rapid_mix(rapid_read64(p |> byte_offset(208)) ^ (secret |> type_offset(6) .*), rapid_read64(p |> byte_offset(216)) ^ see6);
                     p = p |> byte_offset(224);
                     i -= 224;
                 }
                 if (i > 112) {
-                    seed = rapid_mix(rapid_read64(p) ^ (secret |> ty_offset(0) .*), rapid_read64(p |> byte_offset(8)) ^ seed);
-                    see1 = rapid_mix(rapid_read64(p |> byte_offset(16)) ^ (secret |> ty_offset(1) .*), rapid_read64(p |> byte_offset(24)) ^ see1);
-                    see2 = rapid_mix(rapid_read64(p |> byte_offset(32)) ^ (secret |> ty_offset(2) .*), rapid_read64(p |> byte_offset(40)) ^ see2);
-                    see3 = rapid_mix(rapid_read64(p |> byte_offset(48)) ^ (secret |> ty_offset(3) .*), rapid_read64(p |> byte_offset(56)) ^ see3);
-                    see4 = rapid_mix(rapid_read64(p |> byte_offset(64)) ^ (secret |> ty_offset(4) .*), rapid_read64(p |> byte_offset(72)) ^ see4);
-                    see5 = rapid_mix(rapid_read64(p |> byte_offset(80)) ^ (secret |> ty_offset(5) .*), rapid_read64(p |> byte_offset(88)) ^ see5);
-                    see6 = rapid_mix(rapid_read64(p |> byte_offset(96)) ^ (secret |> ty_offset(6) .*), rapid_read64(p |> byte_offset(104)) ^ see6);
+                    seed = rapid_mix(rapid_read64(p) ^ (secret |> type_offset(0) .*), rapid_read64(p |> byte_offset(8)) ^ seed);
+                    see1 = rapid_mix(rapid_read64(p |> byte_offset(16)) ^ (secret |> type_offset(1) .*), rapid_read64(p |> byte_offset(24)) ^ see1);
+                    see2 = rapid_mix(rapid_read64(p |> byte_offset(32)) ^ (secret |> type_offset(2) .*), rapid_read64(p |> byte_offset(40)) ^ see2);
+                    see3 = rapid_mix(rapid_read64(p |> byte_offset(48)) ^ (secret |> type_offset(3) .*), rapid_read64(p |> byte_offset(56)) ^ see3);
+                    see4 = rapid_mix(rapid_read64(p |> byte_offset(64)) ^ (secret |> type_offset(4) .*), rapid_read64(p |> byte_offset(72)) ^ see4);
+                    see5 = rapid_mix(rapid_read64(p |> byte_offset(80)) ^ (secret |> type_offset(5) .*), rapid_read64(p |> byte_offset(88)) ^ see5);
+                    see6 = rapid_mix(rapid_read64(p |> byte_offset(96)) ^ (secret |> type_offset(6) .*), rapid_read64(p |> byte_offset(104)) ^ see6);
                     p = p |> byte_offset(112);
                     i -= 112;
                 }
@@ -191,17 +191,17 @@ fn rapidhash_internal(key: *u8, len: i64, seed: u64, secret: *u64): u64 {
             seed ^= see2;
         }
         if (i > 16) {
-            seed = rapid_mix(rapid_read64(p) ^ (secret |> ty_offset(2) .*), rapid_read64(p |> byte_offset(8)) ^ seed);
+            seed = rapid_mix(rapid_read64(p) ^ (secret |> type_offset(2) .*), rapid_read64(p |> byte_offset(8)) ^ seed);
             if (i > 32) {
-                seed = rapid_mix(rapid_read64(p |> byte_offset(16)) ^ (secret |> ty_offset(2) .*), rapid_read64(p |> byte_offset(24)) ^ seed);
+                seed = rapid_mix(rapid_read64(p |> byte_offset(16)) ^ (secret |> type_offset(2) .*), rapid_read64(p |> byte_offset(24)) ^ seed);
                 if (i > 48) {
-                    seed = rapid_mix(rapid_read64(p |> byte_offset(32)) ^ (secret |> ty_offset(1) .*), rapid_read64(p |> byte_offset(40)) ^ seed);
+                    seed = rapid_mix(rapid_read64(p |> byte_offset(32)) ^ (secret |> type_offset(1) .*), rapid_read64(p |> byte_offset(40)) ^ seed);
                     if (i > 64) {
-                        seed = rapid_mix(rapid_read64(p |> byte_offset(48)) ^ (secret |> ty_offset(1) .*), rapid_read64(p |> byte_offset(56)) ^ seed);
+                        seed = rapid_mix(rapid_read64(p |> byte_offset(48)) ^ (secret |> type_offset(1) .*), rapid_read64(p |> byte_offset(56)) ^ seed);
                         if (i > 80) {
-                            seed = rapid_mix(rapid_read64(p |> byte_offset(64)) ^ (secret |> ty_offset(2) .*), rapid_read64(p |> byte_offset(72)) ^ seed);
+                            seed = rapid_mix(rapid_read64(p |> byte_offset(64)) ^ (secret |> type_offset(2) .*), rapid_read64(p |> byte_offset(72)) ^ seed);
                             if (i > 96) {
-                                seed = rapid_mix(rapid_read64(p |> byte_offset(80)) ^ (secret |> ty_offset(1) .*), rapid_read64(p |> byte_offset(88)) ^ seed);
+                                seed = rapid_mix(rapid_read64(p |> byte_offset(80)) ^ (secret |> type_offset(1) .*), rapid_read64(p |> byte_offset(88)) ^ seed);
                             }
                         }
                     }
@@ -211,10 +211,10 @@ fn rapidhash_internal(key: *u8, len: i64, seed: u64, secret: *u64): u64 {
         a = rapid_read64(p |> byte_offset(i - 16)) ^ i.cast(u64);
         b = rapid_read64(p |> byte_offset(i - 8));
     }
-    a ^= (secret |> ty_offset(1) .*);
+    a ^= (secret |> type_offset(1) .*);
     b ^= seed;
     rapid_mum(a.^, b.^);
-    return rapid_mix(a ^ (secret |> ty_offset(7) .*), b ^ (secret |> ty_offset(1) .*) ^ i.cast(u64));
+    return rapid_mix(a ^ (secret |> type_offset(7) .*), b ^ (secret |> type_offset(1) .*) ^ i.cast(u64));
 }
 
  /*
@@ -229,7 +229,7 @@ fn rapidhash_internal(key: *u8, len: i64, seed: u64, secret: *u64): u64 {
   */
 fn rapidhashMicro_internal(key: *u8, len: i64, seed: u64, secret: *u64): u64 {
     p : *u8 = key;
-    seed ^= rapid_mix(seed ^ (secret |> ty_offset(2) .*), (secret |> ty_offset(1) .*));
+    seed ^= rapid_mix(seed ^ (secret |> type_offset(2) .*), (secret |> type_offset(1) .*));
     a: u64 = 0; b: u64 = 0;
     i : i64 = len;
     if (_rapid_likely_(len <= 16)) {
@@ -255,11 +255,11 @@ fn rapidhashMicro_internal(key: *u8, len: i64, seed: u64, secret: *u64): u64 {
             see1 : u64 = seed; see2 : u64 = seed;
             see3 : u64 = seed; see4 : u64 = seed;
             while (i > 80) {
-                seed = rapid_mix(rapid_read64(p) ^ (secret |> ty_offset(0) .*), rapid_read64(p |> byte_offset(8)) ^ seed);
-                see1 = rapid_mix(rapid_read64(p |> byte_offset(16)) ^ (secret |> ty_offset(1) .*), rapid_read64(p |> byte_offset(24)) ^ see1);
-                see2 = rapid_mix(rapid_read64(p |> byte_offset(32)) ^ (secret |> ty_offset(2) .*), rapid_read64(p |> byte_offset(40)) ^ see2);
-                see3 = rapid_mix(rapid_read64(p |> byte_offset(48)) ^ (secret |> ty_offset(3) .*), rapid_read64(p |> byte_offset(56)) ^ see3);
-                see4 = rapid_mix(rapid_read64(p |> byte_offset(64)) ^ (secret |> ty_offset(4) .*), rapid_read64(p |> byte_offset(72)) ^ see4);
+                seed = rapid_mix(rapid_read64(p) ^ (secret |> type_offset(0) .*), rapid_read64(p |> byte_offset(8)) ^ seed);
+                see1 = rapid_mix(rapid_read64(p |> byte_offset(16)) ^ (secret |> type_offset(1) .*), rapid_read64(p |> byte_offset(24)) ^ see1);
+                see2 = rapid_mix(rapid_read64(p |> byte_offset(32)) ^ (secret |> type_offset(2) .*), rapid_read64(p |> byte_offset(40)) ^ see2);
+                see3 = rapid_mix(rapid_read64(p |> byte_offset(48)) ^ (secret |> type_offset(3) .*), rapid_read64(p |> byte_offset(56)) ^ see3);
+                see4 = rapid_mix(rapid_read64(p |> byte_offset(64)) ^ (secret |> type_offset(4) .*), rapid_read64(p |> byte_offset(72)) ^ see4);
                 p = p |> byte_offset(80);
                 i -= 80;
             }
@@ -269,13 +269,13 @@ fn rapidhashMicro_internal(key: *u8, len: i64, seed: u64, secret: *u64): u64 {
             seed ^= see2;
         }
         if (i > 16) {
-            seed = rapid_mix(rapid_read64(p) ^ (secret |> ty_offset(2) .*), rapid_read64(p |> byte_offset(8)) ^ seed);
+            seed = rapid_mix(rapid_read64(p) ^ (secret |> type_offset(2) .*), rapid_read64(p |> byte_offset(8)) ^ seed);
             if (i > 32) {
-                seed = rapid_mix(rapid_read64(p |> byte_offset(16)) ^ (secret |> ty_offset(2) .*), rapid_read64(p |> byte_offset(24)) ^ seed);
+                seed = rapid_mix(rapid_read64(p |> byte_offset(16)) ^ (secret |> type_offset(2) .*), rapid_read64(p |> byte_offset(24)) ^ seed);
                 if (i > 48) {
-                    seed = rapid_mix(rapid_read64(p |> byte_offset(32)) ^ (secret |> ty_offset(1) .*), rapid_read64(p |> byte_offset(40)) ^ seed);
+                    seed = rapid_mix(rapid_read64(p |> byte_offset(32)) ^ (secret |> type_offset(1) .*), rapid_read64(p |> byte_offset(40)) ^ seed);
                     if (i > 64) {
-                        seed = rapid_mix(rapid_read64(p |> byte_offset(48)) ^ (secret |> ty_offset(1) .*), rapid_read64(p |> byte_offset(56)) ^ seed);
+                        seed = rapid_mix(rapid_read64(p |> byte_offset(48)) ^ (secret |> type_offset(1) .*), rapid_read64(p |> byte_offset(56)) ^ seed);
                     }
                 }
             }
@@ -283,10 +283,10 @@ fn rapidhashMicro_internal(key: *u8, len: i64, seed: u64, secret: *u64): u64 {
         a = rapid_read64(p |> byte_offset(i - 16)) ^ i.cast(u64);
         b = rapid_read64(p |> byte_offset(i - 8));
     }
-    a ^= (secret |> ty_offset(1) .*);
+    a ^= (secret |> type_offset(1) .*);
     b ^= seed;
     rapid_mum(a.^, b.^);
-    return rapid_mix(a ^ (secret |> ty_offset(7) .*), b ^ (secret |> ty_offset(1) .*) ^ i.cast(u64));
+    return rapid_mix(a ^ (secret |> type_offset(7) .*), b ^ (secret |> type_offset(1) .*) ^ i.cast(u64));
 }
 
   /*
@@ -301,7 +301,7 @@ fn rapidhashMicro_internal(key: *u8, len: i64, seed: u64, secret: *u64): u64 {
   */
 fn rapidhashNano_internal(key: *u8, len: i64, seed: u64, secret: *u64): u64 {
     p : *u8 = key;
-    seed ^= rapid_mix(seed ^ (secret |> ty_offset(2) .*), (secret |> ty_offset(1) .*));
+    seed ^= rapid_mix(seed ^ (secret |> type_offset(2) .*), (secret |> type_offset(1) .*));
     a: u64 = 0; b: u64 = 0;
     i : i64 = len;
     if (_rapid_likely_(len <= 16)) {
@@ -326,9 +326,9 @@ fn rapidhashNano_internal(key: *u8, len: i64, seed: u64, secret: *u64): u64 {
         if (i > 48) {
             see1 : u64 = seed; see2 : u64 = seed;
             while (i > 48) {
-                seed = rapid_mix(rapid_read64(p) ^ (secret |> ty_offset(0) .*), rapid_read64(p |> byte_offset(8)) ^ seed);
-                see1 = rapid_mix(rapid_read64(p |> byte_offset(16)) ^ (secret |> ty_offset(1) .*), rapid_read64(p |> byte_offset(24)) ^ see1);
-                see2 = rapid_mix(rapid_read64(p |> byte_offset(32)) ^ (secret |> ty_offset(2) .*), rapid_read64(p |> byte_offset(40)) ^ see2);
+                seed = rapid_mix(rapid_read64(p) ^ (secret |> type_offset(0) .*), rapid_read64(p |> byte_offset(8)) ^ seed);
+                see1 = rapid_mix(rapid_read64(p |> byte_offset(16)) ^ (secret |> type_offset(1) .*), rapid_read64(p |> byte_offset(24)) ^ see1);
+                see2 = rapid_mix(rapid_read64(p |> byte_offset(32)) ^ (secret |> type_offset(2) .*), rapid_read64(p |> byte_offset(40)) ^ see2);
                 p = p |> byte_offset(48);
                 i -= 48;
             }
@@ -336,18 +336,18 @@ fn rapidhashNano_internal(key: *u8, len: i64, seed: u64, secret: *u64): u64 {
             seed ^= see2;
         }
         if (i > 16) {
-            seed = rapid_mix(rapid_read64(p) ^ (secret |> ty_offset(2) .*), rapid_read64(p |> byte_offset(8)) ^ seed);
+            seed = rapid_mix(rapid_read64(p) ^ (secret |> type_offset(2) .*), rapid_read64(p |> byte_offset(8)) ^ seed);
             if (i > 32) {
-                seed = rapid_mix(rapid_read64(p |> byte_offset(16)) ^ (secret |> ty_offset(2) .*), rapid_read64(p |> byte_offset(24)) ^ seed);
+                seed = rapid_mix(rapid_read64(p |> byte_offset(16)) ^ (secret |> type_offset(2) .*), rapid_read64(p |> byte_offset(24)) ^ seed);
             }
         }
         a = rapid_read64(p |> byte_offset(i - 16)) ^ i.cast(u64);
         b = rapid_read64(p |> byte_offset(i - 8));
     }
-    a ^= (secret |> ty_offset(1) .*);
+    a ^= (secret |> type_offset(1) .*);
     b ^= seed;
     rapid_mum(a.^, b.^);
-    return rapid_mix(a ^ (secret |> ty_offset(7) .*), b ^ (secret |> ty_offset(1) .*) ^ i.cast(u64));
+    return rapid_mix(a ^ (secret |> type_offset(7) .*), b ^ (secret |> type_offset(1) .*) ^ i.cast(u64));
 }
  
 /*

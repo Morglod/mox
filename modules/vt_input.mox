@@ -114,7 +114,7 @@ fn vt_feed(p: *VtParser, b: u8): void {
 
 fn vt_feed_bytes(p: *VtParser, ptr: *u8, n: i64): void {
     for (i : it_range(0i64, n)) {
-        vt_feed(p, ty_offset(ptr, i).*);
+        vt_feed(p, type_offset(ptr, i).*);
     }
 }
 

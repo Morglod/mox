@@ -17,13 +17,15 @@ JIT backend is x86_64 targetted, but llvm and C backend could emit for any platf
 
 Windows / Linux x86_64 tested
 
-To know language better, you can read [./by_example.mox](./by_example.mox)
+[Getting started](https://mox-lang.dev/tutorials/getting-started/setup/)
+
+To know language better, you can read [tutorials](https://mox-lang.dev/tutorials/) or [./by_example.mox](./by_example.mox)
 
 [Compilation speed comparison](./benchmark/result.md)
 
 ## Download link
 
-[Prerequisites](./docs/1_prerequisites.md)
+[Prerequisites](https://mox-lang.dev/tutorials/getting-started/setup/)
 
 Zip archive already contains both versions of compiler and base modules.  
 
@@ -79,24 +81,17 @@ fn main() {
 Code generation and ast manipulation:
 
 ```rust
-fn per_platform_import_statement($path: []u8): __ast_ptr {
-    platform_subpath : []u8 = "";
-
-    switch (MOX_OS) {
-        case .Windows:
-            platform_subpath = "win";
-        case .Linux:
-            platform_subpath = "sysv";
-        case:
-            platform_subpath = "unknown";
+fn make_config($path: []u8): __ast_ptr {
+    sb : StringBuilder = 0;
+    init(sb.^);
+    for (line : split_iterator(fs_read_file_full($path), "\n")) {
+        eq := index_of(line, "=");
+        format(sb.^, "const {} : i32 = {};\n", .{ slice(line, 0, eq), slice(line, eq + 1, line.len) });
     }
-
-    code_str := #format_temp("import \"{}_{}\";", .{ $path, platform_subpath });
-    ast := __compiler_parse(code_str);
-    return ast;
+    return __compiler_parse(finalize(sb.^));
 }
 
-#run #land_ast per_platform_import_statement("module/path");
+#run #land_ast make_config("./config.txt"); // const width : i32 = 800; ...
 ```
 
 Type manipulation:

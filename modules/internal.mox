@@ -293,12 +293,12 @@ fn byte_offset(ptr: $T / *$P, offset: usize) : $T {
 
 // pointer arithmetic without "pointer arithmetic", offset is scaled by element size
 // ptr : *i64 = 16;
-// ptr |> ty_offset(4) -> 16 + sizeof_type(i64) * 4 -> 48
-fn ty_offset(ptr: $T / *$P, offset: isize) : $T {
+// ptr |> type_offset(4) -> 16 + sizeof_type(i64) * 4 -> 48
+fn type_offset(ptr: $T / *$P, offset: isize) : $T {
     return byte_offset(ptr, sizeof_type($P) * offset);
 }
 
-fn ty_offset(ptr: $T / *$P, offset: usize) : $T {
+fn type_offset(ptr: $T / *$P, offset: usize) : $T {
     return byte_offset(ptr, sizeof_type($P).cast(u64) * offset);
 }
 
@@ -463,7 +463,7 @@ fn push(dst: []$T, value: $T): []$T {
     dst.ptr.* = value;
 
     out: []$T = #memory_garbage;
-    out.ptr = ty_offset(dst.ptr, 1);
+    out.ptr = type_offset(dst.ptr, 1);
     out.len = dst.len - 1;
 
     return out;
@@ -541,14 +541,14 @@ struct PtrIterator($T: __type_ptr) {
 fn iterate(slice: []$T): PtrIterator($T) {
     return .{
         cur = slice.ptr;
-        end = slice.ptr |> ty_offset(slice.len);
+        end = slice.ptr |> type_offset(slice.len);
         started = false;
     };
 }
 
 fn iterator_next(it: *PtrIterator($T)): bool {
     if (it.started) {
-        it.cur = it.cur |> ty_offset(1);
+        it.cur = it.cur |> type_offset(1);
     } else {
         it.started = true;
     }
@@ -596,7 +596,7 @@ fn get_source_location_file_path(loc: MoxSourceLocation = #caller_location): []u
         i: i64 = 0;
         n: i64 = __mox_source_path_count .cast(i64);
         while (i < n) {
-            record := ty_offset(table, i) .*;
+            record := type_offset(table, i) .*;
             if (record.module_id == loc.module_id) {
                 out: []u8 = #memory_garbage;
                 out.ptr = record.path_ptr;

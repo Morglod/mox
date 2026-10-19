@@ -121,11 +121,11 @@ fn _hashmap_swiss_grow(m: *SwissMap($K, $V, $HASH), min_cap: i64): void {
         for (i : it_range(old.cap)) {
             c := byte_offset(ctrl, i).*;
             if ((c & 0x80) != 0) { continue; } // EMPTY or DELETED
-            e := ty_offset(entries, i);
+            e := type_offset(entries, i);
             h := $HASH(e.key.^);
             slot := _hashmap_swiss_find_insert_slot(nst, h);
             byte_offset(nctrl, slot).* = _hashmap_swiss_h2(h);
-            ty_offset(nentries, slot).* = e.*;
+            type_offset(nentries, slot).* = e.*;
         }
         nst.len = old.len;
         nst.growth_left = (nst.cap * 7) / 8 - old.len;
@@ -156,7 +156,7 @@ fn get(m: *SwissMap($K, $V, $HASH), key: $K): *$V {
         mm := simd_byte_eq_mask16(cp, h2);
         while (mm != 0) {
             s := base + #bit_count_trailing_zeroes(mm).cast(i64);
-            e := ty_offset(entries, s);
+            e := type_offset(entries, s);
             if (e.key == key) { return e.value.^; }
             mm = mm & (mm - 1);
         }
@@ -199,7 +199,7 @@ fn get_or_insert(m: *SwissMap($K, $V, $HASH), key: $K): MapSlot($V) {
         st.growth_left -= 1;
     }
     byte_offset(_hashmap_swiss_ctrl(st), slot).* = _hashmap_swiss_h2(h);
-    e := ty_offset(_hashmap_swiss_entries_ptr(st), slot);
+    e := type_offset(_hashmap_swiss_entries_ptr(st), slot);
     e.key = key;
     e.value = zeroed($V);
     st.len += 1;
@@ -230,7 +230,7 @@ fn remove(m: *SwissMap($K, $V, $HASH), key: $K): bool {
         mm := simd_byte_eq_mask16(cp, h2);
         while (mm != 0) {
             s := base + #bit_count_trailing_zeroes(mm).cast(i64);
-            e := ty_offset(entries, s);
+            e := type_offset(entries, s);
             if (e.key == key) {
                 // if the group of this slot still has an EMPTY, no probe ever went past it, so the slot can go back to EMPTY instead of DELETED
                 own_base := (s / SWISS_GROUP) * SWISS_GROUP;
@@ -287,5 +287,5 @@ fn iterator_next(it: *SwissIterator($K, $V)): bool {
 }
 
 fn iterator_current(it: *SwissIterator($K, $V)): *MapEntry($K, $V) {
-    return ty_offset(it.entries, it.at);
+    return type_offset(it.entries, it.at);
 }

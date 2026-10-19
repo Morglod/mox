@@ -17,7 +17,7 @@ fn c_strlen(s: *u8): i64 {
 fn c_strlen(src: *u8, max_len: i64): i64 {
     n: i64 = 0;
     while (n < max_len) {
-        if (ty_offset(src, n).* == 0) { break; }
+        if (type_offset(src, n).* == 0) { break; }
         n += 1;
     }
     return n;

@@ -451,9 +451,9 @@ fn os_clipboard_set(text: *u8, a: u32, b: u32): void {
             wdst := dst.cast(*u16);
             src := text |> byte_offset(a.cast(i64));
             for (i : it_range(n.cast(i64))) {
-                ty_offset(wdst, i).* = ty_offset(src, i).*.cast(u16);
+                type_offset(wdst, i).* = type_offset(src, i).*.cast(u16);
             }
-            ty_offset(wdst, n.cast(i64)).* = 0;
+            type_offset(wdst, n.cast(i64)).* = 0;
             GlobalUnlock(hmem);
             SetClipboardData(CF_UNICODETEXT, hmem); // clipboard owns hmem now
         }
@@ -473,10 +473,10 @@ fn os_clipboard_get(buf: *u8, cap: u32): u32 {
             wsrc := src.cast(*u16);
             i: i64 = 0;
             while (n < (cap - 1)) {
-                c := ty_offset(wsrc, i).*;
+                c := type_offset(wsrc, i).*;
                 if (c == 0) { break; }
                 if (c < 128) {
-                    ty_offset(buf, n.cast(i64)).* = c.cast(u8);
+                    type_offset(buf, n.cast(i64)).* = c.cast(u8);
                     n += 1;
                 }
                 i += 1;
@@ -764,7 +764,7 @@ fn os_stdin_read_bytes(ti: *OsTermInput, buf: *u8, cap: i64): i64 {
         if (rec.EventType == .key) {
             kr := rec.Event.ptr.cast(*KEY_EVENT_RECORD);
             if ((kr.bKeyDown != 0) && (kr.UnicodeChar != 0)) {
-                ty_offset(buf, pos).* = kr.UnicodeChar.cast(u8);
+                type_offset(buf, pos).* = kr.UnicodeChar.cast(u8);
                 pos += 1;
             }
         }

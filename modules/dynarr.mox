@@ -40,7 +40,7 @@ fn dynarr_cap(arr: *DynArr($T)): i64 {
 
 // no bounds check, storage must exist
 fn dynarr_at(arr: *DynArr($T), i: i64): *$T {
-    return ty_offset(_dynarr_items_ptr(arr.storage), i);
+    return type_offset(_dynarr_items_ptr(arr.storage), i);
 }
 
 // live view, it dies on the next growth
@@ -116,7 +116,7 @@ fn dynarr_ensure(arr: *DynArr($T), extra: i64): void {
 fn push(arr: *DynArr($T), val: $T): void {
     _dynarr_grow(arr, 1);
     storage := arr.storage;
-    dst_ptr := _dynarr_items_ptr(storage) |> ty_offset(storage.len);
+    dst_ptr := _dynarr_items_ptr(storage) |> type_offset(storage.len);
     dst_ptr.* = val;
     storage.len += 1;
 }
@@ -125,7 +125,7 @@ fn push(arr: *DynArr($T), vals: []$T): void {
     if (vals.len == 0) { return; }
     _dynarr_grow(arr, vals.len);
     storage := arr.storage;
-    dst := ty_offset(_dynarr_items_ptr(storage), storage.len);
+    dst := type_offset(_dynarr_items_ptr(storage), storage.len);
     mem_copy(dst.cast(*u8), vals.ptr.cast(*u8), sizeof_type($T) * vals.len);
     storage.len += vals.len;
 }

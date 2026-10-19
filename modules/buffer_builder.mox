@@ -133,6 +133,6 @@ fn iterator_next(it: *BufferBuilderIter($T)): bool {
 }
 
 fn iterator_current(it: *BufferBuilderIter($T)): *$T {
-    if (it.index < BB_CHUNK_LEN) { return ty_offset(it.bb.buf.ptr, it.index); }
-    return ty_offset(it.node.buf.ptr, it.index % BB_CHUNK_LEN);
+    if (it.index < BB_CHUNK_LEN) { return type_offset(it.bb.buf.ptr, it.index); }
+    return type_offset(it.node.buf.ptr, it.index % BB_CHUNK_LEN);
 }

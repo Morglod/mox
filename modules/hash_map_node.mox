@@ -48,7 +48,7 @@ fn _hashmap_node_stride($K: __type_ptr, $V: __type_ptr): i64 {
 }
 
 fn _hashmap_node_at(st: *NodeMapStorage($K, $V), idx: i64): *MapEntry($K, $V) {
-    chunk := ty_offset(st.chunk_table, #shr(idx, NODE_CHUNK_SHIFT)).*;
+    chunk := type_offset(st.chunk_table, #shr(idx, NODE_CHUNK_SHIFT)).*;
     p := chunk |> byte_offset((idx & (NODE_CHUNK_LEN - 1)) * _hashmap_node_stride($K, $V));
     return p.cast(*MapEntry($K, $V));
 }
@@ -68,7 +68,7 @@ fn destroy(m: *NodeMap($K, $V, $HASH)): void {
     st := m.storage;
     if (st == 0) { return; }
     for (i : it_range(st.chunk_count)) {
-        mem_free(m.alloc, ty_offset(st.chunk_table, i).*);
+        mem_free(m.alloc, type_offset(st.chunk_table, i).*);
     }
     if (st.chunk_table != 0) { mem_free(m.alloc, st.chunk_table.cast(*u8)); }
     mem_free(m.alloc, st.cast(*u8));
@@ -116,7 +116,7 @@ fn _hashmap_node_alloc_index(m: *NodeMap($K, $V, $HASH)): i64 {
             st.chunk_table_cap = ncap;
         }
         chunk := mem_alloc(m.alloc, NODE_CHUNK_LEN * _hashmap_node_stride($K, $V), 16);
-        ty_offset(st.chunk_table, st.chunk_count).* = chunk;
+        type_offset(st.chunk_table, st.chunk_count).* = chunk;
         st.chunk_count += 1;
     }
     idx := st.next_fresh;
@@ -138,7 +138,7 @@ fn _hashmap_node_grow(m: *NodeMap($K, $V, $HASH), min_bucket_cap: i64): void {
         nst.next_fresh = old.next_fresh;
         buckets := _hashmap_node_buckets(old);
         for (i : it_range(old.bucket_cap)) {
-            b := ty_offset(buckets, i).*;
+            b := type_offset(buckets, i).*;
             if (b.dist_and_fp == 0) { continue; }
             e := _hashmap_node_at(nst, b.index.cast(i64));
             _hashmap_node_bucket_insert(nst, $HASH(e.key.^), b.index);
@@ -154,7 +154,7 @@ fn _hashmap_node_bucket_insert(st: *NodeMapStorage($K, $V), h: u64, node_idx: u3
     mask := st.bucket_cap - 1;
     idx := #shr(h, st.shift.cast(u64)).cast(i64);
     dif : u32 = 0x100 | (h & 0xFF).cast(u32);
-    while (dif <= ty_offset(buckets, idx).dist_and_fp) {
+    while (dif <= type_offset(buckets, idx).dist_and_fp) {
         dif += 0x100;
         idx = (idx + 1) & mask;
     }
@@ -168,7 +168,7 @@ fn _hashmap_node_place_and_shift(st: *NodeMapStorage($K, $V), idx: i64, b: MapBu
     buckets := _hashmap_node_buckets(st);
     mask := st.bucket_cap - 1;
     while (true) {
-        at := ty_offset(buckets, idx);
+        at := type_offset(buckets, idx);
         if (at.dist_and_fp == 0) {
             at.* = b;
             return;
@@ -198,7 +198,7 @@ fn get(m: *NodeMap($K, $V, $HASH), key: $K): *$V {
     idx := #shr(h, st.shift.cast(u64)).cast(i64);
     dif : u32 = 0x100 | (h & 0xFF).cast(u32);
     while (true) {
-        b := ty_offset(buckets, idx).*;
+        b := type_offset(buckets, idx).*;
         if (dif == b.dist_and_fp) {
             e := _hashmap_node_at(st, b.index.cast(i64));
             if (e.key == key) { return e.value.^; }
@@ -229,7 +229,7 @@ fn get_or_insert(m: *NodeMap($K, $V, $HASH), key: $K): MapSlot($V) {
     dif : u32 = 0x100 | (h & 0xFF).cast(u32);
     out: MapSlot($V) = #memory_garbage;
     while (true) {
-        b := ty_offset(buckets, idx).*;
+        b := type_offset(buckets, idx).*;
         if (dif == b.dist_and_fp) {
             e := _hashmap_node_at(st, b.index.cast(i64));
             if (e.key == key) {
@@ -274,7 +274,7 @@ fn remove(m: *NodeMap($K, $V, $HASH), key: $K): bool {
 
     node_idx: i64 = -1;
     while (true) {
-        b := ty_offset(buckets, idx).*;
+        b := type_offset(buckets, idx).*;
         if (dif == b.dist_and_fp) {
             e := _hashmap_node_at(st, b.index.cast(i64));
             if (e.key == key) {
@@ -290,14 +290,14 @@ fn remove(m: *NodeMap($K, $V, $HASH), key: $K): bool {
 
     // shift the bucket run back by one
     next := (idx + 1) & mask;
-    while (ty_offset(buckets, next).dist_and_fp >= 0x200) {
-        moved := ty_offset(buckets, next).*;
+    while (type_offset(buckets, next).dist_and_fp >= 0x200) {
+        moved := type_offset(buckets, next).*;
         moved.dist_and_fp -= 0x100;
-        ty_offset(buckets, idx).* = moved;
+        type_offset(buckets, idx).* = moved;
         idx = next;
         next = (next + 1) & mask;
     }
-    ty_offset(buckets, idx).* = zeroed(MapBucket);
+    type_offset(buckets, idx).* = zeroed(MapBucket);
 
     // the vacant node joins the free list, no other node moves
     _hashmap_node_at(st, node_idx).cast(*u32).* = st.free_head;
@@ -324,13 +324,13 @@ fn iterator_next(it: *NodeIterator($K, $V)): bool {
     buckets := _hashmap_node_buckets(it.st);
     it.at += 1;
     while (it.at < it.st.bucket_cap) {
-        if (ty_offset(buckets, it.at).dist_and_fp != 0) { return true; }
+        if (type_offset(buckets, it.at).dist_and_fp != 0) { return true; }
         it.at += 1;
     }
     return false;
 }
 
 fn iterator_current(it: *NodeIterator($K, $V)): *MapEntry($K, $V) {
-    b := ty_offset(_hashmap_node_buckets(it.st), it.at).*;
+    b := type_offset(_hashmap_node_buckets(it.st), it.at).*;
     return _hashmap_node_at(it.st, b.index.cast(i64));
 }

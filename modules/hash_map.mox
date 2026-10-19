@@ -154,7 +154,7 @@ fn _hashmap_place_and_shift(st: *HashMapStorage($K, $V), idx: i64, b: MapBucket)
     buckets := _hashmap_buckets(st);
     mask := st.bucket_cap - 1;
     while (true) {
-        at := ty_offset(buckets, idx);
+        at := type_offset(buckets, idx);
         if (at.dist_and_fp == 0) {
             at.* = b;
             return;
@@ -173,7 +173,7 @@ fn _hashmap_bucket_insert(st: *HashMapStorage($K, $V), h: u64, value_idx: u32): 
     mask := st.bucket_cap - 1;
     idx := #shr(h, st.shift.cast(u64)).cast(i64);
     dif : u32 = 0x100 | (h & 0xFF).cast(u32);
-    while (dif <= ty_offset(buckets, idx).dist_and_fp) {
+    while (dif <= type_offset(buckets, idx).dist_and_fp) {
         dif += 0x100;
         idx = (idx + 1) & mask;
     }
@@ -193,7 +193,7 @@ fn _hashmap_grow(m: *HashMap($K, $V, $HASH), min_bucket_cap: i64): void {
             nst.len = n;
             entries := _entries_ptr(nst);
             for (i : it_range(n)) {
-                e := ty_offset(entries, i);
+                e := type_offset(entries, i);
                 _hashmap_bucket_insert(nst, $HASH(e.key.^), i.cast(u32));
             }
         }
@@ -220,9 +220,9 @@ fn get(m: *HashMap($K, $V, $HASH), key: $K): *$V {
     idx := #shr(h, st.shift.cast(u64)).cast(i64);
     dif : u32 = 0x100 | (h & 0xFF).cast(u32);
     while (true) {
-        b := ty_offset(buckets, idx).*;
+        b := type_offset(buckets, idx).*;
         if (dif == b.dist_and_fp) {
-            e := ty_offset(entries, b.index.cast(i64));
+            e := type_offset(entries, b.index.cast(i64));
             if (e.key == key) { return e.value.^; }
         } else if (dif > b.dist_and_fp) {
             return nullptr($V); // the key would sit here if it existed
@@ -253,9 +253,9 @@ fn get_or_insert(m: *HashMap($K, $V, $HASH), key: $K): MapSlot($V) {
     dif : u32 = 0x100 | (h & 0xFF).cast(u32);
     out: MapSlot($V) = #memory_garbage;
     while (true) {
-        b := ty_offset(buckets, idx).*;
+        b := type_offset(buckets, idx).*;
         if (dif == b.dist_and_fp) {
-            e := ty_offset(entries, b.index.cast(i64));
+            e := type_offset(entries, b.index.cast(i64));
             if (e.key == key) {
                 out.value = e.value.^;
                 out.found = true;
@@ -263,7 +263,7 @@ fn get_or_insert(m: *HashMap($K, $V, $HASH), key: $K): MapSlot($V) {
             }
         } else if (dif > b.dist_and_fp) {
             // new key: append the entry and place the bucket here
-            e := ty_offset(entries, st.len);
+            e := type_offset(entries, st.len);
             e.key = key;
             e.value = zeroed($V);
             nb: MapBucket = #memory_garbage;
@@ -300,9 +300,9 @@ fn remove(m: *HashMap($K, $V, $HASH), key: $K): bool {
 
     value_idx: i64 = -1;
     while (true) {
-        b := ty_offset(buckets, idx).*;
+        b := type_offset(buckets, idx).*;
         if (dif == b.dist_and_fp) {
-            e := ty_offset(entries, b.index.cast(i64));
+            e := type_offset(entries, b.index.cast(i64));
             if (e.key == key) {
                 value_idx = b.index.cast(i64);
                 break;
@@ -316,26 +316,26 @@ fn remove(m: *HashMap($K, $V, $HASH), key: $K): bool {
 
     // shift the bucket run back by one, there are no tombstones
     next := (idx + 1) & mask;
-    while (ty_offset(buckets, next).dist_and_fp >= 0x200) { // dist >= 2 can move closer
-        moved := ty_offset(buckets, next).*;
+    while (type_offset(buckets, next).dist_and_fp >= 0x200) { // dist >= 2 can move closer
+        moved := type_offset(buckets, next).*;
         moved.dist_and_fp -= 0x100;
-        ty_offset(buckets, idx).* = moved;
+        type_offset(buckets, idx).* = moved;
         idx = next;
         next = (next + 1) & mask;
     }
-    ty_offset(buckets, idx).* = zeroed(MapBucket);
+    type_offset(buckets, idx).* = zeroed(MapBucket);
 
     // swap-remove from the dense array, then repoint the bucket of the moved entry
     last := st.len - 1;
     if (value_idx != last) {
-        ty_offset(entries, value_idx).* = ty_offset(entries, last).*;
-        moved_e := ty_offset(entries, value_idx);
+        type_offset(entries, value_idx).* = type_offset(entries, last).*;
+        moved_e := type_offset(entries, value_idx);
         mh := $HASH(moved_e.key.^);
         midx := #shr(mh, st.shift.cast(u64)).cast(i64);
-        while (ty_offset(buckets, midx).index.cast(i64) != last) {
+        while (type_offset(buckets, midx).index.cast(i64) != last) {
             midx = (midx + 1) & mask;
         }
-        ty_offset(buckets, midx).index = value_idx.cast(u32);
+        type_offset(buckets, midx).index = value_idx.cast(u32);
     }
     st.len -= 1;
     return true;

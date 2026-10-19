@@ -213,7 +213,7 @@ fn pointers() {
 
     // there are no pointer arithmetics, but you could use helpers from internal.mox
     var2 |> byte_offset(123); // var2 + 123 bytes to pointer
-    var2 |> ty_offset(123); // var2 + 123 * sizeof(MyStruct) bytes to pointer
+    var2 |> type_offset(123); // var2 + 123 * sizeof(MyStruct) bytes to pointer
 }
 
 fn control_flow() {

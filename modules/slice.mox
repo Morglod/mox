@@ -86,10 +86,10 @@ fn ends_with(s: []$T, x: []$T): bool {
 fn count_of(s: []$T, val: $T): i64 {
     n: i64 = 0;
     it := s.ptr;
-    end_ptr := ty_offset(s.ptr, s.len);
+    end_ptr := type_offset(s.ptr, s.len);
     while (it != end_ptr) {
         if (it.* == val) { n += 1; }
-        it = ty_offset(it, 1);
+        it = type_offset(it, 1);
     }
     return n;
 }
@@ -118,7 +118,7 @@ fn empty_slice($T: __type_ptr): []$T {
 fn slice(arr: *[$N]$T, from: i64, len: i64): []$T {
     from = min(from, arr.len);
     out: []$T = #memory_garbage;
-    out.ptr = ty_offset(arr.ptr, from);
+    out.ptr = type_offset(arr.ptr, from);
     out.len = min(len, arr.len - from);
     return out;
 }
@@ -133,7 +133,7 @@ fn slice(arr: *[$N]$T): []$T {
 fn slice(s: []$T, from: i64, len: i64 = -1): []$T {
     from = min(from, s.len);
     out: []$T = #memory_garbage;
-    out.ptr = ty_offset(s.ptr, from);
+    out.ptr = type_offset(s.ptr, from);
     if (len == -1) { len = s.len; }
     out.len = min(len, s.len - from);
     return out;
@@ -149,13 +149,13 @@ fn slice(ptr: *$T, len: i64 = 1): []$T {
 fn replace_inplace(s: []$T, from: $T, to: $T): i64 {
     n: i64 = 0;
     it := s.ptr;
-    end_ptr := ty_offset(s.ptr, s.len);
+    end_ptr := type_offset(s.ptr, s.len);
     while (it != end_ptr) {
         if (it.* == from) {
             it.* = to;
             n += 1;
         }
-        it = ty_offset(it, 1);
+        it = type_offset(it, 1);
     }
     return n;
 }
@@ -163,10 +163,10 @@ fn replace_inplace(s: []$T, from: $T, to: $T): i64 {
 // set every element to val
 fn fill(s: []$T, val: $T): void {
     it := s.ptr;
-    end_ptr := ty_offset(s.ptr, s.len);
+    end_ptr := type_offset(s.ptr, s.len);
     while (it != end_ptr) {
         it.* = val;
-        it = ty_offset(it, 1);
+        it = type_offset(it, 1);
     }
 }
 
@@ -223,7 +223,7 @@ fn sort_insertion(s: []$T, $less: *fn(a: *$T, b: *$T): bool): void {
     for (i : it_range(1i64, s.len)) {
         key := s[i];
         j := i - 1;
-        while ((j >= 0) && $less(key.^, ty_offset(s.ptr, j))) {
+        while ((j >= 0) && $less(key.^, type_offset(s.ptr, j))) {
             s[j + 1] = s[j];
             j -= 1;
         }
@@ -265,8 +265,8 @@ fn sort_quick(s: []$T, $less: *fn(a: *$T, b: *$T): bool): void {
         i: i64 = 0;
         j := s.len - 1;
         while (true) {
-            while ($less(ty_offset(s.ptr, i), pivot.^)) { i += 1; }
-            while ($less(pivot.^, ty_offset(s.ptr, j))) { j -= 1; }
+            while ($less(type_offset(s.ptr, i), pivot.^)) { i += 1; }
+            while ($less(pivot.^, type_offset(s.ptr, j))) { j -= 1; }
             if (i >= j) { break; }
             tmp := s[i];
             s[i] = s[j];
@@ -310,14 +310,14 @@ fn binary_search(s: []$T, val: $T, $less: *fn(a: *$T, b: *$T): bool): i64 {
     hi := s.len;
     while (lo < hi) {
         mid := lo + (hi - lo) / 2;
-        if ($less(ty_offset(s.ptr, mid), val.^)) {
+        if ($less(type_offset(s.ptr, mid), val.^)) {
             lo = mid + 1;
         } else {
             hi = mid;
         }
     }
     // s[lo] is the first element not less than val: equal if val is not less than it either
-    if ((lo < s.len) && (!$less(val.^, ty_offset(s.ptr, lo)))) { return lo; }
+    if ((lo < s.len) && (!$less(val.^, type_offset(s.ptr, lo)))) { return lo; }
     return -1;
 }
 

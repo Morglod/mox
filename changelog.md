@@ -1,3 +1,17 @@
+## 0.2.0
+
+A lot of things were fixed, tested and stabilized, so minor version is up.
+
+## Compiler
+
+non nullable pointers now could also be initialized and compared with `0`.
+
+bool type also could be initialized with `0` now (same as false).
+
+## Modules
+
+`ty_offset` renamed to `type_offset`
+
 ## 0.1.10
 
 ## Compiler

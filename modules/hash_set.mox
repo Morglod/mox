@@ -99,7 +99,7 @@ fn _hashset_place_and_shift(st: *HashSetStorage($K), idx: i64, b: MapBucket): vo
     buckets := _hashset_buckets(st);
     mask := st.bucket_cap - 1;
     while (true) {
-        at := ty_offset(buckets, idx);
+        at := type_offset(buckets, idx);
         if (at.dist_and_fp == 0) {
             at.* = b;
             return;
@@ -117,7 +117,7 @@ fn _hashset_bucket_insert(st: *HashSetStorage($K), h: u64, value_idx: u32): void
     mask := st.bucket_cap - 1;
     idx := #shr(h, st.shift.cast(u64)).cast(i64);
     dif : u32 = 0x100 | (h & 0xFF).cast(u32);
-    while (dif <= ty_offset(buckets, idx).dist_and_fp) {
+    while (dif <= type_offset(buckets, idx).dist_and_fp) {
         dif += 0x100;
         idx = (idx + 1) & mask;
     }
@@ -137,7 +137,7 @@ fn _hashset_grow(s: *HashSet($K, $HASH), min_bucket_cap: i64): void {
             nst.len = n;
             keys := _hashset_keys(nst);
             for (i : it_range(n)) {
-                _hashset_bucket_insert(nst, $HASH(ty_offset(keys, i)), i.cast(u32));
+                _hashset_bucket_insert(nst, $HASH(type_offset(keys, i)), i.cast(u32));
             }
         }
         mem_free(s.alloc, old.cast(*u8));
@@ -163,9 +163,9 @@ fn get(s: *HashSet($K, $HASH), key: $K): *$K {
     idx := #shr(h, st.shift.cast(u64)).cast(i64);
     dif : u32 = 0x100 | (h & 0xFF).cast(u32);
     while (true) {
-        b := ty_offset(buckets, idx).*;
+        b := type_offset(buckets, idx).*;
         if (dif == b.dist_and_fp) {
-            kp := ty_offset(keys, b.index.cast(i64));
+            kp := type_offset(keys, b.index.cast(i64));
             if (kp.* == key) { return kp; }
         } else if (dif > b.dist_and_fp) {
             return nullptr($K);
@@ -196,16 +196,16 @@ fn get_or_add(s: *HashSet($K, $HASH), key: $K): MapSlot($K) {
     dif : u32 = 0x100 | (h & 0xFF).cast(u32);
     out: MapSlot($K) = #memory_garbage;
     while (true) {
-        b := ty_offset(buckets, idx).*;
+        b := type_offset(buckets, idx).*;
         if (dif == b.dist_and_fp) {
-            kp := ty_offset(keys, b.index.cast(i64));
+            kp := type_offset(keys, b.index.cast(i64));
             if (kp.* == key) {
                 out.value = kp;
                 out.found = true;
                 return out;
             }
         } else if (dif > b.dist_and_fp) {
-            kp := ty_offset(keys, st.len);
+            kp := type_offset(keys, st.len);
             kp.* = key;
             nb: MapBucket = #memory_garbage;
             nb.dist_and_fp = dif;
@@ -239,9 +239,9 @@ fn remove(s: *HashSet($K, $HASH), key: $K): bool {
 
     value_idx: i64 = -1;
     while (true) {
-        b := ty_offset(buckets, idx).*;
+        b := type_offset(buckets, idx).*;
         if (dif == b.dist_and_fp) {
-            if (ty_offset(keys, b.index.cast(i64)).* == key) {
+            if (type_offset(keys, b.index.cast(i64)).* == key) {
                 value_idx = b.index.cast(i64);
                 break;
             }
@@ -253,24 +253,24 @@ fn remove(s: *HashSet($K, $HASH), key: $K): bool {
     }
 
     next := (idx + 1) & mask;
-    while (ty_offset(buckets, next).dist_and_fp >= 0x200) {
-        moved := ty_offset(buckets, next).*;
+    while (type_offset(buckets, next).dist_and_fp >= 0x200) {
+        moved := type_offset(buckets, next).*;
         moved.dist_and_fp -= 0x100;
-        ty_offset(buckets, idx).* = moved;
+        type_offset(buckets, idx).* = moved;
         idx = next;
         next = (next + 1) & mask;
     }
-    ty_offset(buckets, idx).* = zeroed(MapBucket);
+    type_offset(buckets, idx).* = zeroed(MapBucket);
 
     last := st.len - 1;
     if (value_idx != last) {
-        ty_offset(keys, value_idx).* = ty_offset(keys, last).*;
-        mh := $HASH(ty_offset(keys, value_idx));
+        type_offset(keys, value_idx).* = type_offset(keys, last).*;
+        mh := $HASH(type_offset(keys, value_idx));
         midx := #shr(mh, st.shift.cast(u64)).cast(i64);
-        while (ty_offset(buckets, midx).index.cast(i64) != last) {
+        while (type_offset(buckets, midx).index.cast(i64) != last) {
             midx = (midx + 1) & mask;
         }
-        ty_offset(buckets, midx).index = value_idx.cast(u32);
+        type_offset(buckets, midx).index = value_idx.cast(u32);
     }
     st.len -= 1;
     return true;
@@ -368,11 +368,11 @@ fn _hashset_swiss_grow(s: *SwissSet($K, $HASH), min_cap: i64): void {
         for (i : it_range(old.cap)) {
             c := byte_offset(ctrl, i).*;
             if ((c & 0x80) != 0) { continue; }
-            kp := ty_offset(keys, i);
+            kp := type_offset(keys, i);
             h := $HASH(kp);
             slot := _hashset_swiss_find_insert_slot(nst, h);
             byte_offset(nctrl, slot).* = _hashmap_swiss_h2(h);
-            ty_offset(nkeys, slot).* = kp.*;
+            type_offset(nkeys, slot).* = kp.*;
         }
         nst.len = old.len;
         nst.growth_left = (nst.cap * 7) / 8 - old.len;
@@ -403,7 +403,7 @@ fn get(s: *SwissSet($K, $HASH), key: $K): *$K {
         mm := simd_byte_eq_mask16(cp, h2);
         while (mm != 0) {
             slot := base + #bit_count_trailing_zeroes(mm).cast(i64);
-            kp := ty_offset(keys, slot);
+            kp := type_offset(keys, slot);
             if (kp.* == key) { return kp; }
             mm = mm & (mm - 1);
         }
@@ -445,7 +445,7 @@ fn get_or_add(s: *SwissSet($K, $HASH), key: $K): MapSlot($K) {
         st.growth_left -= 1;
     }
     byte_offset(_hashset_swiss_ctrl(st), slot).* = _hashmap_swiss_h2(h);
-    kp := ty_offset(_hashset_swiss_keys(st), slot);
+    kp := type_offset(_hashset_swiss_keys(st), slot);
     kp.* = key;
     st.len += 1;
     out.value = kp;
@@ -473,7 +473,7 @@ fn remove(s: *SwissSet($K, $HASH), key: $K): bool {
         mm := simd_byte_eq_mask16(cp, h2);
         while (mm != 0) {
             slot := base + #bit_count_trailing_zeroes(mm).cast(i64);
-            if (ty_offset(keys, slot).* == key) {
+            if (type_offset(keys, slot).* == key) {
                 own_base := (slot / SWISS_GROUP) * SWISS_GROUP;
                 if (simd_byte_eq_mask16(byte_offset(ctrl, own_base), SWISS_EMPTY) != 0) {
                     byte_offset(ctrl, slot).* = SWISS_EMPTY;
@@ -527,7 +527,7 @@ fn iterator_next(it: *SwissSetIterator($K)): bool {
 }
 
 fn iterator_current(it: *SwissSetIterator($K)): *$K {
-    return ty_offset(it.keys, it.at);
+    return type_offset(it.keys, it.at);
 }
 
 // ---- NodeSet: chunked pool, stable key pointers ----
@@ -565,7 +565,7 @@ fn _hashset_node_stride($K: __type_ptr): i64 {
 }
 
 fn _hashset_node_at(st: *NodeSetStorage($K), idx: i64): *$K {
-    chunk := ty_offset(st.chunk_table, #shr(idx, 6i64)).*;
+    chunk := type_offset(st.chunk_table, #shr(idx, 6i64)).*;
     p := chunk |> byte_offset((idx & 63) * _hashset_node_stride($K));
     return p.cast(*$K);
 }
@@ -585,7 +585,7 @@ fn destroy(s: *NodeSet($K, $HASH)): void {
     st := s.storage;
     if (st == 0) { return; }
     for (i : it_range(st.chunk_count)) {
-        mem_free(s.alloc, ty_offset(st.chunk_table, i).*);
+        mem_free(s.alloc, type_offset(st.chunk_table, i).*);
     }
     if (st.chunk_table != 0) { mem_free(s.alloc, st.chunk_table.cast(*u8)); }
     mem_free(s.alloc, st.cast(*u8));
@@ -630,7 +630,7 @@ fn _hashset_node_alloc_index(s: *NodeSet($K, $HASH)): i64 {
             st.chunk_table_cap = ncap;
         }
         chunk := mem_alloc(s.alloc, 64 * _hashset_node_stride($K), 16);
-        ty_offset(st.chunk_table, st.chunk_count).* = chunk;
+        type_offset(st.chunk_table, st.chunk_count).* = chunk;
         st.chunk_count += 1;
     }
     idx := st.next_fresh;
@@ -642,7 +642,7 @@ fn _hashset_node_place_and_shift(st: *NodeSetStorage($K), idx: i64, b: MapBucket
     buckets := _hashset_node_buckets(st);
     mask := st.bucket_cap - 1;
     while (true) {
-        at := ty_offset(buckets, idx);
+        at := type_offset(buckets, idx);
         if (at.dist_and_fp == 0) {
             at.* = b;
             return;
@@ -660,7 +660,7 @@ fn _hashset_node_bucket_insert(st: *NodeSetStorage($K), h: u64, node_idx: u32): 
     mask := st.bucket_cap - 1;
     idx := #shr(h, st.shift.cast(u64)).cast(i64);
     dif : u32 = 0x100 | (h & 0xFF).cast(u32);
-    while (dif <= ty_offset(buckets, idx).dist_and_fp) {
+    while (dif <= type_offset(buckets, idx).dist_and_fp) {
         dif += 0x100;
         idx = (idx + 1) & mask;
     }
@@ -682,7 +682,7 @@ fn _hashset_node_grow(s: *NodeSet($K, $HASH), min_bucket_cap: i64): void {
         nst.next_fresh = old.next_fresh;
         buckets := _hashset_node_buckets(old);
         for (i : it_range(old.bucket_cap)) {
-            b := ty_offset(buckets, i).*;
+            b := type_offset(buckets, i).*;
             if (b.dist_and_fp == 0) { continue; }
             kp := _hashset_node_at(nst, b.index.cast(i64));
             _hashset_node_bucket_insert(nst, $HASH(kp), b.index);
@@ -709,7 +709,7 @@ fn get(s: *NodeSet($K, $HASH), key: $K): *$K {
     idx := #shr(h, st.shift.cast(u64)).cast(i64);
     dif : u32 = 0x100 | (h & 0xFF).cast(u32);
     while (true) {
-        b := ty_offset(buckets, idx).*;
+        b := type_offset(buckets, idx).*;
         if (dif == b.dist_and_fp) {
             kp := _hashset_node_at(st, b.index.cast(i64));
             if (kp.* == key) { return kp; }
@@ -740,7 +740,7 @@ fn get_or_add(s: *NodeSet($K, $HASH), key: $K): MapSlot($K) {
     dif : u32 = 0x100 | (h & 0xFF).cast(u32);
     out: MapSlot($K) = #memory_garbage;
     while (true) {
-        b := ty_offset(buckets, idx).*;
+        b := type_offset(buckets, idx).*;
         if (dif == b.dist_and_fp) {
             kp := _hashset_node_at(st, b.index.cast(i64));
             if (kp.* == key) {
@@ -782,7 +782,7 @@ fn remove(s: *NodeSet($K, $HASH), key: $K): bool {
 
     node_idx: i64 = -1;
     while (true) {
-        b := ty_offset(buckets, idx).*;
+        b := type_offset(buckets, idx).*;
         if (dif == b.dist_and_fp) {
             if (_hashset_node_at(st, b.index.cast(i64)).* == key) {
                 node_idx = b.index.cast(i64);
@@ -796,14 +796,14 @@ fn remove(s: *NodeSet($K, $HASH), key: $K): bool {
     }
 
     next := (idx + 1) & mask;
-    while (ty_offset(buckets, next).dist_and_fp >= 0x200) {
-        moved := ty_offset(buckets, next).*;
+    while (type_offset(buckets, next).dist_and_fp >= 0x200) {
+        moved := type_offset(buckets, next).*;
         moved.dist_and_fp -= 0x100;
-        ty_offset(buckets, idx).* = moved;
+        type_offset(buckets, idx).* = moved;
         idx = next;
         next = (next + 1) & mask;
     }
-    ty_offset(buckets, idx).* = zeroed(MapBucket);
+    type_offset(buckets, idx).* = zeroed(MapBucket);
 
     _hashset_node_at(st, node_idx).cast(*u32).* = st.free_head;
     st.free_head = node_idx.cast(u32);
@@ -828,13 +828,13 @@ fn iterator_next(it: *NodeSetIterator($K)): bool {
     buckets := _hashset_node_buckets(it.st);
     it.at += 1;
     while (it.at < it.st.bucket_cap) {
-        if (ty_offset(buckets, it.at).dist_and_fp != 0) { return true; }
+        if (type_offset(buckets, it.at).dist_and_fp != 0) { return true; }
         it.at += 1;
     }
     return false;
 }
 
 fn iterator_current(it: *NodeSetIterator($K)): *$K {
-    b := ty_offset(_hashset_node_buckets(it.st), it.at).*;
+    b := type_offset(_hashset_node_buckets(it.st), it.at).*;
     return _hashset_node_at(it.st, b.index.cast(i64));
 }

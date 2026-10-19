@@ -323,7 +323,7 @@ fn _parse_dec(s: []u8, neg: bool, out: *f64): bool {
             // SWAR: swallow 8-digit runs while the mantissa has room
             while (nd_mant <= 11) {
                 if (i + 8 > n) { break; }
-                v8 := ty_offset(s.ptr, i).cast(*u64).*;
+                v8 := type_offset(s.ptr, i).cast(*u64).*;
                 if (_swar_is_8_digits(v8) == false) { break; }
                 w = w * 100000000 + _swar_parse_8_digits(v8);
                 nd += 8;

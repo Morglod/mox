@@ -43,14 +43,14 @@ fn _parse_u64_dec(s: []u8, out: *u64): bool {
         s = slice(s, 8);
     }
     it := s.ptr;
-    end_ptr := ty_offset(s.ptr, s.len);
+    end_ptr := type_offset(s.ptr, s.len);
     while (it != end_ptr) {
         d := #wrap_sub(it.*.cast(u64), 48);
         if (d > 9) { return false; }
         if (res > _DEC_CUTOFF) { return false; }
         if (res == _DEC_CUTOFF) { if (d > _DEC_CUTLIM) { return false; } }
         res = res * 10 + d;
-        it = ty_offset(it, 1);
+        it = type_offset(it, 1);
     }
     out.* = res;
     return true;
@@ -60,7 +60,7 @@ fn _parse_u64_hex(s: []u8, out: *u64): bool {
     if (s.len == 0) { return false; }
     res : u64 = 0;
     it := s.ptr;
-    end_ptr := ty_offset(s.ptr, s.len);
+    end_ptr := type_offset(s.ptr, s.len);
     while (it != end_ptr) {
         c := it.*.cast(u64);
         d := #wrap_sub(c, 48);              // '0'..'9' -> 0..9
@@ -71,7 +71,7 @@ fn _parse_u64_hex(s: []u8, out: *u64): bool {
         }
         if (#shr(res, 60) != 0) { return false; }
         res = #shl(res, 4) | d;
-        it = ty_offset(it, 1);
+        it = type_offset(it, 1);
     }
     out.* = res;
     return true;
@@ -82,13 +82,13 @@ fn _parse_u64_pow2(s: []u8, out: *u64, bits: u64, base: u64): bool {
     if (s.len == 0) { return false; }
     res : u64 = 0;
     it := s.ptr;
-    end_ptr := ty_offset(s.ptr, s.len);
+    end_ptr := type_offset(s.ptr, s.len);
     while (it != end_ptr) {
         d := #wrap_sub(it.*.cast(u64), 48);
         if (d >= base) { return false; }
         if (#shr(res, 64 - bits) != 0) { return false; }
         res = #shl(res, bits) | d;
-        it = ty_offset(it, 1);
+        it = type_offset(it, 1);
     }
     out.* = res;
     return true;
