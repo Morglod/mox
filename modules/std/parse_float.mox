@@ -13,11 +13,11 @@
 // Base-10 digit runs use the 8-digits-per-u64 SWAR helpers
 
 import "internal.mox";
-import "slice.mox";
-import "math.mox";
-import "panic.mox";
-import "parse_int.mox";
-import "parse_float_table.mox";
+import "std/slice.mox";
+import "std/math.mox";
+import "std/panic.mox";
+import "std/parse_int.mox";
+import "std/parse_float_table.mox";
 
 const _F64_POW10: [23]f64 = .{
     1.0; 10.0; 100.0; 1000.0; 10000.0; 100000.0; 1000000.0; 10000000.0;
@@ -353,12 +353,14 @@ fn _parse_dec(s: []u8, neg: bool, out: *f64): bool {
         else if (s[i] == 45) { esign = -1; i += 1; }
         if (i >= n) { return false; }
         if (_is_dig(s[i]) == false) { return false; }
+        // the digits move dp by at most n, so past n + 1000 the result is 0 or INF whatever the exponent is
+        e_limit := n + 1000;
         e_acc: i64 = 0;
         while (i < n) {
             c2 := s[i];
             d2 := #wrap_sub(c2.cast(u64), 48);
             if (d2 <= 9) {
-                if (e_acc < 100000) { e_acc = e_acc * 10 + d2.cast(i64); }
+                if (e_acc < e_limit) { e_acc = e_acc * 10 + d2.cast(i64); }
                 i += 1;
                 continue;
             }
@@ -493,12 +495,14 @@ fn _parse_hex(s: []u8, neg: bool, out: *f64): bool {
     else if (s[i] == 45) { esign = -1; i += 1; }
     if (i >= n) { return false; }
     if (_is_dig(s[i]) == false) { return false; }
+    // the digits move e2 by at most 4 * n, so past 4 * n + 2000 the result is 0 or INF whatever the exponent is
+    e_limit := 4 * n + 2000;
     e_acc: i64 = 0;
     while (i < n) {
         c2 := s[i];
         d2 := #wrap_sub(c2.cast(u64), 48);
         if (d2 <= 9) {
-            if (e_acc < 100000) { e_acc = e_acc * 10 + d2.cast(i64); }
+            if (e_acc < e_limit) { e_acc = e_acc * 10 + d2.cast(i64); }
             i += 1;
             continue;
         }

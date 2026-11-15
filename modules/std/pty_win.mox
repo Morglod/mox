@@ -1,38 +1,59 @@
-import "./internal.mox";
+import "internal.mox";
 import "./context.mox";
+import "./alloc.mox";
 import "./os_win.mox";
+import "./process_tree_win.mox";
+import "./c_interop.mox";
+import "./utf16.mox";
 
 // CreatePseudoConsole wants a COORD packed in a u32: cols in the low 16 bits, rows in the high 16
 fn _pty_pack_size(cols: u32, rows: u32): u32 { return (cols & 65535) | #shl(rows, 16); }
 
 struct Pty {
     hpc: u64;        // HPCON (pseudo-console)
-    in_write: u64;   // parent writes -> child stdin
+    in_io: *_WinAsyncIo; // our async end of the input pipe (parent writes -> child stdin), on alloc
+    in_len: i64;     // bytes of in_io.buf in flight
+    alloc: *Alloc;
     out_read: u64;   // parent reads  <- child stdout
     hproc: u64;      // child process
     hthread: u64;
     cols: u32;
     rows: u32;
     alive: bool;
+    exit: OsWaitResult; // .running until pty_alive or pty_close sees the exit
 };
 
-// close whatever a failed pty_spawn already created; zero handles are skipped
-fn _pty_spawn_cleanup(in_read: u64, in_write: u64, out_read: u64, out_write: u64, hpc: u64): void {
-    if (hpc != 0)      { ClosePseudoConsole(hpc.cast(*u8)); }
-    if (in_read != 0)  { CloseHandle(in_read.cast(*u8)); }
-    if (in_write != 0) { CloseHandle(in_write.cast(*u8)); }
-    if (out_read != 0) { CloseHandle(out_read.cast(*u8)); }
-    if (out_write != 0){ CloseHandle(out_write.cast(*u8)); }
+// cancels the write in flight, closes the input pipe and frees in_io
+fn _pty_free_in_io(pty: *Pty): void {
+    io := pty.in_io;
+    if (io == 0) { return; }
+    _win_async_io_close(io);
+    if (io.buf.len > 0) { mem_free(pty.alloc, io.buf); }
+    mem_free(pty.alloc, io);
+    pty.in_io = nullptr(_WinAsyncIo);
 }
 
-// spawn `cmd` (CreateProcessA needs it writable and NUL-terminated) in a cols x rows pty
-fn pty_spawn(cmd: *u8, cols: i64, rows: i64, out: *Pty): bool {
+// close whatever a failed pty_spawn already created; zero handles are skipped
+fn _pty_spawn_cleanup(pty: *Pty, in_read: u64, out_read: u64, out_write: u64, hpc: u64): void {
+    if (hpc != 0)      { ClosePseudoConsole(hpc.cast(*u8)); }
+    if (in_read != 0)  { CloseHandle(in_read.cast(*u8)); }
+    if (out_read != 0) { CloseHandle(out_read.cast(*u8)); }
+    if (out_write != 0){ CloseHandle(out_write.cast(*u8)); }
+    _pty_free_in_io(pty);
+}
+
+// spawn `cmd` (NULL-terminated UTF-8) in a cols x rows pty. alloc holds the input buffer until pty_close.
+fn pty_spawn(cmd: *u8, cols: i64, rows: i64, out: *Pty, alloc: *Alloc = get_context_alloc()): bool {
     out.cols = max(cols, 1).cast(u32);
     out.rows = max(rows, 1).cast(u32);
     out.alive = false;
+    out.exit.status = .failed; // a pty that never started
+    out.exit.exit_code = 0;
     // zero the handles first, pty_close closes whatever is non-zero
     out.hpc = 0;
-    out.in_write = 0;
+    out.in_io = nullptr(_WinAsyncIo);
+    out.in_len = 0;
+    out.alloc = alloc;
     out.out_read = 0;
     out.hproc = 0;
     out.hthread = 0;
@@ -42,15 +63,24 @@ fn pty_spawn(cmd: *u8, cols: i64, rows: i64, out: *Pty): bool {
     out_read: u64 = 0;
     out_write: u64 = 0;
     hpc: u64 = 0;
-    if (CreatePipe(in_read.^, in_write.^, nullptr(u8), 0) == 0) { return false; }
+    // input is async so pty_write never waits for conhost; output stays a plain pipe, pty_read peeks it
+    t := scratch_begin(alloc);
+    piped := _win_async_pipe(true, t.alloc, in_read.^, in_write.^);
+    scratch_end(t);
+    if (!piped) { return false; }
+    out.in_io = mem_alloc(alloc, _WinAsyncIo);
+    if (!_win_async_io_init(out.in_io, in_write, _WIN_ASYNC_PIPE_BUF.cast(i64), alloc)) {
+        _pty_spawn_cleanup(out, in_read, 0, 0, 0);
+        return false;
+    }
     if (CreatePipe(out_read.^, out_write.^, nullptr(u8), 0) == 0) {
-        _pty_spawn_cleanup(in_read, in_write, 0, 0, 0);
+        _pty_spawn_cleanup(out, in_read, 0, 0, 0);
         return false;
     }
 
     hr := CreatePseudoConsole(_pty_pack_size(out.cols, out.rows), in_read.cast(*u8), out_write.cast(*u8), 0, hpc.^);
     if (hr != 0) {
-        _pty_spawn_cleanup(in_read, in_write, out_read, out_write, 0);
+        _pty_spawn_cleanup(out, in_read, out_read, out_write, 0);
         return false;
     }
 
@@ -59,25 +89,28 @@ fn pty_spawn(cmd: *u8, cols: i64, rows: i64, out: *Pty): bool {
     InitializeProcThreadAttributeList(nullptr(u8), 1, 0, attr_size.^); // first call always fails, it only fills attr_size
     attr := #temp_buffer(attr_size.cast(i64)).ptr;
     if (InitializeProcThreadAttributeList(attr, 1, 0, attr_size.^) == 0) {
-        _pty_spawn_cleanup(in_read, in_write, out_read, out_write, hpc);
+        _pty_spawn_cleanup(out, in_read, out_read, out_write, hpc);
         return false;
     }
     if (UpdateProcThreadAttribute(attr, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, hpc.cast(*u8), 8, nullptr(u8), nullptr(u64)) == 0) {
         DeleteProcThreadAttributeList(attr);
-        _pty_spawn_cleanup(in_read, in_write, out_read, out_write, hpc);
+        _pty_spawn_cleanup(out, in_read, out_read, out_write, hpc);
         return false;
     }
 
-    siex: STARTUPINFOEXA = 0;
-    siex.StartupInfo.cb = sizeof_type(STARTUPINFOEXA).cast(u32);
+    siex: STARTUPINFOEXW = 0;
+    siex.StartupInfo.cb = sizeof_type(STARTUPINFOEXW).cast(u32);
     siex.lpAttributeList = attr;
+    siex.StartupInfo.dwFlags = STARTF_USESTDHANDLES; // null std handles: otherwise a child gets our redirected stdout/stderr instead of the pseudo-console
 
     pi: PROCESS_INFORMATION = 0;
 
-    ok := CreateProcessA(nullptr(u8), cmd, nullptr(u8), nullptr(u8), 0, EXTENDED_STARTUPINFO_PRESENT, nullptr(u8), nullptr(u8), siex.^, pi.^);
+    // CreateProcessW wants a writable command line, the temp copy is one
+    cmd_w := #temp_utf8_to_utf16(slice(cmd, c_strlen(cmd))).ptr;
+    ok := CreateProcessW(nullptr(u16), cmd_w, nullptr(u8), nullptr(u8), 0, EXTENDED_STARTUPINFO_PRESENT, nullptr(u8), nullptr(u16), siex.^, pi.^);
     if (ok == 0) {
         DeleteProcThreadAttributeList(attr);
-        _pty_spawn_cleanup(in_read, in_write, out_read, out_write, hpc);
+        _pty_spawn_cleanup(out, in_read, out_read, out_write, hpc);
         return false;
     }
 
@@ -89,11 +122,11 @@ fn pty_spawn(cmd: *u8, cols: i64, rows: i64, out: *Pty): bool {
     CloseHandle(out_write.cast(*u8));
 
     out.hpc = hpc;
-    out.in_write = in_write;
     out.out_read = out_read;
     out.hproc = pi.hProcess.cast(u64);
     out.hthread = pi.hThread.cast(u64);
     out.alive = true;
+    out.exit.status = .running;
     return true;
 }
 
@@ -108,24 +141,69 @@ fn pty_read(pty: *Pty, buf: *u8, cap: i64): i64 {
     return got.cast(i64);
 }
 
-fn pty_write(pty: *Pty, buf: *u8, n: i64): void {
-    if (n == 0) { return; }
-    wr: u32 = 0;
-    WriteFile(pty.in_write.cast(*u8), buf, n.cast(u32), wr.^, nullptr(u8)); // input is tiny (keystrokes/paste), no partial-write loop
+// true when the write in flight is done (or there is none); a short write is sent on, a failed one closes the input
+fn _pty_in_idle(pty: *Pty): bool {
+    io := pty.in_io;
+    if (!io.pending) { return true; }
+    if (WaitForSingleObject(io.ev.cast(*u8), 0) != WAIT_OBJECT_0) { return false; }
+    got := _win_async_io_finish(io);
+    if (got < 0) {
+        _win_async_io_close(io);
+        return true;
+    }
+    if (got < pty.in_len) {
+        pty.in_len -= got;
+        mem_copy(io.buf.ptr, byte_offset(io.buf.ptr, got), pty.in_len);
+        _win_async_write_start(io, slice(io.buf.ptr, pty.in_len), 0);
+        return false;
+    }
+    pty.in_len = 0;
+    return true;
+}
+
+// takes up to 64 KB of buf without waiting: returns the bytes taken (0 = the previous write is still in flight, try later), -1 on error.
+// The bytes are copied, buf can be reused at once; a write that fails later gives -1 on the next call.
+fn pty_write(pty: *Pty, buf: *u8, n: i64): i64 {
+    if (n <= 0) { return 0; }
+    io := pty.in_io;
+    if ((io == 0) || (io.h == 0)) { return -1; }
+    if (!_pty_in_idle(pty)) { return 0; }
+    if (io.h == 0) { return -1; }
+    k := min(n, io.buf.len);
+    mem_copy(io.buf.ptr, buf, k);
+    pty.in_len = k;
+    _win_async_write_start(io, slice(io.buf.ptr, k), 0);
+    if (io.h == 0) { return -1; }
+    return k;
+}
+
+// writes all of buf, waiting while conhost takes it (keystrokes: at once; about 2 s per MB of paste)
+fn pty_write_all(pty: *Pty, buf: *u8, n: i64): bool {
+    off: i64 = 0;
+    while (off < n) {
+        w := pty_write(pty, byte_offset(buf, off), n - off);
+        if (w < 0) { return false; }
+        if (w == 0) {
+            WaitForSingleObject(pty.in_io.ev.cast(*u8), INFINITE);
+            continue;
+        }
+        off += w;
+    }
+    return true;
 }
 
 fn pty_alive(pty: *Pty): bool {
     if (!pty.alive) { return false; }
-    code: u32 = 0;
-    if (GetExitCodeProcess(pty.hproc.cast(*u8), code.^) == 0) { return false; }
-    return code == STILL_ACTIVE;
+    wr := os_wait_process_exit(pty.hproc, 0);
+    if (wr.status == .running) { return true; }
+    pty.exit = wr;
+    pty.alive = false;
+    return false;
 }
 
-// only meaningful after pty_alive() returned false
-fn pty_exit_code(pty: *Pty): u32 {
-    code: u32 = 0;
-    GetExitCodeProcess(pty.hproc.cast(*u8), code.^);
-    return code;
+// .running while the child runs
+fn pty_exit_code(pty: *Pty): OsWaitResult {
+    return pty.exit;
 }
 
 fn pty_resize(pty: *Pty, cols: i64, rows: i64): void {
@@ -138,11 +216,29 @@ fn pty_resize(pty: *Pty, cols: i64, rows: i64): void {
     ResizePseudoConsole(pty.hpc.cast(*u8), _pty_pack_size(cols_, rows_));
 }
 
+// reads and drops the pty output until conhost closes its end
+fn _pty_drain(out_read: *u8): *u8 {
+    buf: [4096]u8 = #memory_garbage;
+    got: u32 = 0;
+    while (ReadFile(out_read, buf.ptr, 4096, got.^, nullptr(u8)) != 0) {}
+    return nullptr(u8);
+}
+
 // releases everything still open, whether the child is running, exited, or already closed (idempotent)
 fn pty_close(pty: *Pty): void {
-    if (pty.alive) { TerminateProcess(pty.hproc.cast(*u8), 0); } // no-op error if it already exited
-    if (pty.hpc != 0)      { ClosePseudoConsole(pty.hpc.cast(*u8)); pty.hpc = 0; }
-    if (pty.in_write != 0) { CloseHandle(pty.in_write.cast(*u8)); pty.in_write = 0; }
+    if (pty.hproc != 0) {
+        os_kill_tree(os_process_pid(pty.hproc)); // the shell's children too, also when the shell itself already exited: our handle keeps its pid theirs
+        if (pty.alive) { pty.exit = os_wait_process_exit(pty.hproc, -1); }
+    }
+    _pty_free_in_io(pty);
+    if (pty.hpc != 0) {
+        // ClosePseudoConsole waits for conhost, which can be stuck writing to a full output pipe: keep reading it meanwhile
+        drain: u64 = 0;
+        draining := (pty.out_read != 0) && os_thread_create(_pty_drain.^, pty.out_read.cast(*u8), drain.^);
+        ClosePseudoConsole(pty.hpc.cast(*u8));
+        pty.hpc = 0;
+        if (draining) { os_thread_join(drain); }
+    }
     if (pty.out_read != 0) { CloseHandle(pty.out_read.cast(*u8)); pty.out_read = 0; }
     if (pty.hproc != 0)    { CloseHandle(pty.hproc.cast(*u8)); pty.hproc = 0; }
     if (pty.hthread != 0)  { CloseHandle(pty.hthread.cast(*u8)); pty.hthread = 0; }

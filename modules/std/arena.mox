@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 import "./alloc.mox";
 import "./panic.mox";
 import "./os.mox";
@@ -10,11 +10,13 @@ enum ArenaFlags : u8 {
 };
 
 struct Arena {
+    interface: Alloc;
     pos: i64;
     commit_pos: i64;
     commit_size: i64;
     reserve_size: i64;
     flags: ArenaFlags;
+    last_pos: i64;
     // debug_name: *u8;
     // prev: *Arena;
     // next: *Arena;
@@ -29,17 +31,21 @@ fn arena_ptr_at(arena: *Arena, pos: i64): *u8 {
 
 fn arena_create_fixed(buf: []u8): *Arena {
     base_pos := align_up(sizeof_type(Arena), ARENA_ALIGN);
+    skip := (align_up(buf.ptr.cast(u64), ARENA_ALIGN.cast(u64)) - buf.ptr.cast(u64)).cast(i64);
+    size := buf.len - skip;
 
-    if (base_pos >= buf.len) {
+    if (base_pos >= size) {
         panic("not enough buffer size, even to handle Arena type itself");
     }
 
-    arena := buf.ptr.cast(*Arena);
+    arena := byte_offset(buf.ptr, skip).cast(*Arena);
     arena.pos = base_pos;
-    arena.commit_pos = buf.len;
-    arena.commit_size = buf.len;
-    arena.reserve_size = buf.len;
+    arena.commit_pos = size;
+    arena.commit_size = size;
+    arena.reserve_size = size;
     arena.flags = .IS_FIXED;
+    arena.last_pos = 0;
+    arena.interface.func = _arena_alloc_fn.^;
 
     return arena;
 }
@@ -51,7 +57,12 @@ fn arena_create_virtual(reserve_size: i64, commit_size: i64): *Arena {
     commit_size = align_up(commit_size, os_page_size);
 
     reserved_mem := os_mem_virtual_reserve(reserve_size);
-    os_mem_virtual_commit(reserved_mem, commit_size);
+    if (reserved_mem == 0) {
+        panic("arena reserve of {} bytes failed", .{ reserve_size; });
+    }
+    if (!os_mem_virtual_commit(reserved_mem, commit_size)) {
+        panic("arena commit of {} bytes failed", .{ commit_size; });
+    }
 
     arena: *Arena = reserved_mem.cast(*Arena);
 
@@ -59,6 +70,8 @@ fn arena_create_virtual(reserve_size: i64, commit_size: i64): *Arena {
     arena.commit_size = commit_size;
     arena.reserve_size = reserve_size;
     arena.flags = .IS_VIRTUAL;
+    arena.last_pos = 0;
+    arena.interface.func = _arena_alloc_fn.^;
 
     arena.pos = align_up(sizeof_type(Arena), ARENA_ALIGN);
 
@@ -71,10 +84,7 @@ fn arena_destroy(arena: *Arena): void {
     }
 }
 
-fn arena_push(arena: *Arena, size: i64, align: u32 = 1): []u8 {
-    start_pos := align_up(arena.pos, align .cast(i64));
-    new_pos := align_up(start_pos + size, ARENA_ALIGN);
-
+fn _arena_set_pos(arena: *Arena, new_pos: i64, size: i64): void {
     if (new_pos > arena.reserve_size) {
         panic("arena exceeds reserved size. new_pos={} requested_size={} reserve_size={}", .{ new_pos; size; arena.reserve_size; });
     }
@@ -82,18 +92,61 @@ fn arena_push(arena: *Arena, size: i64, align: u32 = 1): []u8 {
     if (new_pos > arena.commit_pos) {
         new_commit_pos := align_up(new_pos, arena.commit_size);
         new_commit_pos = min(new_commit_pos, arena.reserve_size);
-        os_mem_virtual_commit(arena |> arena_ptr_at(arena.commit_pos), new_commit_pos - arena.commit_pos);
+        if (!os_mem_virtual_commit(arena |> arena_ptr_at(arena.commit_pos), new_commit_pos - arena.commit_pos)) {
+            panic("arena commit of {} bytes failed", .{ new_commit_pos - arena.commit_pos; });
+        }
         arena.commit_pos = new_commit_pos;
     }
 
     arena.pos = new_pos;
-    ptr: *u8 = arena_ptr_at(arena, start_pos);
-    
+}
+
+fn arena_push(arena: *Arena, size: i64, align: u32 = 1): []u8 {
+    // aligns the address, not the offset: a fixed arena's base is only ARENA_ALIGN-aligned
+    base := arena.cast(u64);
+    start_pos := (align_up(base + arena.pos.cast(u64), align.cast(u64)) - base).cast(i64);
+    _arena_set_pos(arena, align_up(start_pos + size, ARENA_ALIGN), size);
+    arena.last_pos = start_pos;
+
     s : []u8 = #memory_garbage;
-    s.ptr = ptr;
+    s.ptr = arena_ptr_at(arena, start_pos);
     s.len = size;
 
     return s;
+}
+
+// The newest block is resized in place.
+// Any other block is copied to a new one; its old size is unknown,
+// so everything from it up to the top is copied (capped by new_size),
+// which is always readable arena memory.
+fn arena_realloc(arena: *Arena, old_mem: *u8, new_size: i64, align: u32 = 1): []u8 {
+    if (old_mem == nullptr(u8)) {
+        return arena_push(arena, new_size, align);
+    }
+
+    old_pos := (old_mem.cast(u64) - arena.cast(u64)).cast(i64);
+    if (old_pos == arena.last_pos && old_mem.cast(u64) % align.cast(u64) == 0) {
+        _arena_set_pos(arena, align_up(old_pos + new_size, ARENA_ALIGN), new_size);
+        s : []u8 = #memory_garbage;
+        s.ptr = old_mem;
+        s.len = new_size;
+        return s;
+    }
+
+    copy_size := max(min(new_size, arena.pos - old_pos), 0i64);
+    out := arena_push(arena, new_size, align);
+    mem_copy(out.ptr, old_mem, copy_size);
+    return out;
+}
+
+// only the newest block gives its memory back, freeing any other block does nothing
+fn arena_free(arena: *Arena, mem: *u8): void {
+    if (mem == nullptr(u8)) { return; }
+    pos := (mem.cast(u64) - arena.cast(u64)).cast(i64);
+    if (pos == arena.last_pos) {
+        arena.pos = pos;
+        arena.last_pos = 0;
+    }
 }
 
 fn arena_push(arena: *Arena, $T: __type_ptr, align: u32 = 0): *$T {
@@ -144,6 +197,7 @@ fn arena_push_str_copy_c(arena: *Arena, s: []u8): []u8 {
 
 fn arena_pop_to(arena: *Arena, new_pos: i64, size: i64): void {
     arena.pos = new_pos;
+    arena.last_pos = 0;
     #if (ARENA_ZERO_ON_POP) {
         mem_zero(arena_ptr_at(arena, new_pos), size);
     }
@@ -166,30 +220,34 @@ fn arena_current_pos(arena: *Arena): i64 {
 
 fn arena_clear(arena: *Arena): void {
     arena.pos = sizeof_type(Arena) |> align_up(ARENA_ALIGN);
+    arena.last_pos = 0;
 }
 
-fn _arena_alloc_fn(allocator_data: *u8, mode: AllocatorFnMode, size: i64, align: u32, old_mem: *u8): *u8 {
-    arena: *Arena = allocator_data.cast(*Arena);
+fn _arena_alloc_fn(self: *Alloc, mode: AllocatorFnMode, size: i64, align: u32, old_mem: *u8): *u8 {
+    arena := self.cast(*Arena);
 
     if (mode == .alloc) {
         return arena_push(arena, size, align).ptr;
     }
     if (mode == .realloc) {
-        panic("arena realloc is not supported");
+        return arena_realloc(arena, old_mem, size, align).ptr;
+    }
+    if (mode == .free) {
+        arena_free(arena, old_mem);
+    }
+    if (mode == .get_arena) {
+        return arena.cast(*u8);
     }
     return nullptr(u8);
 }
 
 fn arena_as_allocator(arena: *Arena): *Alloc {
-    alloc := arena_push(arena, Alloc, 8);
-    alloc.func = _arena_alloc_fn.^;
-    alloc.data = arena.cast(*u8);
-    return alloc;
+    return arena.interface.^;
 }
 
 // the arena behind an allocator made by arena_as_allocator; nullptr for any other allocator
 fn arena_from_allocator(alloc: *Alloc): *Arena {
     if (alloc == nullptr(Alloc)) { return nullptr(Arena); }
     if (alloc.func != _arena_alloc_fn.^) { return nullptr(Arena); }
-    return alloc.data.cast(*Arena);
+    return alloc.cast(*Arena);
 }

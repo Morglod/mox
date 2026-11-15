@@ -73,7 +73,7 @@ fn game() {
         if (player.hp <= 0) {
             DrawText("DEAD", WINDOW_W / 2, WINDOW_H / 2 - 40, 40, COLOR_RED);
 
-            text := #format_temp("SCORE: {}\0", .{ player.score; });
+            text := #format_temp("SCORE: {}\0", .{ player.score; }, nullptr(Alloc));
             DrawText(text.ptr, WINDOW_W / 2, WINDOW_H / 2, 40, COLOR_YELLOW);
 
             DrawText("PRESS SPACE", WINDOW_W / 2, WINDOW_H / 2 + 40, 40, COLOR_WHITE);
@@ -214,10 +214,10 @@ fn game() {
             DrawLineV(p2, p3, COLOR_GREEN);
             DrawLineV(p3, p1, COLOR_GREEN);
 
-            hp_text := #format_temp("HP: {}\0", .{ player.hp; });
+            hp_text := #format_temp("HP: {}\0", .{ player.hp; }, nullptr(Alloc));
             DrawText(hp_text.ptr, 0, 5, 40, COLOR_RED);
 
-            hp_text := #format_temp("SCORE: {}\0", .{ player.score; });
+            hp_text := #format_temp("SCORE: {}\0", .{ player.score; }, nullptr(Alloc));
             DrawText(hp_text.ptr, 0, 45, 40, COLOR_YELLOW);
         }
 

@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 
 // RFC 4648
 

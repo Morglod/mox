@@ -29,6 +29,12 @@ import "internal.mox";
 #linkc("exp")   fn c_exp(x: f64): f64;
 #linkc("logf")  fn c_logf(x: f32): f32;
 #linkc("log")   fn c_log(x: f64): f64;
+#linkc("exp2f") fn c_exp2f(x: f32): f32;
+#linkc("exp2")  fn c_exp2(x: f64): f64;
+#linkc("log2f") fn c_log2f(x: f32): f32;
+#linkc("log2")  fn c_log2(x: f64): f64;
+#linkc("log10f") fn c_log10f(x: f32): f32;
+#linkc("log10")  fn c_log10(x: f64): f64;
 #linkc("floorf") fn c_floorf(x: f32): f32;
 #linkc("floor")  fn c_floor(x: f64): f64;
 #linkc("ceilf") fn c_ceilf(x: f32): f32;
@@ -39,6 +45,8 @@ import "internal.mox";
 #linkc("fmod")  fn c_fmod(a: f64, b: f64): f64;
 #linkc("fabs")  fn c_fabs(x: f64): f64;
 #linkc("fabsf")  fn c_fabsf(x: f32): f32;
+#linkc("hypotf") fn c_hypotf(x: f32, y: f32): f32;
+#linkc("hypot")  fn c_hypot(x: f64, y: f64): f64;
 
 const LN_2_F32: f32     = 0.693147180559945309f;
 const LOG2_E_F32: f32   = 1.442695040888963407f;
@@ -113,19 +121,31 @@ fn mix(a: [$N]$T, b: [$N]$T, k: $T): [$N]$T {
     return a + (b - a) * k;
 }
 
-fn exp2(x: f32): f32  { return exp(x * LN_2_F32); }
-fn log2(x: f32): f32  { return log(x) * LOG2_E_F32; }
-fn log10(x: f32): f32 { return log(x) * LOG10_E_F32; }
+fn exp2(x: f32): f32  { return c_exp2f(x); }
+fn log2(x: f32): f32  { return c_log2f(x); }
+fn log10(x: f32): f32 { return c_log10f(x); }
 
-fn exp2(x: f64): f64  { return exp(x * LN_2_F64); }
-fn log2(x: f64): f64  { return log(x) * LOG2_E_F64; }
-fn log10(x: f64): f64 { return log(x) * LOG10_E_F64; }
+fn exp2(x: f64): f64  { return c_exp2(x); }
+fn log2(x: f64): f64  { return c_log2(x); }
+fn log10(x: f64): f64 { return c_log10(x); }
 
+// result in [0, |m|); m == 0 behaves like x % 0 (int: crash, float: NaN)
 fn mod_euclid(x: $T, m: $T): $T {
-    r := x % m;
-    if (r < 0) {
-        return r + abs(m);
+    #if ($T.cast(*MoxType).kind == .F32 || $T.cast(*MoxType).kind == .F64) {
+        r := x % m;
+        if (r < 0) {
+            r = r + abs(m);
+            if (r == abs(m)) { return 0; } // a tiny negative r rounds up to |m|
+        }
+        return r;
     } else {
+        if (m < 0 && m + 1 == 0) { return 0; } // MIN % -1 traps; x mod -1 is always 0
+        r := x % m;
+        if (r < 0) {
+            // r - m instead of r + abs(m): can't overflow when m is the smallest int
+            if (m < 0) { return r - m; }
+            return r + m;
+        }
         return r;
     }
 }
@@ -243,9 +263,28 @@ fn length(v: [$N]$T): $T { return sqrt(dot(v, v)); }
 fn distance_sq(a: [$N]$T, b: [$N]$T): $T { d: [$N]$T = a - b; return dot(d, d); }
 fn distance(a: [$N]$T, b: [$N]$T): $T { d: [$N]$T = a - b; return sqrt(dot(d, d)); }
 
+// zero vector for a zero input
 fn normalize(v: [$N]$T): [$N]$T {
-    inv: $T = 1 .cast($T) / length(v);
-    return v * inv;
+    len_sq := dot(v, v);
+    min_normal: $T = #memory_garbage;
+    #if ($T.cast(*MoxType).kind == .F32) { min_normal = F32_MIN_NORMAL; } else { min_normal = F64_MIN_NORMAL; }
+    if (len_sq >= min_normal && len_sq < f_inf($T)) {
+        return v * (1 .cast($T) / sqrt(len_sq));
+    }
+    if (is_nan(len_sq)) {
+        return v * len_sq;
+    }
+    // the squared length left the float range: divide by the largest component first
+    m: $T = 0;
+    #for (i : it_range($N)) {
+        m = max(m, abs(v[i]));
+    }
+    if (m == 0) {
+        zero: [$N]$T = 0;
+        return zero;
+    }
+    s := v / m;
+    return s * (1 .cast($T) / sqrt(dot(s, s)));
 }
 
 fn lerp(a: [$N]$T, b: [$N]$T, t: $T): [$N]$T { return a + (b - a) * t; }
@@ -348,12 +387,25 @@ fn mul_vec(m: $M / Matrix($T, $X, $Y), v: [$X]$T): [$Y]$T {
     return out;
 }
 
-// gauss elimination without pivoting, good enough for transform matrices
+// gauss elimination with partial pivoting, 0 for a singular matrix
 fn determinant(m: $M / Matrix($T, $N, $N)): $T {
     a: Matrix($T, $N, $N) = m;
     det: $T = 1;
     for (p : it_range(0u32, $N)) {
-        piv: $T = a.data[p][p];
+        best := p;
+        for (r : it_range(p + 1, $N)) {
+            if (abs(a.data[p][r]) > abs(a.data[p][best])) { best = r; }
+        }
+        piv: $T = a.data[p][best];
+        if (piv == 0) { return 0; }
+        if (best != p) {
+            for (c : it_range(p, $N)) {
+                tmp := a.data[c][p];
+                a.data[c][p] = a.data[c][best];
+                a.data[c][best] = tmp;
+            }
+            det = -det;
+        }
         det *= piv;
         for (r : it_range(p + 1, $N)) {
             factor: $T = a.data[p][r] / piv;
@@ -365,12 +417,33 @@ fn determinant(m: $M / Matrix($T, $N, $N)): $T {
     return det;
 }
 
-// gauss-jordan without pivoting
+// gauss-jordan with partial pivoting, all NaN for a singular matrix
 fn inverse(m: $M / Matrix($T, $N, $N)): Matrix($T, $N, $N) {
     a: Matrix($T, $N, $N) = m;
     inv: Matrix($T, $N, $N) = identity($T, $N);
     for (p : it_range(0u32, $N)) {
-        piv: $T = a.data[p][p];
+        best := p;
+        for (r : it_range(p + 1, $N)) {
+            if (abs(a.data[p][r]) > abs(a.data[p][best])) { best = r; }
+        }
+        piv: $T = a.data[p][best];
+        if (piv == 0) {
+            nan := f_nan($T);
+            for (c : it_range(0u32, $N)) {
+                for (r : it_range(0u32, $N)) { inv.data[c][r] = nan; }
+            }
+            return inv;
+        }
+        if (best != p) {
+            for (c : it_range(0u32, $N)) {
+                tmp := a.data[c][p];
+                a.data[c][p] = a.data[c][best];
+                a.data[c][best] = tmp;
+                tmp = inv.data[c][p];
+                inv.data[c][p] = inv.data[c][best];
+                inv.data[c][best] = tmp;
+            }
+        }
         for (c : it_range(0u32, $N)) {
             a.data[c][p] /= piv;
             inv.data[c][p] /= piv;
@@ -507,11 +580,16 @@ fn quat_from_axis_angle(axis: [3]$T, angle: $T): Quat($T) {
     return q;
 }
 
+// identity for a zero input
 fn quat_normalize(q: Quat($T)): Quat($T) {
-    len: $T = sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
-    inv: $T = 1 / len;
-    r: Quat($T) = #memory_garbage;
-    r.x = q.x*inv; r.y = q.y*inv; r.z = q.z*inv; r.w = q.w*inv;
+    r: Quat($T) = 0;
+    if (q.x == 0 && q.y == 0 && q.z == 0 && q.w == 0) {
+        r.w = 1;
+        return r;
+    }
+    v: [4]$T = .{ q.x; q.y; q.z; q.w; };
+    n := normalize(v);
+    r.x = n[0]; r.y = n[1]; r.z = n[2]; r.w = n[3];
     return r;
 }
 
@@ -563,40 +641,63 @@ fn quat_slerp(a: Quat($T), b: Quat($T), t: $T): Quat($T) {
     return r;
 }
 
+// edges are inclusive; corners can be in any order; NaN is outside
 fn is_point_in_rect(point: []$T, a: []$T, b: []$T): bool {
-    N := min(point.len, a.len) |> min(b.len);
-    for (i : it_range(N)) {
-        if (point[i] < a[i] || point[i] > b[i]) {
+    if (point.len != a.len || point.len != b.len) {
+        return false;
+    }
+    for (i : it_range(point.len)) {
+        x := point[i];
+        if (!((x >= a[i] && x <= b[i]) || (x >= b[i] && x <= a[i]))) {
             return false;
         }
     }
     return true;
 }
 
+// edges are inclusive; corners can be in any order; NaN is outside
 fn is_point_in_rect(point: [$N]$T, a: [$N]$T, b: [$N]$T): bool {
-    // TODO: comparison operators for builtin vectors
-    // return point >= a && point <= b;
-
-    ps : []$T = #memory_garbage;
-    ps.ptr = point.ptr;
-    ps.len = $N;
-
-    as : []$T = #memory_garbage;
-    as.ptr = a.ptr;
-    as.len = $N;
-    
-    bs : []$T = #memory_garbage;
-    bs.ptr = b.ptr;
-    bs.len = $N;
-    
-    return is_point_in_rect(ps, as, bs);
+    #for (i : it_range($N)) {
+        x := point[i];
+        if (!((x >= a[i] && x <= b[i]) || (x >= b[i] && x <= a[i]))) {
+            return false;
+        }
+    }
+    return true;
 }
 
+// result in [low, high) on each axis, low on a zero-size axis
 fn wrap_in_rect(p: [$N]$T, a: [$N]$T, b: [$N]$T): [$N]$T {
     low := min(a, b);
     high := max(a, b);
-    size := high - low;
-    return mod_euclid(p - low, size) + low;
+    out: [$N]$T = #memory_garbage;
+    #for (i : it_range($N)) {
+        #if ($T.cast(*MoxType).kind == .F32 || $T.cast(*MoxType).kind == .F64) {
+            size := high[i] - low[i];
+            out[i] = low[i];
+            if (size > 0) {
+                r := mod_euclid(p[i] - low[i], size) + low[i];
+                if (r >= high[i]) { r = low[i]; } // + low can round up to high
+                out[i] = r;
+            }
+        } else {
+            // unsigned math: high - low and the distance from low always fit there
+            const U := #run _unsigned_int_type($T);
+            lo_u := low[i].cast(U);
+            p_u := p[i].cast(U);
+            size := #wrap_sub(high[i].cast(U), lo_u);
+            off: U = 0;
+            if (size != 0) {
+                if (p[i] >= low[i]) { off = #wrap_sub(p_u, lo_u) % size; }
+                else {
+                    r := #wrap_sub(lo_u, p_u) % size;
+                    if (r != 0) { off = size - r; }
+                }
+            }
+            out[i] = #wrap_add(lo_u, off).cast($T);
+        }
+    }
+    return out;
 }
 
 fn angle_to_direction(radians: $T): [2]$T {
@@ -672,20 +773,49 @@ fn trunc(x: [$N]$T): [$N]$T {
     return out;
 }
 
+// 0 when a == b
 fn inverse_lerp(a: $T, b: $T, v: $T): $T {
+    if (a == b) { return 0; }
     return (v - a) / (b - a);
 }
 
-// remap [a,b] to [c,d]
+fn inverse_lerp(a: [$N]$T, b: [$N]$T, v: [$N]$T): [$N]$T {
+    out: [$N]$T = #memory_garbage;
+    #for (i : it_range($N)) {
+        out[i] = inverse_lerp(a[i], b[i], v[i]);
+    }
+    return out;
+}
+
+// remap [a,b] to [c,d]; c when a == b
 fn remap(x: $T, a: $T, b: $T, c: $T, d: $T): $T {
-    return lerp(c, d, inverse_lerp(a, b, x));
+    #if ($T.cast(*MoxType).kind == .F32 || $T.cast(*MoxType).kind == .F64) {
+        return lerp(c, d, inverse_lerp(a, b, x));
+    } else {
+        if (a == b) { return c; }
+        // i128 so the product fits unless both differences are above 2^63
+        r := c.cast(i128) + (x.cast(i128) - a.cast(i128)) * (d.cast(i128) - c.cast(i128)) / (b.cast(i128) - a.cast(i128));
+        return r.cast($T);
+    }
+}
+
+fn remap(x: [$N]$T, a: [$N]$T, b: [$N]$T, c: [$N]$T, d: [$N]$T): [$N]$T {
+    out: [$N]$T = #memory_garbage;
+    #for (i : it_range($N)) {
+        out[i] = remap(x[i], a[i], b[i], c[i], d[i]);
+    }
+    return out;
 }
 
 // remap [0,a] to [0,b]
 fn remap(x: $T, a: $T, b: $T): $T {
-    a1: $T = 0;
-    b1: $T = 0;
-    return lerp(b1, b, inverse_lerp(a1, a, x));
+    zero: $T = 0;
+    return remap(x, zero, a, zero, b);
+}
+
+fn remap(x: [$N]$T, a: [$N]$T, b: [$N]$T): [$N]$T {
+    zero: [$N]$T = 0;
+    return remap(x, zero, a, zero, b);
 }
 
 fn step(edge: $T, x: $T): $T {
@@ -703,8 +833,9 @@ fn smootherstep(edge0: $T, edge1: $T, x: $T): $T {
     return t * t * t * (t * (t * 6 - 15) + 10);
 }
 
-fn approx_eq(a: $T, b: $T, epsilon: $T = 0.00001): bool {
-    if (a == b || is_inf(a) || is_inf(b)) { return true; }
+fn approx_eq(a: $T, b: $T, epsilon: $T = 0.00001.cast($T)): bool {
+    if (a == b) { return true; } // also INF == INF
+    if (!is_finite(a) || !is_finite(b)) { return false; } // INF vs anything else, NaN
     diff := abs(a - b);
     if (diff < epsilon) { return true; }
     return diff <= epsilon * max(abs(a), abs(b));
@@ -763,27 +894,26 @@ fn smooth_damp(
     max_speed: $T,
     dt: $T
 ): $T {
-    smooth_time := max(0.0001, smooth_time);
-    omega := 2.0 / smooth_time;
+    st := max(smooth_time, 0.0001.cast($T));
+    omega := 2 / st;
 
     // approximation of exp(-omega * dt)
     x := omega * dt;
-    e := 1.0 / (1.0 + x + 0.48 * x * x + 0.235 * x * x * x);
+    e := 1 / (1 + x + 0.48.cast($T) * x * x + 0.235.cast($T) * x * x * x);
 
     // clamp maximum speed
-    original_target := target;
-    max_change := max_speed * smooth_time;
+    max_change := max_speed * st;
     change := clamp(current - target, -max_change, max_change);
-    target = current - change;
+    clamped_target := current - change;
 
     temp := (velocity.* + omega * change) * dt;
     velocity.* = (velocity.* - omega * temp) * e;
-    output := target + (change + temp) * e;
+    output := clamped_target + (change + temp) * e;
 
     // prevent overshooting
-    if ((original_target - current > 0.0) == (output > original_target)) {
-        output = original_target;
-        velocity.* = (output - original_target) / dt;
+    if ((target - current > 0) == (output > target)) {
+        output = target;
+        velocity.* = 0;
     }
 
     return output;
@@ -797,43 +927,47 @@ fn smooth_damp(
     max_speed: $T,
     dt: $T
 ): [$N]$T {
-    smooth_time := max(0.0001, smooth_time);
-    omega := 2.0 / smooth_time;
+    st := max(smooth_time, 0.0001.cast($T));
+    omega := 2 / st;
 
     // approximation of exp(-omega * dt)
     x := omega * dt;
-    e := 1.0 / (1.0 + x + 0.48 * x * x + 0.235 * x * x * x);
+    e := 1 / (1 + x + 0.48.cast($T) * x * x + 0.235.cast($T) * x * x * x);
 
-    // clamp maximum speed
-    original_target := target;
-    max_change := max_speed * smooth_time;
-    change := clamp(current - target, -max_change, max_change);
-    target = current - change;
+    // clamp maximum speed (length of the change, not each component)
+    max_change := max_speed * st;
+    change := current - target;
+    len_sq := dot(change, change);
+    if (len_sq > max_change * max_change) {
+        change = change * (max_change / sqrt(len_sq));
+    }
+    clamped_target := current - change;
 
     temp := (velocity.* + omega * change) * dt;
     velocity.* = (velocity.* - omega * temp) * e;
-    output := target + (change + temp) * e;
+    output := clamped_target + (change + temp) * e;
 
     // prevent overshooting
-    #for (i : it_range($N)) {
-        if ((original_target[i] - current[i] > 0.0) == (output[i] > original_target[i])) {
-            output[i] = original_target[i];
-            velocity.*[i] = (output[i] - original_target[i]) / dt;
-        }
+    if (dot(target - current, output - target) > 0) {
+        zero: [$N]$T = 0;
+        output = target;
+        velocity.* = zero;
     }
 
     return output;
 }
 
-// Wraps t into [0, length). Like fmod, but always positive.
+// Wraps t into [0, |length|). Like fmod, but always positive. 0 for length 0.
 fn repeat(t: $T, length: $T): $T {
-    return clamp(t - floor(t / length) * length, 0, length);
+    if (length == 0) { return 0; }
+    return mod_euclid(t, length);
 }
 
 // Bounces t back and forth between 0 and length: 0 -> length -> 0 -> length ...
 fn ping_pong(t: $T, length: $T): $T {
-    t := repeat(t, length * 2);
-    return length - abs(t - length);
+    l := abs(length);
+    t2 := repeat(t, l * 2);
+    return l - abs(t2 - l);
 }
 
 fn snap(x: $T, step: $T): $T {
@@ -850,39 +984,8 @@ fn snap(x: [$N]$T, step: $T): [$N]$T {
     return out;
 }
 
-fn hypot(x: f32, y: f32): f32 {
-    a := x.cast(f64);
-    b := y.cast(f64);
-    return sqrt(a * a + b * b) .cast(f32);
-}
-
-const HYPOT_F64_HI: f64 = 1.0e153;
-const HYPOT_F64_LO: f64 = 1.0e-150;
-
-fn hypot(x: f64, y: f64): f64 {
-    a := abs(x);
-    b := abs(y);
-    if (is_inf(a) || is_inf(b)) { return F64_INF; }
-
-    hi : f64 = #memory_garbage;
-    if (a > b) { hi = a; }
-    else { hi = b; }
-
-    // fast path: squares can't overflow or lose precision
-    if (hi < HYPOT_F64_HI && hi > HYPOT_F64_LO) {
-        return sqrt(a * a + b * b);
-    }
-
-    // Slow path: huge, tiny, zero, or NaN
-    if (a < b) {
-        tmp := a;
-        a = b;
-        b = tmp;
-    }
-    if (a == 0.0) { return 0.0; }
-    r := b / a;
-    return a * sqrt(1.0 + r * r);
-}
+fn hypot(x: f32, y: f32): f32 { return c_hypotf(x, y); }
+fn hypot(x: f64, y: f64): f64 { return c_hypot(x, y); }
 
 fn copysign(x: f32, y: f32): f32 {
     bits := (bitcast(u32, x) & 0x7FFFFFFF) | (bitcast(u32, y) & 0x80000000);

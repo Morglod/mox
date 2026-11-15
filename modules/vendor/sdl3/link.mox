@@ -1,6 +1,6 @@
 import "internal.mox";
 import "build.mox";
-import "format.mox";
+import "std/format.mox";
 
 fn link_sdl3($link_comptime: bool): void {
     if (!#is_comptime) { return; }

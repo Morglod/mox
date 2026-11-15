@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 import "./math.mox";
 import "./panic.mox";
 import "./arena.mox";
@@ -27,6 +27,20 @@ fn _format_push_string(dst: []u8, offset: i64, str: []u8): i64 {
     return offset;
 }
 
+// format returns the length it needed. This cuts that to what fits in dst with room for a NUL, writes the NUL and
+// ends cut text with "...". Returns the text length without the NUL.
+fn format_fit(dst: []u8, needed: i64): i64 {
+    if (dst.len == 0) { return 0; }
+    n := needed;
+    if (n >= dst.len) {
+        n = dst.len - 1;
+        dots := min(3i64, n);
+        mem_set(byte_offset(dst.ptr, n - dots), char(".").cast(u8), dots);
+    }
+    dst[n] = 0;
+    return n;
+}
+
 fn format_u64(dst: []u8, offset: i64, x: u64): i64 {
     const zero_char := char("0").cast(u8);
 
@@ -41,22 +55,12 @@ fn format_u64(dst: []u8, offset: i64, x: u64): i64 {
 }
 
 fn format_i64(dst: []u8, offset: i64, x: i64): i64 {
-    const zero_char := char("0").cast(u8);
-
     if (x < 0) {
         offset = _format_push(dst, offset, char("-").cast(u8));
-        // TODO: handle -min_i64, it will overflow here
-        x = -x;
+        // negate in the unsigned domain: handles i64::MIN without overflow
+        return format_u64(dst, offset, #wrap_sub(0, x.cast(u64)));
     }
-
-    rest := x / 10;
-
-    if (rest != 0) {
-        offset = format_i64(dst, offset, rest);
-    }
-
-    d := x % 10;
-    return _format_push(dst, offset, zero_char + d.cast(u8));
+    return format_u64(dst, offset, x.cast(u64));
 }
 
 fn format_len_u64(value: u64): i64 {
@@ -65,13 +69,9 @@ fn format_len_u64(value: u64): i64 {
 
 fn format_len_i64(value: i64): i64 {
     if (value >= 0) {
-        return ilog10(value.cast(u64)).cast(i64) + 1;
+        return format_len_u64(value.cast(u64));
     }
-    neg : i64 = -value;
-    if (neg < 0) {
-        return 1 + 19;
-    }
-    return 1 + ilog10(neg.cast(u64)).cast(i64) + 1;
+    return 1 + format_len_u64(#wrap_sub(0, value.cast(u64)));
 }
 
 const _FORMAT_U128_CHUNK : u128 = 10000000000000000000;
@@ -213,6 +213,9 @@ fn format(dst: []u8, offset: i64, $fmt_str: []u8, values: $T): i64 {
 
         while (i < $fmt_str.len) {
             if ($fmt_str[i] == char("\\")) {
+                if (i + 1 >= $fmt_str.len) {
+                    panic("format(\"{}\"): the format string ends with a lone backslash", .{ $fmt_str; });
+                }
                 ch := $fmt_str[i + 1];
                 #emit {
                     offset = _format_push(dst, offset, ch);
@@ -221,7 +224,7 @@ fn format(dst: []u8, offset: i64, $fmt_str: []u8, values: $T): i64 {
                 continue;
             }
 
-            if ($fmt_str[i] == char("{") && $fmt_str[i + 1] == char("}")) {
+            if ($fmt_str[i] == char("{") && i + 1 < $fmt_str.len && $fmt_str[i + 1] == char("}")) {
                 if (value_index >= members_count) {
                     panic("format(\"{}\") expected to have more values", .{ $fmt_str; });
                 }
@@ -266,6 +269,9 @@ fn format_len($fmt_str: []u8, values: $T): i64 {
 
         while (i < $fmt_str.len) {
             if ($fmt_str[i] == char("\\")) {
+                if (i + 1 >= $fmt_str.len) {
+                    panic("format_len(\"{}\"): the format string ends with a lone backslash", .{ $fmt_str; });
+                }
                 #emit {
                     total += 1;
                 };
@@ -273,7 +279,7 @@ fn format_len($fmt_str: []u8, values: $T): i64 {
                 continue;
             }
 
-            if ($fmt_str[i] == char("{") && $fmt_str[i + 1] == char("}")) {
+            if ($fmt_str[i] == char("{") && i + 1 < $fmt_str.len && $fmt_str[i + 1] == char("}")) {
                 if (value_index >= members_count) {
                     panic("format_len(\"{}\") expected to have more values", .{ $fmt_str; });
                 }
@@ -315,21 +321,19 @@ fn #format_temp($buf_size: i64, $fmt_str: []u8, values: $T): []u8 {
     buf: [$buf_size]u8 = #memory_garbage;
     buf_slice := buf.^ |> slice();
 
-    len := format(buf_slice, 0, $fmt_str, values);
-    buf_slice[len] = 0;
-
-    return buf_slice;
+    len := format_fit(buf_slice, format(buf_slice, 0, $fmt_str, values));
+    return slice(buf_slice, 0, len);
 }
 
-fn #format_temp($fmt_str: []u8, values: $T): []u8 {
+fn #format_temp($fmt_str: []u8, values: $T, conflict: *Alloc): []u8 {
     len := format_len($fmt_str, values);
-    buf := #temp_buffer(len);
+    buf := #temp_buffer(len, conflict);
     format(buf, 0, $fmt_str, values);
     return buf;
 }
 
 fn print($fmt_str: []u8, values: $T): void {
-    os_stdout_write(#format_temp($fmt_str, values));
+    os_stdout_write(#format_temp($fmt_str, values, nullptr(Alloc)));
 }
 
 fn print(str: []u8) {
@@ -337,11 +341,29 @@ fn print(str: []u8) {
 }
 
 fn println($fmt_str: []u8, values: $T): void {
-    os_stdout_write(#format_temp($fmt_str, values));
+    os_stdout_write(#format_temp($fmt_str, values, nullptr(Alloc)));
     os_stdout_write("\n");
 }
 
 fn println(str: []u8) {
     os_stdout_write(str);
     os_stdout_write("\n");
+}
+
+fn err_print($fmt_str: []u8, values: $T): void {
+    os_stderr_write(#format_temp($fmt_str, values, nullptr(Alloc)));
+}
+
+fn err_print(str: []u8) {
+    os_stderr_write(str);
+}
+
+fn err_println($fmt_str: []u8, values: $T): void {
+    os_stderr_write(#format_temp($fmt_str, values, nullptr(Alloc)));
+    os_stderr_write("\n");
+}
+
+fn err_println(str: []u8) {
+    os_stderr_write(str);
+    os_stderr_write("\n");
 }

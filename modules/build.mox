@@ -1,13 +1,13 @@
 // build tools
 
-import "./internal.mox";
-import "./file.mox";
-import "./assert.mox";
-import "./format.mox";
-import "./os.mox";
-import "./string.mox";
-import "./slice.mox";
-import "./parse_float.mox";
+import "internal.mox";
+import "std/file.mox";
+import "std/assert.mox";
+import "std/format.mox";
+import "std/os.mox";
+import "std/string.mox";
+import "std/slice.mox";
+import "std/parse_int.mox";
 
 const MOX_BUILD_INSTALL_DEPS_STRING := #run os_get_env("MOX_INSTALL_DEPS");
 const MOX_BUILD_INSTALL_DEPS := MOX_BUILD_INSTALL_DEPS_STRING.len != 0 && MOX_BUILD_INSTALL_DEPS_STRING != "false";
@@ -24,15 +24,44 @@ fn build_resolve_path(path: []u8, loc: MoxSourceLocation = #caller_location): []
 fn build_copy_to_output(src_path: []u8, loc: MoxSourceLocation = #caller_location): void {
     const output_dir := __compiler_output_dir();
     dst_path := fs_path_join(output_dir, fs_path_basename(src_path));
+    // already in the output dir: a copy onto itself fails (or truncates the file)
+    src_abs := fs_path_abs(src_path);
+    dst_abs := fs_path_abs(dst_path);
+    if (src_abs.len > 0) {
+        if ((MOX_OS == .Windows) && equal_ignore_case(src_abs, dst_abs)) { return; }
+        if (src_abs == dst_abs) { return; }
+    }
     assert(fs_copy_file(src_path, dst_path), "build_copy_to_output failed for src=\"{}\" dst=\"{}\"", .{ src_path; dst_path; }, loc);
 }
 
-// eg build_linux_check_glibc_version("2.39")
+struct BuildVersion {
+    parts: [4]i64; // missing parts are 0
+    ok: bool;
+};
+
+// "2.39" -> 2, 39, 0, 0; not ok when a part is not a number or there are more than 4
+fn build_parse_version(s: []u8): BuildVersion {
+    v: BuildVersion = 0;
+    n: i64 = 0;
+    for (part : split_iterator(s, ".")) {
+        x: i64 = 0;
+        if ((n >= 4) || !parse_int(part, x.^, 10) || (x < 0)) { return v; }
+        v.parts[n] = x;
+        n += 1;
+    }
+    v.ok = n > 0;
+    return v;
+}
+
+// true when the system glibc is at least version, eg build_linux_check_glibc_version("2.39"); false when it can not be read (not glibc)
 fn build_linux_check_glibc_version(version: []u8): bool {
-    ver1 := 0.0f64; parse_float(version, ver1.^);
-    ver2s := os_exec_output("getconf GNU_LIBC_VERSION | cut -d' ' -f2") |> trim();
-    ver2 := 0.0f64; parse_float(ver2s, ver2.^);
-    return ver1 <= ver2;
+    want := build_parse_version(version);
+    have := build_parse_version(os_exec_output("getconf GNU_LIBC_VERSION 2>/dev/null | cut -d' ' -f2") |> trim());
+    if (!want.ok || !have.ok) { return false; }
+    for (i : it_range(4i64)) {
+        if (have.parts[i] != want.parts[i]) { return have.parts[i] > want.parts[i]; }
+    }
+    return true;
 }
 
 enum BuildUnixPackageManager : u8 {
@@ -52,19 +81,38 @@ fn build_unix_get_package_manager(): BuildUnixPackageManager {
     if (name == "dnf") { return .Dnf; }
     if (name == "yum") { return .Yum; }
     if (name == "pacman") { return .Pacman; }
-    if (name == "Zypper") { return .Zypper; }
+    if (name == "zypper") { return .Zypper; }
     if (name == "apk") { return .Apk; }
     if (name == "brew") { return .Brew; }
     return .None;
 }
 
+// true when the dynamic linker cache has the library: an entry equal to name, or name followed by '.' ("libSDL3.so" finds "libSDL3.so.0")
 fn build_unix_dll_available(name: []u8): bool {
-    return os_exec_output(#format_temp("ldconfig -p | grep -q {} && echo 1 || echo 0", .{ name; })) == "1";
+    list := os_exec_output("ldconfig -p 2>/dev/null || /sbin/ldconfig -p 2>/dev/null");
+    for (line : split_iterator(list, "\n")) {
+        entry := trim(line);
+        end := index_of(entry, 32 .cast(u8)); // the name is the first field: "libz.so.1 (libc6,x86-64) => /lib/..."
+        if (end >= 0) { entry = slice(entry, 0, end); }
+        if (entry == name) { return true; }
+        if ((entry.len > name.len) && starts_with(entry, name) && (entry[name.len] == 46)) { return true; }
+    }
+    return false;
 }
 
+// list: "all", "true", or comma separated names, eg "sdl3,raylib"
+fn build_deps_list_contains(list: []u8, name: []u8): bool {
+    if ((list == "all") || (list == "true")) { return true; }
+    for (item : split_iterator(list, ",")) {
+        if (trim(item) == name) { return true; }
+    }
+    return false;
+}
+
+// MOX_INSTALL_DEPS asks to install this dependency
 fn build_contains_install_deps(name: []u8): bool {
     if (!MOX_BUILD_INSTALL_DEPS) {
         return false;
     }
-    return MOX_BUILD_INSTALL_DEPS_STRING == "all" || MOX_BUILD_INSTALL_DEPS_STRING == "true" || contains(MOX_BUILD_INSTALL_DEPS_STRING, name);
+    return build_deps_list_contains(MOX_BUILD_INSTALL_DEPS_STRING, name);
 }

@@ -1,0 +1,255 @@
+import "internal.mox";
+import "./alloc.mox";
+import "./panic.mox";
+
+// Puts allocations one after another in chunks. There is no free list.
+// Only the last allocation can be freed or resized in place. Freeing any other allocation does nothing.
+// temp_start / temp_end free everything allocated between them, including the chunks added meanwhile.
+
+const BUMP_ALLOC_CHUNK_MIN_SIZE : i64 = KILOBYTE * 4;
+const BUMP_ALLOC_CHUNK_ALIGN : u32 = 16;
+const BUMP_ALLOC_DEFAULT_ALIGN : u32 = 8;
+
+struct BumpAllocator_ChunkHeader {
+    cap: i64;
+    used: i64;
+    prev: *BumpAllocator_ChunkHeader;
+}
+
+const BUMP_ALLOC_CHUNK_HEADER_SIZE := align_up(sizeof_type(BumpAllocator_ChunkHeader), BUMP_ALLOC_CHUNK_ALIGN.cast(i64));
+
+struct BumpAllocator {
+    interface: Alloc;
+    base: *Alloc;
+    chunk: *BumpAllocator_ChunkHeader;
+    last_alloc: *u8;
+    chunk_min_size: i64;
+}
+
+struct BumpTemp {
+    ba: *BumpAllocator;
+    chunk: *BumpAllocator_ChunkHeader;
+    used: i64;
+    last_alloc: *u8;
+}
+
+fn init(ba: *BumpAllocator, alloc_base: *Alloc, chunk_min_size: i64 = BUMP_ALLOC_CHUNK_MIN_SIZE) {
+    ba.base = alloc_base;
+    ba.chunk_min_size = chunk_min_size;
+    ba.chunk = nullptr(BumpAllocator_ChunkHeader);
+    ba.last_alloc = nullptr(u8);
+    ba.interface.func = _bump_alloc_fn.^;
+}
+
+fn as_allocator(ba: *BumpAllocator): *Alloc {
+    return ba.interface.^;
+}
+
+fn _bump_chunk_top(chunk: *BumpAllocator_ChunkHeader): u64 {
+    return chunk.cast(u64) + chunk.used.cast(u64);
+}
+
+fn _bump_chunk_end(chunk: *BumpAllocator_ChunkHeader): u64 {
+    return chunk.cast(u64) + chunk.cap.cast(u64);
+}
+
+fn _bump_chunk_set_top(chunk: *BumpAllocator_ChunkHeader, top: u64) {
+    chunk.used = (top - chunk.cast(u64)).cast(i64);
+}
+
+fn _bump_chunk_push(chunk: *BumpAllocator_ChunkHeader, size: i64, align: u32): *u8 {
+    start := align_up(_bump_chunk_top(chunk), align.cast(u64));
+    end := start + size.cast(u64);
+    if (end > _bump_chunk_end(chunk)) {
+        return nullptr(u8);
+    }
+    _bump_chunk_set_top(chunk, end);
+    return start.cast(*u8);
+}
+
+fn _bump_add_chunk(ba: *BumpAllocator, size: i64, align: u32): *BumpAllocator_ChunkHeader {
+    worst_case_size := BUMP_ALLOC_CHUNK_HEADER_SIZE + align.cast(i64) + size;
+    cap := align_up(max(worst_case_size, ba.chunk_min_size), BUMP_ALLOC_CHUNK_ALIGN.cast(i64));
+
+    chunk := mem_alloc(ba.base, cap, max(align, BUMP_ALLOC_CHUNK_ALIGN)).cast(*BumpAllocator_ChunkHeader);
+    if (chunk == nullptr(BumpAllocator_ChunkHeader)) {
+        panic("bump allocator: base allocator failed to allocate chunk of {} bytes", .{ cap });
+    }
+    chunk.cap = cap;
+    chunk.used = BUMP_ALLOC_CHUNK_HEADER_SIZE;
+    chunk.prev = ba.chunk;
+    ba.chunk = chunk;
+    return chunk;
+}
+
+fn _bump_free_chunks(ba: *BumpAllocator, chunk: *BumpAllocator_ChunkHeader) {
+    while (chunk != nullptr(BumpAllocator_ChunkHeader)) {
+        prev := chunk.prev;
+        mem_free(ba.base, chunk);
+        chunk = prev;
+    }
+}
+
+fn _bump_alloc(ba: *BumpAllocator, size: i64, align: u32): *u8 {
+    ptr := nullptr(u8);
+    if (ba.chunk != nullptr(BumpAllocator_ChunkHeader)) {
+        ptr = _bump_chunk_push(ba.chunk, size, align);
+    }
+    if (ptr == nullptr(u8)) {
+        ptr = _bump_chunk_push(_bump_add_chunk(ba, size, align), size, align);
+    }
+    ba.last_alloc = ptr;
+    return ptr;
+}
+
+fn _bump_find_chunk(ba: *BumpAllocator, mem: *u8): *BumpAllocator_ChunkHeader {
+    addr := mem.cast(u64);
+    chunk := ba.chunk;
+    while (chunk != nullptr(BumpAllocator_ChunkHeader)) {
+        if (addr >= chunk.cast(u64) + BUMP_ALLOC_CHUNK_HEADER_SIZE.cast(u64) && addr <= _bump_chunk_top(chunk)) {
+            return chunk;
+        }
+        chunk = chunk.prev;
+    }
+    return chunk;
+}
+
+fn _bump_realloc(ba: *BumpAllocator, old_mem: *u8, new_size: i64, align: u32): *u8 {
+    if (old_mem == nullptr(u8)) {
+        return _bump_alloc(ba, new_size, align);
+    }
+
+    // old size is unknown, so copy everything from old_mem to the top of its chunk
+    copy_size : i64 = 0;
+    chunk := _bump_find_chunk(ba, old_mem);
+    if (chunk != nullptr(BumpAllocator_ChunkHeader)) {
+        copy_size = (_bump_chunk_top(chunk) - old_mem.cast(u64)).cast(i64);
+    }
+    if (old_mem == ba.last_alloc) {
+        _bump_chunk_set_top(ba.chunk, old_mem.cast(u64));
+    }
+
+    new_mem := _bump_alloc(ba, new_size, align);
+    mem_copy(new_mem, old_mem, min(copy_size, new_size));
+    return new_mem;
+}
+
+fn _bump_free(ba: *BumpAllocator, mem: *u8) {
+    if (mem == nullptr(u8) || mem != ba.last_alloc) {
+        return;
+    }
+    _bump_chunk_set_top(ba.chunk, mem.cast(u64));
+    ba.last_alloc = nullptr(u8);
+}
+
+fn mem_alloc(ba: *BumpAllocator, size: i64, align: u32 = BUMP_ALLOC_DEFAULT_ALIGN): *u8 {
+    return _bump_alloc(ba, size, align);
+}
+
+fn mem_alloc(ba: *BumpAllocator, $T: __type_ptr, align: u32 = 0): *$T {
+    if (align == 0) { align = alignof_type($T); }
+    return _bump_alloc(ba, sizeof_type($T), align).cast(*$T);
+}
+
+fn mem_alloc_slice(ba: *BumpAllocator, $T: __type_ptr, len: i64, align: u32 = 0): []$T {
+    if (align == 0) { align = alignof_type($T); }
+    slice : []$T = #memory_garbage;
+    slice.ptr = _bump_alloc(ba, sizeof_type($T) * len, align).cast(*$T);
+    slice.len = len;
+    return slice;
+}
+
+fn mem_realloc(ba: *BumpAllocator, old_mem: *$T, new_size: i64, align: u32 = 0): *$T {
+    if (align == 0) { align = alignof_type($T); }
+    return _bump_realloc(ba, old_mem.cast(*u8), new_size, align).cast(*$T);
+}
+
+fn mem_realloc_slice(ba: *BumpAllocator, old_mem: []$T, new_len: i64, align: u32 = 0): []$T {
+    if (align == 0) { align = alignof_type($T); }
+    slice : []$T = #memory_garbage;
+    slice.ptr = _bump_realloc(ba, old_mem.ptr.cast(*u8), sizeof_type($T) * new_len, align).cast(*$T);
+    slice.len = new_len;
+    return slice;
+}
+
+fn mem_free(ba: *BumpAllocator, ptr: *$T): void {
+    _bump_free(ba, ptr.cast(*u8));
+}
+
+fn mem_free(ba: *BumpAllocator, slice: []$T): void {
+    _bump_free(ba, slice.ptr.cast(*u8));
+}
+
+fn reset(ba: *BumpAllocator) {
+    if (ba.chunk == nullptr(BumpAllocator_ChunkHeader)) {
+        return;
+    }
+    _bump_free_chunks(ba, ba.chunk.prev);
+    ba.chunk.prev = nullptr(BumpAllocator_ChunkHeader);
+    ba.chunk.used = BUMP_ALLOC_CHUNK_HEADER_SIZE;
+    ba.last_alloc = nullptr(u8);
+}
+
+fn destroy(ba: *BumpAllocator) {
+    _bump_free_chunks(ba, ba.chunk);
+    init(ba, ba.base, ba.chunk_min_size);
+}
+
+fn temp_start(ba: *BumpAllocator): BumpTemp {
+    t: BumpTemp = .{
+        ba = ba;
+        chunk = ba.chunk;
+        used = 0;
+        last_alloc = ba.last_alloc;
+    };
+    if (ba.chunk != nullptr(BumpAllocator_ChunkHeader)) {
+        t.used = ba.chunk.used;
+    }
+    // an allocation made before the mark must not grow or shrink in place: temp_end would roll it back
+    ba.last_alloc = nullptr(u8);
+    return t;
+}
+
+fn temp_end(t: BumpTemp) {
+    ba := t.ba;
+    found := t.chunk == nullptr(BumpAllocator_ChunkHeader);
+    chunk := ba.chunk;
+    while (!found && chunk != nullptr(BumpAllocator_ChunkHeader)) {
+        found = chunk == t.chunk;
+        chunk = chunk.prev;
+    }
+    if (!found) {
+        panic("bump allocator: temp_end with a mark whose chunk was already freed (out of order temp_end?)");
+    }
+
+    while (ba.chunk != t.chunk) {
+        prev := ba.chunk.prev;
+        mem_free(ba.base, ba.chunk);
+        ba.chunk = prev;
+    }
+    if (t.chunk != nullptr(BumpAllocator_ChunkHeader)) {
+        if (t.chunk.used < t.used) {
+            panic("bump allocator: temp_end out of order, the mark is above the current top");
+        }
+        t.chunk.used = t.used;
+    }
+    ba.last_alloc = t.last_alloc;
+}
+
+fn _bump_alloc_fn(self: *Alloc, mode: AllocatorFnMode, size: i64, align: u32, old_mem: *u8): *u8 {
+    ba := self.cast(*BumpAllocator);
+
+    if (mode == .alloc) {
+        return _bump_alloc(ba, size, align);
+    }
+    if (mode == .realloc) {
+        return _bump_realloc(ba, old_mem, size, align);
+    }
+    if (mode == .free) {
+        _bump_free(ba, old_mem);
+    }
+    if (mode == .get_arena) {
+        return get_alloc_backing_arena(ba.base).cast(*u8);
+    }
+    return nullptr(u8);
+}

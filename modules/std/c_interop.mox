@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 import "./alloc.mox";
 import "./arena.mox";
 import "./context.mox";
@@ -52,11 +52,6 @@ fn #temp_c_string(str: []u8): *u8 {
 }
 
 fn #temp_c_string(str: []u8, conflict: *Alloc): *u8 {
-    tmp := #temp_buffer(str.len + 1, conflict);
-    return _c_string_into(tmp, str);
-}
-
-fn #temp_c_string(str: []u8, conflict: *Arena): *u8 {
     tmp := #temp_buffer(str.len + 1, conflict);
     return _c_string_into(tmp, str);
 }

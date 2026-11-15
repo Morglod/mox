@@ -8,7 +8,7 @@
 // Returns false on empty input, invalid character, overflow or unsupported base;
 
 import "internal.mox";
-import "slice.mox";
+import "std/slice.mox";
 
 // (2^64 - 1) / 10 and % 10
 const _DEC_CUTOFF : u64 = 1844674407370955161;

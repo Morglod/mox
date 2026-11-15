@@ -1,0 +1,232 @@
+import "internal.mox";
+import "./os_win.mox";
+import "./alloc.mox";
+import "./context.mox";
+import "./dynarr.mox";
+
+struct PROCESSENTRY32W {
+    dwSize: u32;
+    cntUsage: u32;
+    th32ProcessID: u32;
+    th32DefaultHeapID: u64;
+    th32ModuleID: u32;
+    cntThreads: u32;
+    th32ParentProcessID: u32;
+    pcPriClassBase: i32;
+    dwFlags: u32;
+    szExeFile: [260]u16;
+};
+
+#linkc("CreateToolhelp32Snapshot") fn CreateToolhelp32Snapshot(flags: u32, pid: u32): WIN_HANDLE;
+#linkc("Process32FirstW") fn Process32FirstW(snap: WIN_HANDLE, entry: *PROCESSENTRY32W): i32;
+#linkc("Process32NextW")  fn Process32NextW(snap: WIN_HANDLE, entry: *PROCESSENTRY32W): i32;
+#linkc("OpenProcess")     fn OpenProcess(access: u32, inherit: i32, pid: u32): WIN_HANDLE;
+#linkc("GetProcessTimes") fn GetProcessTimes(h: WIN_HANDLE, creation: *u64, exit: *u64, kernel: *u64, user: *u64): i32; // FILETIMEs as u64
+#linkc("GetProcessId")    fn GetProcessId(h: WIN_HANDLE): u32;
+
+struct PROCESS_BASIC_INFORMATION {
+    ExitStatus: i32;
+    PebBaseAddress: u64;
+    AffinityMask: u64;
+    BasePriority: i32;
+    UniqueProcessId: u64;
+    InheritedFromUniqueProcessId: u64;
+};
+const _PtNtQueryInformationProcessFn : __type_ptr = #type fn(h: WIN_HANDLE, info_class: u32, info: *u8, len: u32, ret_len: *u32): i32;
+_pt_nt_query: *_PtNtQueryInformationProcessFn = 0; // looked up once; two threads doing it at the same time store the same value
+
+const TH32CS_SNAPPROCESS : u32 = 2;
+const PROCESS_QUERY_LIMITED_INFORMATION : u32 = 4096;
+const _PT_KILL_ACCESS : u32 = 1052673; // PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE
+const _PT_ERROR_INVALID_PARAMETER : u32 = 87; // what OpenProcess sets for a pid no process has
+const _PT_MAX_PASSES : i64 = 16;
+const _PT_KILL_WAIT_MS : u32 = 5000;
+
+struct OsProcessEntry {
+    pid: u64;
+    parent_pid: u64;
+    start_time: u64; // creation FILETIME
+};
+
+// a process killed by os_kill_tree; the open handle keeps its pid from being reused, so children still found by parent pid are really its own
+struct _PtWinProc {
+    entry: OsProcessEntry;
+    handle: WIN_HANDLE;
+};
+
+fn os_current_pid(): u64 { return GetCurrentProcessId().cast(u64); }
+
+fn os_process_pid(proc: OsProcess): u64 { return GetProcessId(proc.cast(*u8)).cast(u64); }
+
+fn _pt_start_time(h: WIN_HANDLE): u64 {
+    creation: u64 = 0;
+    exit_time: u64 = 0;
+    kernel: u64 = 0;
+    user: u64 = 0;
+    if (GetProcessTimes(h, creation.^, exit_time.^, kernel.^, user.^) == 0) { return 0; }
+    return creation;
+}
+
+// Opens pid and reads its parent pid and start time through the handle. A snapshot's parent pid can belong to an earlier owner of the pid, these always belong to the opened process.
+// Returns 0 when pid can not be opened or read; GetLastError tells why.
+fn _pt_open_entry(pid: u64, access: u32, entry: *OsProcessEntry): WIN_HANDLE {
+    if (pid > 4294967295) { return nullptr(u8); }
+    if (_pt_nt_query == 0) {
+        _pt_nt_query = GetProcAddress(GetModuleHandleA("ntdll.dll".ptr), "NtQueryInformationProcess".ptr).cast(*_PtNtQueryInformationProcessFn);
+    }
+    h := OpenProcess(access, 0, pid.cast(u32));
+    if (h == 0) { return h; }
+    info: PROCESS_BASIC_INFORMATION = 0;
+    entry.pid = pid;
+    entry.start_time = _pt_start_time(h);
+    if ((entry.start_time == 0) || (_pt_nt_query(h, 0, info.^.cast(*u8), sizeof_type(PROCESS_BASIC_INFORMATION).cast(u32), nullptr(u32)) != 0)) {
+        CloseHandle(h);
+        return nullptr(u8);
+    }
+    entry.parent_pid = info.InheritedFromUniqueProcessId;
+    return h;
+}
+
+// 0 = no such process, or no access to it
+fn os_process_start_time(pid: u64): u64 {
+    if (pid > 4294967295) { return 0; }
+    h := OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid.cast(u32));
+    if (h == 0) { return 0; }
+    t := _pt_start_time(h);
+    CloseHandle(h);
+    return t;
+}
+
+// every process with its parent pid as the snapshot saw it; start_time is left 0
+fn _pt_snapshot(all: *DynArr(OsProcessEntry)): bool {
+    dynarr_reset(all);
+    snap := CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap.cast(u64) == INVALID_HANDLE_VALUE) { return false; }
+    pe: PROCESSENTRY32W = 0;
+    pe.dwSize = sizeof_type(PROCESSENTRY32W).cast(u32);
+    more := Process32FirstW(snap, pe.^) != 0;
+    while (more) {
+        e: OsProcessEntry = 0;
+        e.pid = pe.th32ProcessID.cast(u64);
+        e.parent_pid = pe.th32ParentProcessID.cast(u64);
+        push(all, e);
+        more = Process32NextW(snap, pe.^) != 0;
+    }
+    CloseHandle(snap);
+    return true;
+}
+
+// the processes started by pid. Windows keeps a dead parent's pid in its children, so only those started after pid count: older ones belong to an earlier owner of the same pid.
+fn os_process_children(pid: u64, alloc: *Alloc = get_context_temp_arena_as_alloc()): []OsProcessEntry {
+    out: []OsProcessEntry = 0;
+    parent: OsProcessEntry = 0;
+    parent_handle := _pt_open_entry(pid, PROCESS_QUERY_LIMITED_INFORMATION, parent.^); // held while listing, so pid stays the same process
+    if (parent_handle == 0) { return out; }
+    defer CloseHandle(parent_handle);
+    all: DynArr(OsProcessEntry) = 0;
+    dynarr_init(all.^);
+    defer dynarr_free(all.^);
+    if (!_pt_snapshot(all.^)) { return out; }
+
+    // the snapshot picks the candidates, the fresh read decides: a pid may have changed owner since the snapshot
+    n: i64 = 0;
+    for (i : it_range(all.len)) {
+        e := dynarr_at(all.^, i);
+        if ((e.parent_pid != pid) || (e.pid == pid)) { continue; }
+        fresh: OsProcessEntry = 0;
+        h := _pt_open_entry(e.pid, PROCESS_QUERY_LIMITED_INFORMATION, fresh.^);
+        if (h == 0) { continue; }
+        CloseHandle(h);
+        if ((fresh.parent_pid == pid) && (fresh.start_time >= parent.start_time)) {
+            all.items[n] = fresh;
+            n += 1;
+        }
+    }
+    out = mem_alloc_slice(alloc, OsProcessEntry, n);
+    for (i : it_range(n)) { out[i] = all.items[i]; }
+    return out;
+}
+
+fn _pt_find(tree: *DynArr(_PtWinProc), pid: u64): i64 {
+    for (i : it_range(dynarr_len(tree))) {
+        if (dynarr_at(tree, i).entry.pid == pid) { return i; }
+    }
+    return -1;
+}
+
+// Force-kills pid and every process under it. Each pass terminates what was found, waits for it to end, then looks for children again, until a pass finds none.
+// start_time != 0: kill pid only while it is still that process (an OsProcessEntry.start_time), otherwise it counts as already gone.
+// Returns true when every process found is gone, also when pid was already gone. False when one could not be killed or checked, or new ones kept coming after 16 passes.
+fn os_kill_tree(pid: u64, start_time: u64 = 0): bool {
+    if (pid > 4294967295) { return true; }
+    root: _PtWinProc = 0;
+    root.handle = _pt_open_entry(pid, _PT_KILL_ACCESS, root.entry.^);
+    if (root.handle == 0) { return GetLastError() == _PT_ERROR_INVALID_PARAMETER; }
+    if ((start_time != 0) && (root.entry.start_time != start_time)) {
+        CloseHandle(root.handle);
+        return true;
+    }
+
+    tree: DynArr(_PtWinProc) = 0;
+    dynarr_init(tree.^);
+    push(tree.^, root);
+    all: DynArr(OsProcessEntry) = 0;
+    dynarr_init(all.^);
+    defer dynarr_free(all.^);
+
+    self := os_current_pid();
+    ok := true;
+    kill_self := false;
+    killed: i64 = 0;
+    pass: i64 = 0;
+    while (true) {
+        first := killed;
+        while (killed < tree.len) {
+            t := dynarr_at(tree.^, killed);
+            killed += 1;
+            if (t.entry.pid == self) {
+                kill_self = true;
+                continue;
+            }
+            if ((TerminateProcess(t.handle, 1) == 0) && (WaitForSingleObject(t.handle, 0) != WAIT_OBJECT_0)) { ok = false; }
+        }
+        // termination is asynchronous: wait, so a process inside CreateProcess cannot add a child after the next scan
+        for (i : it_range(first, killed)) {
+            t := dynarr_at(tree.^, i);
+            if ((t.entry.pid != self) && (WaitForSingleObject(t.handle, _PT_KILL_WAIT_MS) != WAIT_OBJECT_0)) { ok = false; }
+        }
+
+        if (pass == _PT_MAX_PASSES) {
+            ok = false;
+            break;
+        }
+        pass += 1;
+        if (!_pt_snapshot(all.^)) {
+            ok = false;
+            break;
+        }
+        for (i : it_range(all.len)) {
+            e := dynarr_at(all.^, i);
+            if ((_pt_find(tree.^, e.pid) >= 0) || (_pt_find(tree.^, e.parent_pid) < 0)) { continue; }
+            // the snapshot only picks the candidate: whether it is a child is decided by what its own handle says
+            p: _PtWinProc = 0;
+            p.handle = _pt_open_entry(e.pid, _PT_KILL_ACCESS, p.entry.^);
+            if (p.handle == 0) {
+                if (GetLastError() != _PT_ERROR_INVALID_PARAMETER) { ok = false; }
+                continue;
+            }
+            parent := _pt_find(tree.^, p.entry.parent_pid);
+            if ((parent < 0) || (p.entry.start_time < dynarr_at(tree.^, parent).entry.start_time)) {
+                CloseHandle(p.handle);
+                continue;
+            }
+            push(tree.^, p);
+        }
+        if (killed == tree.len) { break; }
+    }
+
+    for (i : it_range(tree.len)) { CloseHandle(dynarr_at(tree.^, i).handle); }
+    dynarr_free(tree.^);
+    if (kill_self) { TerminateProcess(GetCurrentProcess(), 1); }
+    return ok;
+}

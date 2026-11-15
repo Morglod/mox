@@ -1,11 +1,21 @@
-import "./internal.mox";
+import "internal.mox";
 import "./alloc.mox";
 import "./context.mox";
+import "./panic.mox";
 
 // growth factor drops as the array gets bigger: x3 under 1000, x2 under 10000, x1.5 after, see _dynarr_grow
 
 const DYNARR_ALIGN : u32 = 8;
 const DYNARR_HEADER_SIZE: i64 = 16;
+
+fn _dynarr_align($T: __type_ptr): u32 {
+    return max(DYNARR_ALIGN, alignof_type($T));
+}
+
+// the items start right after the header, so it is padded to the item alignment
+fn _dynarr_header_size($T: __type_ptr): i64 {
+    return align_up(DYNARR_HEADER_SIZE, alignof_type($T).cast(i64));
+}
 
 struct DynArrStorage($T: __type_ptr) {
     len: i64;
@@ -24,7 +34,7 @@ struct DynArr($T: __type_ptr) {
 };
 
 fn _dynarr_items_ptr(st: *DynArrStorage($T)): *$T {
-    p := st.cast(*u8) |> byte_offset(DYNARR_HEADER_SIZE);
+    p := st.cast(*u8) |> byte_offset(#run _dynarr_header_size($T));
     return p.cast(*$T);
 }
 
@@ -57,8 +67,8 @@ fn dynarr_items(arr: *DynArr($T)): []$T {
 }
 
 fn _dynarr_alloc(arr: *DynArr($T), cap: i64): void {
-    bytes := DYNARR_HEADER_SIZE + sizeof_type($T) * cap;
-    storage := mem_alloc(arr.alloc, bytes, DYNARR_ALIGN).cast(*DynArrStorage($T));
+    bytes := (#run _dynarr_header_size($T)) + sizeof_type($T) * cap;
+    storage := mem_alloc(arr.alloc, bytes, #run _dynarr_align($T)).cast(*DynArrStorage($T));
     storage.len = 0;
     storage.cap = cap;
     arr.storage = storage;
@@ -70,8 +80,8 @@ fn _dynarr_realloc(arr: *DynArr($T), cap: i64): void {
         return;
     }
     if (cap == arr.storage.cap) { return; }
-    bytes := DYNARR_HEADER_SIZE + sizeof_type($T) * cap;
-    storage := mem_realloc(arr.alloc, arr.storage.cast(*u8), bytes, DYNARR_ALIGN).cast(*DynArrStorage($T));
+    bytes := (#run _dynarr_header_size($T)) + sizeof_type($T) * cap;
+    storage := mem_realloc(arr.alloc, arr.storage.cast(*u8), bytes, #run _dynarr_align($T)).cast(*DynArrStorage($T));
     storage.cap = cap;
     arr.storage = storage;
 }
@@ -121,8 +131,16 @@ fn push(arr: *DynArr($T), val: $T): void {
     storage.len += 1;
 }
 
+// vals must not point into arr: a grow would free them, so this panics even when no grow is needed
 fn push(arr: *DynArr($T), vals: []$T): void {
     if (vals.len == 0) { return; }
+    if (arr.storage != 0) {
+        base := _dynarr_items_ptr(arr.storage).cast(u64);
+        src := vals.ptr.cast(u64);
+        if (src >= base && src < base + (dynarr_cap(arr) * sizeof_type($T)).cast(u64)) {
+            panic("dynarr push: vals points into the array itself");
+        }
+    }
     _dynarr_grow(arr, vals.len);
     storage := arr.storage;
     dst := type_offset(_dynarr_items_ptr(storage), storage.len);

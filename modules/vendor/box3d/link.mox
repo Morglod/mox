@@ -1,6 +1,6 @@
 import "internal.mox";
 import "build.mox";
-import "format.mox";
+import "std/format.mox";
 
 // box3d binaries are built from the box3d sources as shared libraries:
 // win64/box3d.dll (+ libbox3d.dll.a import lib) with clang (x86_64-w64-windows-gnu, UCRT only),

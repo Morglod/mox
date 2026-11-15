@@ -1,10 +1,6 @@
 // mox backend=llvm -O3 ./rapidhash_bench.mox
 
-import "internal.mox";
-import "alloc.mox";
-import "format.mox";
-import "time.mox";
-import "rapidhash.mox";
+import "std.mox";
 
 const BUF_SIZE : i64 = 16384;
 

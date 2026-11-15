@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 import "./alloc.mox";
 import "./simd.mox";
 import "./hash_map.mox";
@@ -14,7 +14,10 @@ import "./hash_map_swiss.mox";
 // Nothing is allocated before the first add.
 //
 // add returns true when the key was new.
-// get returns a pointer to the stored key, null when absent. This is useful for interning.
+// get returns a pointer to the stored key, null when absent.
+// Keys are stored by reference like in the maps: a []u8 key keeps pointing at the caller's bytes.
+// add_copy stores a copy of a new []u8 key instead and returns the stored key, which makes interning safe.
+// The copies belong to the caller: use an arena for them, or free each one after remove or destroy.
 
 // ---- HashSet: dense robin-hood ----
 
@@ -84,9 +87,10 @@ fn entries(s: *HashSet($K, $HASH)): []$K {
 
 fn _hashset_new_storage(s: *HashSet($K, $HASH), bucket_cap: i64): *HashSetStorage($K) {
     buckets_bytes := bucket_cap * sizeof_type(MapBucket);
-    keys_offset := align_up(MAP_HEADER_SIZE + buckets_bytes, 16i64);
+    align := #run _hash_storage_align($K);
+    keys_offset := align_up(MAP_HEADER_SIZE + buckets_bytes, align);
     bytes := keys_offset + _hashmap_dense_cap(bucket_cap) * sizeof_type($K);
-    st := mem_alloc(s.alloc, bytes, 16).cast(*HashSetStorage($K));
+    st := mem_alloc(s.alloc, bytes, align.cast(u32)).cast(*HashSetStorage($K));
     st.len = 0;
     st.bucket_cap = bucket_cap;
     st.shift = (64 - ilog2(bucket_cap)).cast(u32);
@@ -184,8 +188,6 @@ fn contains(s: *HashSet($K, $HASH), key: $K): bool {
 fn get_or_add(s: *HashSet($K, $HASH), key: $K): MapSlot($K) {
     if (s.storage == 0) {
         _hashset_grow(s, MAP_MIN_BUCKETS);
-    } else if (s.storage.len >= _hashmap_dense_cap(s.storage.bucket_cap)) {
-        _hashset_grow(s, s.storage.bucket_cap * 2);
     }
     st := s.storage;
     buckets := _hashset_buckets(st);
@@ -205,6 +207,11 @@ fn get_or_add(s: *HashSet($K, $HASH), key: $K): MapSlot($K) {
                 return out;
             }
         } else if (dif > b.dist_and_fp) {
+            // grow only for a new key, so overwriting an existing one never moves entries
+            if (st.len >= _hashmap_dense_cap(st.bucket_cap)) {
+                _hashset_grow(s, st.bucket_cap * 2);
+                return get_or_add(s, key);
+            }
             kp := type_offset(keys, st.len);
             kp.* = key;
             nb: MapBucket = #memory_garbage;
@@ -225,6 +232,18 @@ fn get_or_add(s: *HashSet($K, $HASH), key: $K): MapSlot($K) {
 // true when the key was new
 fn add(s: *HashSet($K, $HASH), key: $K): bool {
     return !get_or_add(s, key).found;
+}
+
+// adds a copy of key made in alloc (s.alloc by default) when it is new, returns the stored key
+fn add_copy(s: *HashSet([]u8, $HASH), key: []u8, alloc: *Alloc = 0): []u8 {
+    slot := get_or_add(s, key);
+    if (!slot.found && key.len > 0) {
+        if (alloc == 0) { alloc = s.alloc; }
+        copied := mem_alloc_slice(alloc, u8, key.len, 1);
+        mem_copy(copied, key);
+        slot.value.* = copied;
+    }
+    return slot.value.*;
 }
 
 fn remove(s: *HashSet($K, $HASH), key: $K): bool {
@@ -329,9 +348,10 @@ fn clear(s: *SwissSet($K, $HASH)): void {
 }
 
 fn _hashset_swiss_new_storage(s: *SwissSet($K, $HASH), cap: i64): *SwissSetStorage($K) {
-    keys_offset := align_up(SWISS_HEADER_SIZE + cap, 16i64);
+    align := #run _hash_storage_align($K);
+    keys_offset := align_up(SWISS_HEADER_SIZE + cap, align);
     bytes := keys_offset + cap * sizeof_type($K);
-    st := mem_alloc(s.alloc, bytes, 16).cast(*SwissSetStorage($K));
+    st := mem_alloc(s.alloc, bytes, align.cast(u32)).cast(*SwissSetStorage($K));
     st.len = 0;
     st.cap = cap;
     st.growth_left = (cap * 7) / 8;
@@ -457,6 +477,18 @@ fn add(s: *SwissSet($K, $HASH), key: $K): bool {
     return !get_or_add(s, key).found;
 }
 
+// adds a copy of key made in alloc (s.alloc by default) when it is new, returns the stored key
+fn add_copy(s: *SwissSet([]u8, $HASH), key: []u8, alloc: *Alloc = 0): []u8 {
+    slot := get_or_add(s, key);
+    if (!slot.found && key.len > 0) {
+        if (alloc == 0) { alloc = s.alloc; }
+        copied := mem_alloc_slice(alloc, u8, key.len, 1);
+        mem_copy(copied, key);
+        slot.value.* = copied;
+    }
+    return slot.value.*;
+}
+
 fn remove(s: *SwissSet($K, $HASH), key: $K): bool {
     st := s.storage;
     if (st == 0) { return false; }
@@ -526,6 +558,8 @@ fn iterator_next(it: *SwissSetIterator($K)): bool {
     return false;
 }
 
+fn iterator_end(it: *SwissSetIterator($K)): void {}
+
 fn iterator_current(it: *SwissSetIterator($K)): *$K {
     return type_offset(it.keys, it.at);
 }
@@ -561,7 +595,7 @@ fn _hashset_node_buckets(st: *NodeSetStorage($K)): *MapBucket {
 
 // a vacant node stores a u32 free-list link
 fn _hashset_node_stride($K: __type_ptr): i64 {
-    return max(sizeof_type($K), 4i64);
+    return #run _hash_node_stride($K);
 }
 
 fn _hashset_node_at(st: *NodeSetStorage($K), idx: i64): *$K {
@@ -629,7 +663,7 @@ fn _hashset_node_alloc_index(s: *NodeSet($K, $HASH)): i64 {
             st.chunk_table = mem_realloc(s.alloc, st.chunk_table.cast(*u8), ncap * 8, 8).cast(**u8);
             st.chunk_table_cap = ncap;
         }
-        chunk := mem_alloc(s.alloc, 64 * _hashset_node_stride($K), 16);
+        chunk := mem_alloc(s.alloc, 64 * _hashset_node_stride($K), (#run _hash_storage_align($K)).cast(u32));
         type_offset(st.chunk_table, st.chunk_count).* = chunk;
         st.chunk_count += 1;
     }
@@ -729,8 +763,6 @@ fn contains(s: *NodeSet($K, $HASH), key: $K): bool {
 fn get_or_add(s: *NodeSet($K, $HASH), key: $K): MapSlot($K) {
     if (s.storage == 0) {
         _hashset_node_grow(s, MAP_MIN_BUCKETS);
-    } else if (s.storage.len >= _hashmap_dense_cap(s.storage.bucket_cap)) {
-        _hashset_node_grow(s, s.storage.bucket_cap * 2);
     }
     st := s.storage;
     buckets := _hashset_node_buckets(st);
@@ -749,6 +781,11 @@ fn get_or_add(s: *NodeSet($K, $HASH), key: $K): MapSlot($K) {
                 return out;
             }
         } else if (dif > b.dist_and_fp) {
+            // grow only for a new key, so overwriting an existing one never moves entries
+            if (st.len >= _hashmap_dense_cap(st.bucket_cap)) {
+                _hashset_node_grow(s, st.bucket_cap * 2);
+                return get_or_add(s, key);
+            }
             node_idx := _hashset_node_alloc_index(s);
             kp := _hashset_node_at(st, node_idx);
             kp.* = key;
@@ -769,6 +806,18 @@ fn get_or_add(s: *NodeSet($K, $HASH), key: $K): MapSlot($K) {
 
 fn add(s: *NodeSet($K, $HASH), key: $K): bool {
     return !get_or_add(s, key).found;
+}
+
+// adds a copy of key made in alloc (s.alloc by default) when it is new, returns the stored key
+fn add_copy(s: *NodeSet([]u8, $HASH), key: []u8, alloc: *Alloc = 0): []u8 {
+    slot := get_or_add(s, key);
+    if (!slot.found && key.len > 0) {
+        if (alloc == 0) { alloc = s.alloc; }
+        copied := mem_alloc_slice(alloc, u8, key.len, 1);
+        mem_copy(copied, key);
+        slot.value.* = copied;
+    }
+    return slot.value.*;
 }
 
 fn remove(s: *NodeSet($K, $HASH), key: $K): bool {
@@ -833,6 +882,8 @@ fn iterator_next(it: *NodeSetIterator($K)): bool {
     }
     return false;
 }
+
+fn iterator_end(it: *NodeSetIterator($K)): void {}
 
 fn iterator_current(it: *NodeSetIterator($K)): *$K {
     b := type_offset(_hashset_node_buckets(it.st), it.at).*;

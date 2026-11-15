@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 import "./alloc.mox";
 import "./rapidhash.mox";
 
@@ -14,6 +14,8 @@ import "./rapidhash.mox";
 // A pointer key `*T` can hash its address:
 //     fn hash_t_ptr(p: **T): u64 { return hash_u64(p.cast(*u64)); }
 // Key equality is structural `==`, so []u8 keys compare by content.
+// Keys are stored as they are passed: a []u8 key keeps pointing at the caller's bytes.
+// The caller keeps those bytes alive while the key is in the map, and frees them after remove or destroy.
 //
 // Entry pointers and entries() views are invalid after growth.
 // remove swap-removes from the dense array, so entry order is not stable.
@@ -43,6 +45,17 @@ fn hash_bytes(p: *[]u8): u64 {
 // ---- container ----
 
 const MAP_HEADER_SIZE : i64 = 32;
+const HASH_STORAGE_MIN_ALIGN : i64 = 16;
+
+// alignment of a storage block and of the dense region of $T inside it
+fn _hash_storage_align($T: __type_ptr): i64 {
+    return max(HASH_STORAGE_MIN_ALIGN, alignof_type($T).cast(i64));
+}
+
+// node chunk stride: a vacant node holds a u32 free-list link, so at least 4 and a multiple of 4
+fn _hash_node_stride($T: __type_ptr): i64 {
+    return align_up(max(sizeof_type($T), 4i64), 4i64);
+}
 const MAP_MIN_BUCKETS : i64 = 16;
 
 struct MapBucket {
@@ -138,9 +151,10 @@ fn entries(m: *HashMap($K, $V, $HASH)): []MapEntry($K, $V) {
 
 fn _hashmap_new_storage(m: *HashMap($K, $V, $HASH), bucket_cap: i64): *HashMapStorage($K, $V) {
     buckets_bytes := bucket_cap * sizeof_type(MapBucket);
-    entries_offset := align_up(MAP_HEADER_SIZE + buckets_bytes, 16i64);
+    align := #run _hash_storage_align(#type MapEntry($K, $V));
+    entries_offset := align_up(MAP_HEADER_SIZE + buckets_bytes, align);
     bytes := entries_offset + _hashmap_dense_cap(bucket_cap) * sizeof_type(#type MapEntry($K, $V));
-    st := mem_alloc(m.alloc, bytes, 16).cast(*HashMapStorage($K, $V));
+    st := mem_alloc(m.alloc, bytes, align.cast(u32)).cast(*HashMapStorage($K, $V));
     st.len = 0;
     st.bucket_cap = bucket_cap;
     st.shift = (64 - ilog2(bucket_cap)).cast(u32);
@@ -241,8 +255,6 @@ fn contains(m: *HashMap($K, $V, $HASH), key: $K): bool {
 fn get_or_insert(m: *HashMap($K, $V, $HASH), key: $K): MapSlot($V) {
     if (m.storage == 0) {
         _hashmap_grow(m, MAP_MIN_BUCKETS);
-    } else if (m.storage.len >= _hashmap_dense_cap(m.storage.bucket_cap)) {
-        _hashmap_grow(m, m.storage.bucket_cap * 2);
     }
     st := m.storage;
     buckets := _hashmap_buckets(st);
@@ -262,6 +274,11 @@ fn get_or_insert(m: *HashMap($K, $V, $HASH), key: $K): MapSlot($V) {
                 return out;
             }
         } else if (dif > b.dist_and_fp) {
+            // grow only for a new key, so overwriting an existing one never moves entries
+            if (st.len >= _hashmap_dense_cap(st.bucket_cap)) {
+                _hashmap_grow(m, st.bucket_cap * 2);
+                return get_or_insert(m, key);
+            }
             // new key: append the entry and place the bucket here
             e := type_offset(entries, st.len);
             e.key = key;

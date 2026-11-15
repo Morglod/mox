@@ -1,0 +1,39 @@
+import "std.mox";
+import "vendor/libspng.mox";
+
+#linkc fn main(): i32 {
+    img : [1024]u8 = 0;
+    for (i : it_range(1024)) { img[i] = (i * 7).cast(u8); }
+
+    enc := spng_ctx_new(.SPNG_CTX_ENCODER);
+    spng_set_option(enc, .SPNG_ENCODE_TO_BUFFER, 1);
+    ihdr := spng_ihdr.{
+        width = 16, height = 16, bit_depth = 8,
+        color_type = .SPNG_COLOR_TYPE_TRUECOLOR_ALPHA,
+        compression_method = 0,
+        filter_method = 0,
+        interlace_method = 0,
+    };
+    spng_set_ihdr(enc, ihdr.^);
+    r := spng_encode_image(enc, img.ptr, 1024, .SPNG_FMT_PNG, .SPNG_ENCODE_FINALIZE);
+    if (r != .SPNG_OK) { println("encode: {}", .{ from_c_string(spng_strerror(r)) }); return 1; }
+    png_len : usize = 0;
+    err : spng_errno = .SPNG_OK;
+    png := spng_get_png_buffer(enc, png_len.^, err.^);
+    spng_ctx_free(enc);
+
+    dec := spng_ctx_new(.NONE);
+    spng_set_png_buffer(dec, png, png_len);
+    out : [1024]u8 = 0;
+    r = spng_decode_image(dec, out.ptr, 1024, .SPNG_FMT_RGBA8, .NONE);
+    if (r != .SPNG_OK) { println("decode: {}", .{ from_c_string(spng_strerror(r)) }); return 1; }
+    got := ihdr; got.width = 0;
+    spng_get_ihdr(dec, got.^);
+    spng_ctx_free(dec);
+
+    same := true;
+    for (i : it_range(1024)) { if (img[i] != out[i]) { same = false; } }
+    println("libspng {} png={} bytes {}x{} roundtrip={}", .{ from_c_string(spng_version_string()), png_len, got.width, got.height, same });
+    if (same) { return 0; }
+    return 1;
+}

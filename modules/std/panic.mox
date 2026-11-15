@@ -1,18 +1,52 @@
-import "./internal.mox";
+import "internal.mox";
 import "./os.mox";
 import "./format.mox";
 import "./slice.mox";
 
 #linkc fn __mox_panic(msg: *u8, msg_len: i64): void {
-    os_stdout_write(msg, msg_len);
+    if (_mox_comptime_hooks.panic != nullptr(_MoxHookPanic)) {
+        _mox_comptime_hooks.panic(slice(msg, msg_len), 0, 0, 0);
+    }
     nl := "\n";
-    os_stdout_write(nl);
-    os_abort();
+    if (is_panicking != 0) {
+        os_stderr_write("something went very wrong: panic while panicking\n");
+        os_stderr_write(panic_message);
+        os_stderr_write(nl);
+        os_stderr_write(msg, msg_len);
+        os_stderr_write(nl);
+        os_abort();
+    }
+    is_panicking = 1;
+    panic_message = slice(msg, msg_len);
+    if (!os_register_panic_printer()) {
+        os_stderr_write(msg, msg_len);
+        os_stderr_write(nl);
+        is_panicking = 2;
+    } else {
+        os_stderr_write("panic happened\n");
+    }
+    os_exit(3);
 }
 
 fn __do_panic(msg: []u8, loc: MoxSourceLocation = #caller_location): void {
-    if (!__mox_debug_break(msg.ptr, msg.len)) {
-        __mox_panic(msg.ptr, msg.len);
+    if (_mox_comptime_hooks.panic != nullptr(_MoxHookPanic)) {
+        _mox_comptime_hooks.panic(msg, loc.module_id, loc.offset, loc.line);
+    }
+
+    buf_mem : [4096]u8 = #memory_garbage;
+    buf := buf_mem.^ |> slice();
+
+    path := get_source_location_file_path(loc);
+    off: i64 = 0;
+    if (path.len != 0) {
+        off = format(buf, 0, "panic at: {}:{}\n{}", .{ path; loc.line; msg; });
+    } else {
+        off = format(buf, 0, "panic at: line {} (build with -g for the file name)\n{}", .{ loc.line; msg; });
+    }
+    text := slice(buf, 0, format_fit(buf, off));
+
+    if (!__mox_debug_break(text.ptr, text.len)) {
+        __mox_panic(text.ptr, text.len);
     }
 }
 
@@ -20,14 +54,9 @@ fn panic($msg_format: []u8, format_values: $T, loc: MoxSourceLocation = #caller_
     buf_mem : [1024]u8 = #memory_garbage;
     buf := buf_mem.^ |> slice();
 
-    off := format(buf, 0, "panic at: {}:{} module_id={} offset={}\n", .{ get_source_location_file_path(loc); loc.line; loc.module_id; loc.offset; });
-    off = format(buf, off, $msg_format, format_values);
-    off = format(buf, off, "\n", .{});
+    off := format(buf, 0, $msg_format, format_values);
 
-    buf[off] = 0;
-    buf.len = off;
-
-    __do_panic(buf, loc);
+    __do_panic(slice(buf, 0, format_fit(buf, off)), loc);
 }
 
 fn panic(msg: []u8, loc: MoxSourceLocation = #caller_location): void {

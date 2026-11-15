@@ -1,7 +1,7 @@
 // Auto-generated bindings from: box3d/box3d.h (Box3D by Erin Catto, MIT, https://github.com/erincatto/box3d)
 // Generator: gen_bindings (c99_parser)
 
-import "internal.mox";
+import "../internal.mox";
 import "./box3d/link.mox";
 
 // Opaque types (forward-declared structs without definitions)

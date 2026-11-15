@@ -12,6 +12,8 @@ const __mox_slice_length_type := i64;
 #linkc fn __mox_mem_alloc(size: i64, align: u32): *u8;
 #linkc fn __mox_mem_realloc(old_mem: *u8, new_size: i64, align: u32): *u8;
 #linkc fn __mox_mem_free(mem: *u8): void;
+#linkc fn __mox_panic(msg: *u8, msg_len: i64): void;
+#linkc("memmove") fn c_memmove(dst: *u8, src: *u8, size: u64): *u8;
 
 #linkc fn __mox_debug_break(msg: *u8, msg_len: i64): bool {
     return false;
@@ -63,6 +65,7 @@ enum MoxTypeKind : u8 {
     ComptimeInt;
     ComptimeFloat;
     PolyTypePattern;
+    PolyExpr;
 };
 
 struct MoxType {
@@ -72,13 +75,19 @@ struct MoxType {
     _align: u8;
     flags: u8;
 
-    #alias align = alignof_type(self);
+    #alias align = alignof_type(self.cast(__type_ptr));
 };
 
 struct MoxType_Ptr {
     base: MoxType;
     base_type: *MoxType;
     flags: u8;
+};
+
+// used for self referenced types
+struct MoxType_Placeholder {
+    base: MoxType;
+    resolved: *MoxType;
 };
 
 struct MoxType_Slice {
@@ -110,6 +119,7 @@ struct MoxType_Struct {
     fields: []MoxType_StructField;
     struct_generic_params: *MoxType_Struct_GenericParams;
     alias_info: __ast_ptr;
+    decl_ast: __ast_ptr;
 };
 
 // this is compiler internals which could be changed frequently
@@ -138,6 +148,7 @@ struct MoxType_Enum {
     base: MoxType;
     enum_base_type: *MoxType;
     values: []MoxType_Enum_Field;
+    decl_ast: __ast_ptr;
 };
 
 // structure for #caller_location
@@ -157,6 +168,7 @@ struct MoxSourceLocation {
 // fn __compiler_internal_module_file_path(module_id: u64): []u8
 // fn __compiler_internal_link_lib(path: []u8, load_in_comptime: bool): void
 // fn __compiler_internal_append_linker(str: []u8): void
+// fn __compiler_internal_panic(msg: []u8, module_id: u64, offset: u64, line: u64): void   a comptime panic as a compile error at that MoxSourceLocation (module_id 0: at the running #run); ends the compilation
 // fn __compiler_register_hook(hook_id: u64, callback: <macro>, custom_data: *T): void
 // __mox_source_path_table
 // __mox_source_path_count
@@ -164,11 +176,13 @@ struct MoxSourceLocation {
 const _MoxHookModuleFilePath: __type_ptr = #type fn(module_id: u64): []u8;
 const _MoxHookLinkLib: __type_ptr = #type fn(path: []u8, comptime_too: bool): void;
 const _MoxHookAppendLinker: __type_ptr = #type fn(args: []u8): void;
+const _MoxHookPanic: __type_ptr = #type fn(msg: []u8, module_id: u64, offset: u64, line: u64): void;
 
 struct _MoxCompilerHooks {
     module_file_path: *_MoxHookModuleFilePath;
     link_lib: *_MoxHookLinkLib;
     append_linker: *_MoxHookAppendLinker;
+    panic: *_MoxHookPanic;
 };
 
 _mox_comptime_hooks: _MoxCompilerHooks = 0;
@@ -176,6 +190,7 @@ _mox_comptime_hooks: _MoxCompilerHooks = 0;
     _mox_comptime_hooks.module_file_path = __compiler_internal_module_file_path.^;
     _mox_comptime_hooks.link_lib = __compiler_internal_link_lib.^;
     _mox_comptime_hooks.append_linker = __compiler_internal_append_linker.^;
+    _mox_comptime_hooks.panic = __compiler_internal_panic.^;
 }
 
 // source file path of a module by id at comptime; empty slice at runtime
@@ -239,6 +254,14 @@ fn sizeof_type($T: __type_ptr): i64 {
 
 fn alignof_type($T: __type_ptr): u32 {
     return #run __compiler_alignof_type($T);
+}
+
+// follows placeholders to the type they stand for
+fn mox_resolve_type(t: *MoxType): *MoxType {
+    while (t.kind == .Placeholder && t.cast(*MoxType_Placeholder).resolved != nullptr(MoxType)) {
+        t = t.cast(*MoxType_Placeholder).resolved;
+    }
+    return t;
 }
 
 fn mox_struct_fields($T: __type_ptr): []MoxType_StructField {
@@ -306,25 +329,32 @@ fn ptr_ty_diff(base: *$T, x: *$T): i64 {
     return (x.cast(u64) - base.cast(u64)).cast(i64) / sizeof_type($T);
 }
 
-fn mem_copy(dst: *u8, src: *u8, size: i64): void {
-    if (dst == src || size <= 0) { return; }
+// copies count values of T, overlapping ranges allowed
+fn mem_copy(dst: *$T, src: *$T, count: i64): void {
+    if (dst == src || count <= 0) { return; }
 
-    if (dst.cast(u64) < src.cast(u64) || dst.cast(u64) >= (src |> byte_offset(size)).cast(u64)) {
-        end := src |> byte_offset(size);
+    if (dst.cast(u64) < src.cast(u64) || dst.cast(u64) >= type_offset(src, count).cast(u64)) {
+        end := type_offset(src, count);
         while (src != end) {
             dst.* = src.*;
-            src = src |> byte_offset(1);
-            dst = dst |> byte_offset(1);
+            src = type_offset(src, 1);
+            dst = type_offset(dst, 1);
         }
     } else {
-        s := src |> byte_offset(size);
-        d := dst |> byte_offset(size);
+        s := type_offset(src, count);
+        d := type_offset(dst, count);
         while (s != src) {
-            s = s |> byte_offset(-1);
-            d = d |> byte_offset(-1);
+            s = type_offset(s, -1);
+            d = type_offset(d, -1);
             d.* = s.*;
         }
     }
+}
+
+// copies size bytes, overlapping ranges allowed
+fn mem_copy(dst: *u8, src: *u8, size: i64): void {
+    if (size <= 0) { return; }
+    c_memmove(dst, src, size.cast(u64));
 }
 
 fn mem_copy(dst: []$T, src: []$T): void {
@@ -405,9 +435,33 @@ fn clamp(x: $T, lo: $T, hi: $T): $T {
     return min(max(x, lo), hi);
 }
 
+// abs of the smallest signed int wraps to itself (its absolute value doesn't fit); uabs gives the exact value
 fn abs(x: $T): $T {
-    if (x < 0) { return -x; }
-    return x;
+    #if ($T.cast(*MoxType).kind == .F32 || $T.cast(*MoxType).kind == .F64) {
+        // 0 - x also turns -0.0 into +0.0
+        if (x <= 0) { return 0 - x; }
+        return x;
+    } else {
+        if (x < 0) { return #wrap_sub(0, x); }
+        return x;
+    }
+}
+
+fn _unsigned_int_type($T: __type_ptr): __type_ptr {
+    k := $T.cast(*MoxType).kind;
+    if (k == .I8) { return #type u8; }
+    if (k == .I16) { return #type u16; }
+    if (k == .I32) { return #type u32; }
+    if (k == .I64) { return #type u64; }
+    if (k == .I128) { return #type u128; }
+    return $T;
+}
+
+// exact absolute value of an int, as the unsigned int of the same width: uabs(INT64_MIN) = 9223372036854775808u64
+fn uabs(x: $T): #run _unsigned_int_type($T) {
+    u := x.cast(#run _unsigned_int_type($T));
+    if (x < 0) { return #wrap_sub(0, u); }
+    return u;
 }
 
 fn lerp(a: $T, b: $T, t: $T): $T {
@@ -502,6 +556,8 @@ fn iterator_next(it: *RangeIterator($T)): bool {
     return it.cur < it.end;
 }
 
+fn iterator_end(it: *RangeIterator($T)): void {}
+
 fn iterator_current(it: *RangeIterator($T)): $T {
     return it.cur;
 }
@@ -527,6 +583,8 @@ fn iterator_next(it: *RangeReverseIterator($T)): bool {
     it.cur -= 1;
     return true;
 }
+
+fn iterator_end(it: *RangeReverseIterator($T)): void {}
 
 fn iterator_current(it: *RangeReverseIterator($T)): $T {
     return it.cur;
@@ -554,6 +612,8 @@ fn iterator_next(it: *PtrIterator($T)): bool {
     }
     return it.cur != it.end;
 }
+
+fn iterator_end(it: *PtrIterator($T)): void {}
 
 fn iterator_current(it: *PtrIterator($T)): *$T {
     return it.cur;
@@ -655,6 +715,10 @@ fn is_finite(x: f64): bool {
 
 const F32_INF : f32 = bitcast(f32, 0x7F800000u32);
 const F64_INF : f64 = bitcast(f64, 0x7FF0000000000000u64);
+const F32_NAN : f32 = bitcast(f32, 0x7FC00000u32);
+const F64_NAN : f64 = bitcast(f64, 0x7FF8000000000000u64);
+const F32_MIN_NORMAL : f32 = bitcast(f32, 0x00800000u32);
+const F64_MIN_NORMAL : f64 = bitcast(f64, 0x0010000000000000u64);
 
 fn f_inf($T: __type_ptr): $T {
     #if ($T.cast(*MoxType).kind == .F32) {
@@ -664,8 +728,23 @@ fn f_inf($T: __type_ptr): $T {
     }
 }
 
+fn f_nan($T: __type_ptr): $T {
+    #if ($T.cast(*MoxType).kind == .F32) {
+        return F32_NAN;
+    } else {
+        return F64_NAN;
+    }
+}
+
 // later mox will have proper inline condition expression
 fn select(x: bool, a: $T, b: $T): $T {
     if (x) { return b; }
     return a;
+}
+
+fn slice(ptr: *$T, len: i64 = 1): []$T {
+    out: []$T = #memory_garbage;
+    out.ptr = ptr;
+    out.len = len;
+    return out;
 }

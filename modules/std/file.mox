@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 import "./os.mox";
 import "./alloc.mox";
 import "./panic.mox";
@@ -66,6 +66,18 @@ fn fs_path_join(dir: []u8, name: []u8, alloc: *Alloc = get_context_temp_arena_as
     mem_copy(out, dir);
     if (has_sep) { out[dir.len] = PATH_SEPARATOR; }
     mem_copy(slice(out, dir.len + has_sep.cast(i64), name.len), name);
+    return out;
+}
+
+// absolute form of path on alloc, with "/" separators and "." / ".." resolved; empty = failed.
+// Works on the text only: the file does not need to exist and symlinks are not followed. A trailing separator is kept.
+fn fs_path_abs(path: []u8, alloc: *Alloc = get_context_temp_arena_as_alloc()): []u8 {
+    // fits the longest result: a 32767-unit Windows path in UTF-8, or the cwd (up to PATH_MAX) joined with path
+    buf := #temp_buffer(98304 + path.len + 2, alloc);
+    n := os_path_abs(buf, path);
+    if (n == 0) { return empty_slice(u8); }
+    out := mem_alloc_slice(alloc, u8, n);
+    mem_copy(out, slice(buf, 0, n));
     return out;
 }
 
@@ -182,9 +194,15 @@ fn fs_temp_file(prefix: []u8 = "mox", alloc: *Alloc = get_context_temp_arena_as_
         path := mem_alloc_slice(alloc, u8, dir_len + name_len);
         mem_copy(path, dir);
         format(path, dir_len, "{}_{}_{}.tmp", .{ prefix; t; _fs_temp_file_counter; });
-        if (os_path_exists(path)) { continue; }
+        if (os_path_exists(path)) {
+            mem_free(alloc, path);
+            continue;
+        }
         h := os_file_open_write(path);
-        if (h == 0) { return empty_slice(u8); }
+        if (h == 0) {
+            mem_free(alloc, path);
+            return empty_slice(u8);
+        }
         os_file_close(h);
         return path;
     }

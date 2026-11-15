@@ -1,7 +1,7 @@
 import "internal.mox";
 import "build.mox";
-import "format.mox";
-import "os.mox";
+import "std/format.mox";
+import "std/os.mox";
 
 fn link_raylib($link_comptime: bool): void {
     if (!#is_comptime) { return; }
@@ -21,8 +21,10 @@ fn link_raylib($link_comptime: bool): void {
                 dll_path = build_resolve_path("./linux64/libraylib.so.600");
             } else {
                 if (build_unix_dll_available("libraylib.so")) {
-                    link_path = "libraylib.so";
-                    dll_path = "libraylib.so";
+                    __compiler_link_lib("raylib", false);
+                    if ($link_comptime) {
+                        __compiler_link_lib("raylib", true);
+                    }
                 }
                 // else if (build_contains_install_deps("raylib")) {
                 //     cmd := "";
@@ -43,8 +45,10 @@ fn link_raylib($link_comptime: bool): void {
                 //         println("\nfailed to install package with \"{}\" at {}\n", .{ cmd; build_resolve_path("./link.mox"); });
                 //         return;
                 //     }
-                //     link_path = "libraylib.so";
-                //     dll_path = "libraylib.so";
+                //     __compiler_link_lib("raylib", false);
+                //     if ($link_comptime) {
+                //         __compiler_link_lib("raylib", true);
+                //     }
                 // }
                 else {
                     println("\nprecompiled raylib are only for 2.39 glibc, install and link raylib manually or specify it in {}\nor run compiler with MOX_INSTALL_DEPS=true\n", .{ build_resolve_path("./link.mox"); });

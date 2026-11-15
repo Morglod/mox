@@ -153,7 +153,7 @@ fn run_demo() {
         EndMode3D();
 
         DrawFPS(10, 10);
-        text := #format_temp("bodies: {}  awake: {}\0", .{ bodies.len; b3World_GetAwakeBodyCount(world); });
+        text := #format_temp("bodies: {}  awake: {}\0", .{ bodies.len; b3World_GetAwakeBodyCount(world); }, nullptr(Alloc));
         DrawText(text.ptr, 10, 36, 20, COLOR_LIGHTGRAY);
         DrawText("click / space: shoot   R: reset", 10, 60, 20, COLOR_LIGHTGRAY);
     }

@@ -1,5 +1,5 @@
-import "./internal.mox";
-import "./utf8.mox"; // utf8_seq_len, utf8_decode
+import "internal.mox";
+import "./utf8.mox";
 
 // VT/xterm terminal input: shared event model + byte-stream parser.
 //
@@ -97,29 +97,26 @@ fn vt_parser_init(p: *VtParser): void {
     p.len = 0;
 }
 
-fn vt_feed(p: *VtParser, b: u8): void {
-    if (p.len >= VT_BUF_CAP) {
-        // Overflow inside an unterminated string sequence (OSC/DCS/APC): keep the 2 byte intro and the newest byte, drop the middle.
-        // The newest byte may be a pending ESC of the ESC \ terminator, it has to survive.
-        if (p.len >= 3) {
-            p.buf[2] = p.buf[p.len - 1];
-            p.len = 3;
-        } else {
-            p.len = 0;
-        }
-    }
+// false when the buffer is full: decode events with vt_next first
+fn vt_feed(p: *VtParser, b: u8): bool {
+    if (p.len >= VT_BUF_CAP) { return false; }
     p.buf[p.len] = b;
     p.len += 1;
+    return true;
 }
 
-fn vt_feed_bytes(p: *VtParser, ptr: *u8, n: i64): void {
-    for (i : it_range(0i64, n)) {
-        vt_feed(p, type_offset(ptr, i).*);
+// takes at most the free space (VT_BUF_CAP - p.len), returns how many bytes it took; feed the rest after vt_next
+fn vt_feed_bytes(p: *VtParser, ptr: *u8, n: i64): i64 {
+    taken := min(n, (VT_BUF_CAP - p.len).cast(i64));
+    for (i : it_range(0i64, taken)) {
+        p.buf[p.len] = type_offset(ptr, i).*;
+        p.len += 1;
     }
+    return taken;
 }
 
 // slice variant
-fn vt_feed_bytes(p: *VtParser, bytes: []u8): void { vt_feed_bytes(p, bytes.ptr, bytes.len); }
+fn vt_feed_bytes(p: *VtParser, bytes: []u8): i64 { return vt_feed_bytes(p, bytes.ptr, bytes.len); }
 
 // drop n bytes from the front
 fn _vt_consume(p: *VtParser, n: u32): void {
@@ -200,15 +197,9 @@ fn _vt_plain(p: *VtParser, flush: bool, ev: *Event): bool {
     if (b == 32) { _vt_consume(p, 1); _vt_key(ev, .space, 32, 0); return true; }
 
     need := _vt_utf8_need(b);
-    if (p.len < need) {
-        if (!flush) { return false; }
-        // nothing more is coming, emit the raw byte instead of stalling forever
-        _vt_consume(p, 1);
-        _vt_key(ev, .char, b.cast(u32), 0);
-        return true;
-    }
+    if ((p.len < need) && !flush) { return false; } // the rest may still come; once flushed a cut char decodes to U+FFFD
 
-    // on a bad continuation byte the decoder reports the lead as one raw byte and the rest is re-parsed, so garbage never eats the bytes behind it
+    // bad UTF-8 decodes to U+FFFD without taking the byte that broke it, that byte is parsed again, so garbage never eats the bytes behind it
     pending: []u8 = #memory_garbage;
     pending.ptr = p.buf.ptr;
     pending.len = p.len.cast(i64);
@@ -414,7 +405,7 @@ fn _vt_skip_string(p: *VtParser): u32 {
 
 // Decode the next event from the pending bytes.
 // false = the buffer is empty or holds an incomplete sequence, feed more bytes and call again.
-// flush means no more bytes are coming soon: a lone ESC becomes the escape key and a cut UTF-8 char is emitted as a raw byte.
+// flush means no more bytes are coming soon: a lone ESC becomes the escape key and a cut UTF-8 char is emitted as U+FFFD.
 // Pass flush=false while bytes can still arrive, flush=true after a short idle timeout.
 fn vt_next(p: *VtParser, flush: bool, ev: *Event): bool {
     while (p.len > 0) {
@@ -446,7 +437,15 @@ fn vt_next(p: *VtParser, flush: bool, ev: *Event): bool {
             // unknown SS3: dropped, keep parsing
         }
         else if ((b1 == 93) || (b1 == 80) || (b1 == 95) || (b1 == 94)) { // ] P _ ^ = OSC/DCS/APC/PM
-            if (_vt_skip_string(p) == _VT_NEED_MORE) { return false; }
+            if (_vt_skip_string(p) == _VT_NEED_MORE) {
+                // a string longer than the buffer can not end inside it: keep the 2 byte intro and the last byte
+                // (it may be the ESC of the ESC \ terminator), drop the middle so more bytes fit
+                if (p.len >= VT_BUF_CAP) {
+                    p.buf[2] = p.buf[p.len - 1];
+                    p.len = 3;
+                }
+                return false;
+            }
             // consumed, keep parsing
         }
         else if (b1 == 27) { // ESC ESC

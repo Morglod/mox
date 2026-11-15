@@ -1,5 +1,8 @@
-import "./internal.mox";
+import "internal.mox";
 import "./os_posix.mox";
+import "./process_tree_posix.mox";
+import "./alloc.mox";
+import "./context.mox";
 
 struct Pty {
     master: i32;     // pty master fd (non-blocking)
@@ -7,7 +10,7 @@ struct Pty {
     cols: u32;
     rows: u32;
     alive: bool;
-    exit_status: i32; // raw waitpid status, captured when the child is reaped
+    exit: OsWaitResult; // .running until the child is reaped
 };
 
 fn _pty_set_winsize(fd: i32, cols: u32, rows: u32): void {
@@ -17,18 +20,20 @@ fn _pty_set_winsize(fd: i32, cols: u32, rows: u32): void {
     posix_ioctl(fd, POSIX_TIOCSWINSZ, ws.^.cast(*u8));
 }
 
-// spawn `cmd` (NUL-terminated) as `/bin/sh -c cmd` in a cols x rows pty
-fn pty_spawn(cmd: *u8, cols: i64, rows: i64, out: *Pty): bool {
+// spawn `cmd` (NULL-terminated) as `/bin/sh -c cmd` in a cols x rows pty. alloc is not used here (windows keeps its input buffer on it).
+fn pty_spawn(cmd: *u8, cols: i64, rows: i64, out: *Pty, alloc: *Alloc = get_context_alloc()): bool {
     out.cols = max(cols, 1).cast(u32);
     out.rows = max(rows, 1).cast(u32);
     out.alive = false;
-    out.exit_status = 0;
+    out.exit.status = .failed; // a pty that never started
+    out.exit.exit_code = 0;
     // set master invalid first, pty_close closes it when it is a valid fd
     out.master = POSIX_NO_FD;
     out.pid = 0;
 
     master := posix_openpt(POSIX_O_RDWR | POSIX_O_NOCTTY);
     if (master < 0) { return false; }
+    posix_fcntl(master, POSIX_F_SETFD, POSIX_FD_CLOEXEC); // other children must not keep the terminal open
     if (posix_grantpt(master) != 0) { posix_close(master); return false; }
     if (posix_unlockpt(master) != 0) { posix_close(master); return false; }
     slave_name := posix_ptsname(master);
@@ -40,7 +45,7 @@ fn pty_spawn(cmd: *u8, cols: i64, rows: i64, out: *Pty): bool {
     if (pid == 0) {
         // child: new session, slave tty becomes the controlling terminal and all of stdio
         posix_setsid();
-        slave := posix_open(slave_name, POSIX_O_RDWR, 0);
+        slave := #posix_retry(#ast posix_open(slave_name, POSIX_O_RDWR, 0)).cast(i32);
         if (slave < 0) { posix_exit_now(127); }
         posix_ioctl(slave, POSIX_TIOCSCTTY, nullptr(u8));
         posix_dup2(slave, 0);
@@ -48,6 +53,7 @@ fn pty_spawn(cmd: *u8, cols: i64, rows: i64, out: *Pty): bool {
         posix_dup2(slave, 2);
         if (slave > 2) { posix_close(slave); }
         posix_close(master);
+        _posix_child_close_from_3();
 
         sh := "/bin/sh";
         dash_c := "-c";
@@ -62,6 +68,7 @@ fn pty_spawn(cmd: *u8, cols: i64, rows: i64, out: *Pty): bool {
     out.master = master;
     out.pid = pid;
     out.alive = true;
+    out.exit.status = .running;
     return true;
 }
 
@@ -73,27 +80,48 @@ fn pty_read(pty: *Pty, buf: *u8, cap: i64): i64 {
     return r;
 }
 
-fn pty_write(pty: *Pty, buf: *u8, n: i64): void {
-    if (n == 0) { return; }
-    if (pty.master < 0) { return; }
-    posix_write(pty.master, buf, n.cast(u64));
+// writes what fits now without blocking: returns the bytes taken (0 = input buffer full, send the rest later), -1 on error
+fn pty_write(pty: *Pty, buf: *u8, n: i64): i64 {
+    if (n <= 0) { return 0; }
+    if (pty.master < 0) { return -1; }
+    w := #posix_retry(#ast posix_write(pty.master, buf, n.cast(u64)));
+    if (w >= 0) { return w; }
+    if (_posix_errno() == POSIX_EAGAIN) { return 0; }
+    return -1;
 }
 
-// reaps the child once it exits, and keeps its status for pty_exit_code
+// writes all of buf, waiting while the child does not read its input.
+// Blocks until the child reads: with echo on, a caller that does not read the output meanwhile can wait forever.
+fn pty_write_all(pty: *Pty, buf: *u8, n: i64): bool {
+    off: i64 = 0;
+    while (off < n) {
+        w := pty_write(pty, byte_offset(buf, off), n - off);
+        if (w < 0) { return false; }
+        if (w == 0) {
+            p: PosixPollFd = 0;
+            p.fd = pty.master;
+            p.events = POSIX_POLLOUT;
+            if ((posix_poll(p.^, 1, -1) < 0) && (_posix_errno() != POSIX_EINTR)) { return false; }
+            continue;
+        }
+        off += w;
+    }
+    return true;
+}
+
+// reaps the child once it exits, and keeps its exit code for pty_exit_code
 fn pty_alive(pty: *Pty): bool {
     if (!pty.alive) { return false; }
-    st: i32 = 0;
-    r := posix_waitpid(pty.pid, st.^, POSIX_WNOHANG);
-    if (r == 0) { return true; }
-    pty.exit_status = st;
+    wr := os_wait_process_exit(pty.pid.cast(u64), 0);
+    if (wr.status == .running) { return true; }
+    pty.exit = wr;
     pty.alive = false;
     return false;
 }
 
-// only meaningful after pty_alive() returned false
-fn pty_exit_code(pty: *Pty): u32 {
-    // WEXITSTATUS(status) = (status >> 8) & 0xff
-    return #shr(pty.exit_status.cast(u32), 8) & 255;
+// .running while the child runs; exit_code is 128+signal when it was killed by a signal
+fn pty_exit_code(pty: *Pty): OsWaitResult {
+    return pty.exit;
 }
 
 fn pty_resize(pty: *Pty, cols: i64, rows: i64): void {
@@ -111,9 +139,8 @@ fn pty_close(pty: *Pty): void {
         if (pty.master >= 0) { posix_close(pty.master); pty.master = POSIX_NO_FD; }
         return;
     }
-    posix_kill(pty.pid, POSIX_SIGKILL);
-    st: i32 = 0;
-    posix_waitpid(pty.pid, st.^, 0);
+    os_kill_tree(pty.pid.cast(u64)); // the shell and everything it started
+    pty.exit = os_wait_process_exit(pty.pid.cast(u64), -1);
     posix_close(pty.master);
     pty.master = POSIX_NO_FD;
     pty.alive = false;

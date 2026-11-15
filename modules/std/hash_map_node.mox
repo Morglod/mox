@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 import "./alloc.mox";
 import "./hash_map.mox";
 
@@ -8,7 +8,7 @@ import "./hash_map.mox";
 // Use it when entry pointers must survive insert, remove and growth.
 // HashMap iterates and grows faster.
 //
-// Same API and hasher convention as HashMap:
+// Same API, hasher and key ownership convention as HashMap:
 //     NodeMap([]u8, MyStruct, hash_bytes.^)
 // Iteration: for (e : iter(m.^)) { ... }, in bucket order, not insertion order.
 
@@ -44,7 +44,7 @@ fn _hashmap_node_buckets(st: *NodeMapStorage($K, $V)): *MapBucket {
 
 // a vacant node stores a u32 free-list link, so a node is never under 4 bytes
 fn _hashmap_node_stride($K: __type_ptr, $V: __type_ptr): i64 {
-    return max(sizeof_type(#type MapEntry($K, $V)), 4i64);
+    return #run _hash_node_stride(#type MapEntry($K, $V));
 }
 
 fn _hashmap_node_at(st: *NodeMapStorage($K, $V), idx: i64): *MapEntry($K, $V) {
@@ -115,7 +115,7 @@ fn _hashmap_node_alloc_index(m: *NodeMap($K, $V, $HASH)): i64 {
             st.chunk_table = nt;
             st.chunk_table_cap = ncap;
         }
-        chunk := mem_alloc(m.alloc, NODE_CHUNK_LEN * _hashmap_node_stride($K, $V), 16);
+        chunk := mem_alloc(m.alloc, NODE_CHUNK_LEN * _hashmap_node_stride($K, $V), (#run _hash_storage_align(#type MapEntry($K, $V))).cast(u32));
         type_offset(st.chunk_table, st.chunk_count).* = chunk;
         st.chunk_count += 1;
     }
@@ -218,8 +218,6 @@ fn contains(m: *NodeMap($K, $V, $HASH), key: $K): bool {
 fn get_or_insert(m: *NodeMap($K, $V, $HASH), key: $K): MapSlot($V) {
     if (m.storage == 0) {
         _hashmap_node_grow(m, MAP_MIN_BUCKETS);
-    } else if (m.storage.len >= _hashmap_dense_cap(m.storage.bucket_cap)) {
-        _hashmap_node_grow(m, m.storage.bucket_cap * 2);
     }
     st := m.storage;
     buckets := _hashmap_node_buckets(st);
@@ -238,6 +236,11 @@ fn get_or_insert(m: *NodeMap($K, $V, $HASH), key: $K): MapSlot($V) {
                 return out;
             }
         } else if (dif > b.dist_and_fp) {
+            // grow only for a new key, so overwriting an existing one never moves entries
+            if (st.len >= _hashmap_dense_cap(st.bucket_cap)) {
+                _hashmap_node_grow(m, st.bucket_cap * 2);
+                return get_or_insert(m, key);
+            }
             node_idx := _hashmap_node_alloc_index(m);
             e := _hashmap_node_at(st, node_idx);
             e.key = key;
@@ -329,6 +332,8 @@ fn iterator_next(it: *NodeIterator($K, $V)): bool {
     }
     return false;
 }
+
+fn iterator_end(it: *NodeIterator($K, $V)): void {}
 
 fn iterator_current(it: *NodeIterator($K, $V)): *MapEntry($K, $V) {
     b := type_offset(_hashmap_node_buckets(it.st), it.at).*;

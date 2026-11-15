@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 import "./alloc.mox";
 import "./arena.mox";
 import "./format.mox";
@@ -116,11 +116,31 @@ fn make_string(s: *u8, len: i64): String {
 struct StringBuilder {
     total_size: i64;
     bb: BufferBuilder(String);
+
+    #alias alloc = self.bb.alloc;
 }
 
-fn init(sb: *StringBuilder, arena: *Alloc = get_context_temp_arena_as_alloc()): void {
+fn init(sb: *StringBuilder, alloc: *Alloc): void {
     sb.total_size = 0;
-    init(sb.bb.^, arena);
+    init(sb.bb.^, alloc);
+}
+
+// builder on a scratch arena, popped at the end of the caller's block
+// pass the finalize allocator as conflict when it may be a temp arena
+fn #temp_string_builder(): *StringBuilder {
+    t := scratch_begin();
+    sb := mem_alloc(t.alloc, StringBuilder);
+    init(sb, t.alloc);
+    defer scratch_end(t);
+    return sb;
+}
+
+fn #temp_string_builder(conflict: *Alloc): *StringBuilder {
+    t := scratch_begin(conflict);
+    sb := mem_alloc(t.alloc, StringBuilder);
+    init(sb, t.alloc);
+    defer scratch_end(t);
+    return sb;
 }
 
 fn reset(sb: *StringBuilder) {
@@ -139,27 +159,34 @@ fn push(sb: *StringBuilder, s: String): void {
     sb.total_size += s.len;
 }
 
-fn format(sb: *StringBuilder, $fmt_str: []u8, values: $T): void {
+// format, push_copy and push_byte return the piece they allocated, so it can be freed when sb.alloc is not an arena
+
+fn format(sb: *StringBuilder, $fmt_str: []u8, values: $T): String {
     len := format_len($fmt_str, values);
-    buf := mem_alloc_slice(sb.bb.arena, u8, len, 1);
+    buf := mem_alloc_slice(sb.alloc, u8, len, 1);
     format(buf, 0, $fmt_str, values);
     push(sb, buf);
+    return buf;
 }
 
-fn push_copy(sb: *StringBuilder, s: String, alloc: *Alloc = get_context_temp_arena_as_alloc()): void {
+fn push_copy(sb: *StringBuilder, s: String, alloc: *Alloc = 0): String {
+    if (alloc == 0) { alloc = sb.alloc; }
     if (s.len == 0) {
         push(sb, empty_slice(u8));
-        return;
+        return empty_slice(u8);
     }
     copied := mem_alloc_slice(alloc, u8, s.len, 1);
     mem_copy(copied, s);
     push(sb, copied);
+    return copied;
 }
 
-fn push_byte(sb: *StringBuilder, b: u8): void {
-    ptr := mem_alloc(sb.bb.arena, 1, 1);
+fn push_byte(sb: *StringBuilder, b: u8): String {
+    ptr := mem_alloc(sb.alloc, 1, 1);
     ptr.* = b;
-    push(sb, make_string(ptr, 1));
+    piece := make_string(ptr, 1);
+    push(sb, piece);
+    return piece;
 }
 
 // copy s to dst, return the position right after it

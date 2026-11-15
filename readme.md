@@ -82,13 +82,13 @@ Code generation and ast manipulation:
 
 ```rust
 fn make_config($path: []u8): __ast_ptr {
-    sb : StringBuilder = 0;
-    init(sb.^);
+    sb := #temp_string_builder();
     for (line : split_iterator(fs_read_file_full($path), "\n")) {
         eq := index_of(line, "=");
-        format(sb.^, "const {} : i32 = {};\n", .{ slice(line, 0, eq), slice(line, eq + 1, line.len) });
+        if (eq < 0) { continue; }
+        format(sb, "const {} : i32 = {};\n", .{ slice(line, 0, eq), slice(line, eq + 1, line.len) });
     }
-    return __compiler_parse(finalize(sb.^));
+    return __compiler_parse(finalize(sb));
 }
 
 #run #land_ast make_config("./config.txt"); // const width : i32 = 800; ...

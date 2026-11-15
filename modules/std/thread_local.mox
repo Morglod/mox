@@ -1,34 +1,41 @@
-import "./internal.mox";
-import "./alloc.mox";
+import "internal.mox";
 import "./os.mox";
 import "./panic.mox";
 
 struct ThreadLocalStorage($T: __type_ptr) {
     key: OsTlsKey;
-    is_init: bool;
+    created: bool;
 };
 
 fn create_thread_local($T: __type_ptr): ThreadLocalStorage($T) {
     storage: ThreadLocalStorage($T) = .{
         key = 0;
-        is_init = false;
+        created = false;
     };
     return storage;
 }
 
+fn _thread_local_free_value(value: *u8): void {
+    os_heap_free(value);
+}
+
 fn thread_local_init(storage: *ThreadLocalStorage($T)): bool {
-    if (!storage.is_init) {
-        if (!os_tls_key_create_simple(storage.key.^)) {
-            panic("failed init thread local storage: os_tls_key_create_simple failed");
-        }
-        storage.is_init = true;
+    if (!storage.created) {
+        owns_value := false;
         if (#run $T.cast(*MoxType).kind != .Ptr) {
-            ptr := mem_alloc(default_alloc(), $T, 8);
-            ptr.* = 0;
-            os_tls_set(storage.key, ptr.cast(*u8));
-        } else {
-            os_tls_set(storage.key, nullptr(u8));
+            // no destructor at comptime: it would fire at compiler exit, after the comptime code is gone
+            owns_value = !#is_comptime;
         }
+        created := false;
+        if (owns_value) {
+            created = os_tls_key_create(storage.key.^, _thread_local_free_value.^);
+        } else {
+            created = os_tls_key_create_simple(storage.key.^);
+        }
+        if (!created) {
+            panic("failed init thread local storage: os_tls_key_create failed");
+        }
+        storage.created = true;
     }
     return true;
 }
@@ -41,38 +48,30 @@ fn _thread_local_pointer_type($T: __type_ptr): __type_ptr {
 }
 
 fn thread_local_get(storage: *ThreadLocalStorage($T)): #run _thread_local_pointer_type($T) {
-    if (!thread_local_init(storage)) {
-        if (#run $T.cast(*MoxType).kind != .Ptr) {
-            return nullptr($T);
-        } else {
-            return 0 .cast(u64).cast($T);
+    thread_local_init(storage);
+    value := os_tls_get(storage.key);
+    if (#run $T.cast(*MoxType).kind != .Ptr) {
+        if (value == nullptr(u8)) {
+            ptr := os_heap_alloc(sizeof_type($T), 16).cast(*$T);
+            ptr.* = 0;
+            os_tls_set(storage.key, ptr.cast(*u8));
+            value = ptr.cast(*u8);
         }
     }
-
-    return os_tls_get(storage.key).cast();
+    return value.cast();
 }
 
 fn thread_local_set(storage: *ThreadLocalStorage($T), value: $T): bool {
-    if (!thread_local_init(storage)) {
-        return false;
-    }
-
+    thread_local_init(storage);
     if (#run $T.cast(*MoxType).kind != .Ptr) {
         thread_local_get(storage).* = value;
-    } else {
-        os_tls_set(storage.key, value.cast(*u8));
+        return true;
     }
-    return true;
+    return os_tls_set(storage.key, value.cast(*u8));
 }
 
 fn thread_local_swap(storage: *ThreadLocalStorage($T), value: $T): $T {
-    #if ($T.cast(*MoxType).kind == .Ptr) {
-        prev_value := thread_local_get(storage);
-        thread_local_set(storage, value);
-        return prev_value;
-    } else {
-        prev_value := thread_local_get(storage).*;
-        thread_local_set(storage, value);
-        return prev_value;
-    }
+    prev_value := thread_local_get(storage).*;
+    thread_local_set(storage, value);
+    return prev_value;
 }

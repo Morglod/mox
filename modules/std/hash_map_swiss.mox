@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 import "./alloc.mox";
 import "./simd.mox";
 import "./hash_map.mox";
@@ -9,7 +9,7 @@ import "./hash_map.mox";
 // Entries live in a parallel slot array in the same allocation.
 // Nothing is allocated before the first insert or reserve.
 //
-// Same API and hasher convention as HashMap:
+// Same API, hasher and key ownership convention as HashMap:
 //     SwissMap([]u8, i32, hash_bytes.^)
 // Compared to HashMap, remove keeps entry slots in place but leaves tombstones, and iteration scans the whole slot array.
 
@@ -75,9 +75,10 @@ fn clear(m: *SwissMap($K, $V, $HASH)): void {
 }
 
 fn _hashmap_swiss_new_storage(m: *SwissMap($K, $V, $HASH), cap: i64): *SwissStorage($K, $V) {
-    entries_offset := align_up(SWISS_HEADER_SIZE + cap, 16i64);
+    align := #run _hash_storage_align(#type MapEntry($K, $V));
+    entries_offset := align_up(SWISS_HEADER_SIZE + cap, align);
     bytes := entries_offset + cap * sizeof_type(#type MapEntry($K, $V));
-    st := mem_alloc(m.alloc, bytes, 16).cast(*SwissStorage($K, $V));
+    st := mem_alloc(m.alloc, bytes, align.cast(u32)).cast(*SwissStorage($K, $V));
     st.len = 0;
     st.cap = cap;
     st.growth_left = (cap * 7) / 8;
@@ -285,6 +286,8 @@ fn iterator_next(it: *SwissIterator($K, $V)): bool {
     }
     return false;
 }
+
+fn iterator_end(it: *SwissIterator($K, $V)): void {}
 
 fn iterator_current(it: *SwissIterator($K, $V)): *MapEntry($K, $V) {
     return type_offset(it.entries, it.at);

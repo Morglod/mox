@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 import "./os.mox";
 
 fn time_monotonic_ns(): i64 {

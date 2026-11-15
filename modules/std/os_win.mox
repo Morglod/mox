@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 import "./slice.mox";
 import "./vt_input.mox"; // shared Event model, filled by os_term_poll
 import "./context.mox";
@@ -6,6 +6,7 @@ import "./c_interop.mox";
 import "./arena.mox";
 import "./alloc.mox";
 import "./string.mox";
+import "./utf16.mox";
 
 #run __compiler_link_lib("user32", false);
 
@@ -61,6 +62,7 @@ const STD_ERROR_HANDLE  : u32 = 4294967284; // (DWORD)-12
 #linkc("ReadFile") fn ReadFile(h: WIN_HANDLE, buf: *u8, n: u32, read_out: *u32, overlapped: *u8): i32;
 #linkc("WaitForSingleObject") fn WaitForSingleObject(h: WIN_HANDLE, ms: u32): u32;
 #linkc("SetConsoleOutputCP") fn SetConsoleOutputCP(cp: u32): i32;
+#linkc("GetConsoleOutputCP") fn GetConsoleOutputCP(): u32;
 
 // INPUT_RECORD.EventType
 enum WinEventType : u16 {
@@ -171,6 +173,8 @@ const CP_UTF8              : u32 = 65001;
 #linkc("GlobalAlloc")      fn GlobalAlloc(flags: u32, bytes: u64): *u8;
 #linkc("GlobalLock")       fn GlobalLock(mem: *u8): *u8;
 #linkc("GlobalUnlock")     fn GlobalUnlock(mem: *u8): i32;
+#linkc("GlobalFree")       fn GlobalFree(mem: *u8): *u8;
+#linkc("GlobalSize")       fn GlobalSize(mem: *u8): u64;
 
 const CF_TEXT        : u32 = 1;
 const CF_UNICODETEXT : u32 = 13;
@@ -186,17 +190,19 @@ const OPEN_EXISTING           : u32 = 3;
 const CREATE_ALWAYS           : u32 = 2;
 const FILE_ATTRIBUTE_NORMAL   : u32 = 128;  // 0x80
 const FILE_ATTRIBUTE_DIRECTORY: u32 = 16;   // 0x10
+const FILE_ATTRIBUTE_REPARSE_POINT : u32 = 1024; // 0x400
+const IO_REPARSE_TAG_MOUNT_POINT   : u32 = 0xA0000003; // junction
+const IO_REPARSE_TAG_SYMLINK       : u32 = 0xA000000C;
 const INVALID_FILE_ATTRIBUTES : u32 = 4294967295; // 0xFFFFFFFF
 
-#linkc("CreateFileA") fn CreateFileA(name: *u8, access: u32, share: u32, sec: *u8, disposition: u32, flags: u32, templ: *u8): WIN_HANDLE;
-#linkc("GetFileAttributesA") fn GetFileAttributesA(path: *u8): u32;
+#linkc("CreateFileW") fn CreateFileW(name: *u16, access: u32, share: u32, sec: *u8, disposition: u32, flags: u32, templ: *u8): WIN_HANDLE;
+#linkc("GetFileAttributesW") fn GetFileAttributesW(path: *u16): u32;
 #linkc("CloseHandle")  fn CloseHandle(h: WIN_HANDLE): i32;
 #linkc("GetFileSizeEx") fn GetFileSizeEx(h: WIN_HANDLE, size_out: *i64): i32; // size_out = LARGE_INTEGER*
 
 struct FILETIME { dwLowDateTime: u32; dwHighDateTime: u32; };
 
-// ANSI form, cFileName is a plain byte string at offset 44
-struct WIN32_FIND_DATAA {
+struct WIN32_FIND_DATAW {
     dwFileAttributes: u32;
     ftCreationTime: FILETIME;
     ftLastAccessTime: FILETIME;
@@ -205,16 +211,18 @@ struct WIN32_FIND_DATAA {
     nFileSizeLow: u32;
     dwReserved0: u32;
     dwReserved1: u32;
-    cFileName: [260]u8;         // MAX_PATH
-    cAlternateFileName: [14]u8;
+    cFileName: [260]u16;        // MAX_PATH
+    cAlternateFileName: [14]u16;
 };
 
-#linkc("FindFirstFileA") fn FindFirstFileA(name: *u8, data: *WIN32_FIND_DATAA): WIN_HANDLE;
-#linkc("FindNextFileA")  fn FindNextFileA(h: WIN_HANDLE, data: *WIN32_FIND_DATAA): i32;
+#linkc("FindFirstFileW") fn FindFirstFileW(name: *u16, data: *WIN32_FIND_DATAW): WIN_HANDLE;
+#linkc("FindNextFileW")  fn FindNextFileW(h: WIN_HANDLE, data: *WIN32_FIND_DATAW): i32;
 #linkc("FindClose")      fn FindClose(h: WIN_HANDLE): i32;
 
-// writes the cwd into buf NUL-terminated, returns the length without the NUL
-#linkc("GetCurrentDirectoryA") fn GetCurrentDirectoryA(buf_len: u32, buf: *u8): u32;
+// writes the cwd into buf NULL-terminated, returns the length without the NULL; when buf is too small returns the size it needs
+#linkc("GetCurrentDirectoryW") fn GetCurrentDirectoryW(buf_len: u32, buf: *u16): u32;
+// writes the full path of name into buf NULL-terminated, returns the length without the NULL; when buf is too small returns the size it needs
+#linkc("GetFullPathNameW") fn GetFullPathNameW(name: *u16, buf_len: u32, buf: *u16, file_part: **u16): u32;
 
 // pseudo console (ConPTY) + child process
 // HANDLE out-params are *u64: pass a u64 var's address, then .cast(*u8) the value to use it as a HANDLE.
@@ -235,7 +243,7 @@ const INFINITE                          : u32 = 4294967295; // 0xFFFFFFFF, wait 
 #linkc("UpdateProcThreadAttribute")         fn UpdateProcThreadAttribute(list: *u8, flags: u32, attribute: u64, value: *u8, size: u64, prev: *u8, ret_size: *u64): i32;
 #linkc("DeleteProcThreadAttributeList")     fn DeleteProcThreadAttributeList(list: *u8): void;
 
-struct STARTUPINFOA {
+struct STARTUPINFOW {
     cb: u32;
     lpReserved: *u8;
     lpDesktop: *u8;
@@ -256,8 +264,8 @@ struct STARTUPINFOA {
     hStdError: WIN_HANDLE;
 };
 
-struct STARTUPINFOEXA {
-    StartupInfo: STARTUPINFOA;
+struct STARTUPINFOEXW {
+    StartupInfo: STARTUPINFOW;
     lpAttributeList: *u8;
 };
 
@@ -268,16 +276,19 @@ struct PROCESS_INFORMATION {
     dwThreadId: u32;
 };
 
-#linkc("CreateProcessA")     fn CreateProcessA(app: *u8, cmdline: *u8, proc_attr: *u8, thread_attr: *u8, inherit: i32, flags: u32, env: *u8, cwd: *u8, startup: *STARTUPINFOEXA, proc_info: *PROCESS_INFORMATION): i32;
+#linkc("CreateProcessW")     fn CreateProcessW(app: *u16, cmdline: *u16, proc_attr: *u8, thread_attr: *u8, inherit: i32, flags: u32, env: *u8, cwd: *u16, startup: *STARTUPINFOEXW, proc_info: *PROCESS_INFORMATION): i32;
 #linkc("GetExitCodeProcess") fn GetExitCodeProcess(h: WIN_HANDLE, code_out: *u32): i32;
 #linkc("TerminateProcess")   fn TerminateProcess(h: WIN_HANDLE, code: u32): i32;
 #linkc("GetLastError")       fn GetLastError(): u32;
-#linkc("DeleteFileA")        fn DeleteFileA(path: *u8): i32;
-#linkc("CreateDirectoryA")   fn CreateDirectoryA(path: *u8, sec: *u8): i32;
-#linkc("RemoveDirectoryA")   fn RemoveDirectoryA(path: *u8): i32;
-#linkc("MoveFileExA")        fn MoveFileExA(from: *u8, to: *u8, flags: u32): i32;
-#linkc("CopyFileA")          fn CopyFileA(from: *u8, to: *u8, fail_if_exists: i32): i32;
-#linkc("GetTempPathA")       fn GetTempPathA(cap: u32, buf: *u8): u32;
+#linkc("DeleteFileW")        fn DeleteFileW(path: *u16): i32;
+#linkc("CreateDirectoryW")   fn CreateDirectoryW(path: *u16, sec: *u8): i32;
+#linkc("RemoveDirectoryW")   fn RemoveDirectoryW(path: *u16): i32;
+#linkc("MoveFileExW")        fn MoveFileExW(from: *u16, to: *u16, flags: u32): i32;
+#linkc("CopyFileW")          fn CopyFileW(from: *u16, to: *u16, fail_if_exists: i32): i32;
+#linkc("GetTempPathW")       fn GetTempPathW(cap: u32, buf: *u16): u32;
+#linkc("GetSystemDirectoryW") fn GetSystemDirectoryW(buf: *u16, cap: u32): u32;
+#linkc("GetModuleHandleA")   fn GetModuleHandleA(name: *u8): WIN_HANDLE;
+#linkc("GetProcAddress")     fn GetProcAddress(module: WIN_HANDLE, name: *u8): *u8;
 #linkc("Sleep")              fn win_Sleep(ms: u32): void;
 #linkc("QueryPerformanceCounter")   fn win_QueryPerformanceCounter(out: *i64): i32;
 #linkc("QueryPerformanceFrequency") fn win_QueryPerformanceFrequency(out: *i64): i32;
@@ -294,8 +305,42 @@ struct SECURITY_ATTRIBUTES {
 const STARTF_USESTDHANDLES : u32 = 0x100;
 const HANDLE_FLAG_INHERIT  : u32 = 1;
 const CREATE_NO_WINDOW     : u32 = 0x08000000;
-const _OS_EXEC_READ_CHUNK  : i64 = 4096;
+const _WIN_ASYNC_PIPE_BUF  : u32 = 65536; // pipe buffer and the read/write size of the async pipes (os_exec_ex, pty input)
 #linkc("SetHandleInformation") fn SetHandleInformation(h: WIN_HANDLE, mask: u32, flags: u32): i32;
+#linkc("DuplicateHandle")      fn DuplicateHandle(src_proc: WIN_HANDLE, src: WIN_HANDLE, dst_proc: WIN_HANDLE, dst_out: *u64, access: u32, inherit: i32, options: u32): i32;
+#linkc("GetCurrentProcess")    fn GetCurrentProcess(): WIN_HANDLE;
+const DUPLICATE_SAME_ACCESS : u32 = 2;
+#linkc("CreateJobObjectW")         fn CreateJobObjectW(sa: *u8, name: *u16): WIN_HANDLE;
+#linkc("AssignProcessToJobObject") fn AssignProcessToJobObject(job: WIN_HANDLE, proc: WIN_HANDLE): i32;
+#linkc("TerminateJobObject")       fn TerminateJobObject(job: WIN_HANDLE, code: u32): i32;
+#linkc("ResumeThread")             fn ResumeThread(h: WIN_HANDLE): u32;
+const CREATE_SUSPENDED : u32 = 4;
+
+struct OVERLAPPED {
+    Internal: u64;
+    InternalHigh: u64;
+    Offset: u32;
+    OffsetHigh: u32;
+    hEvent: WIN_HANDLE;
+};
+#linkc("CreateNamedPipeW")       fn CreateNamedPipeW(name: *u16, open_mode: u32, pipe_mode: u32, max_instances: u32, out_size: u32, in_size: u32, timeout_ms: u32, sec: *u8): WIN_HANDLE;
+#linkc("CreateEventW")           fn CreateEventW(sec: *u8, manual_reset: i32, initial: i32, name: *u16): WIN_HANDLE;
+#linkc("WaitForMultipleObjects") fn WaitForMultipleObjects(count: u32, handles: *u64, wait_all: i32, ms: u32): u32;
+#linkc("GetOverlappedResult")    fn GetOverlappedResult(h: WIN_HANDLE, ov: *OVERLAPPED, got_out: *u32, wait: i32): i32;
+#linkc("CancelIoEx")             fn CancelIoEx(h: WIN_HANDLE, ov: *OVERLAPPED): i32;
+#linkc("GetCurrentProcessId")    fn GetCurrentProcessId(): u32;
+#linkc("GetCurrentThreadId")     fn GetCurrentThreadId(): u32;
+const PIPE_ACCESS_INBOUND           : u32 = 1;
+const PIPE_ACCESS_OUTBOUND          : u32 = 2;
+const PIPE_REJECT_REMOTE_CLIENTS    : u32 = 8;
+const FILE_FLAG_OVERLAPPED          : u32 = 0x40000000;
+const FILE_FLAG_FIRST_PIPE_INSTANCE : u32 = 0x00080000;
+const FILE_READ_ATTRIBUTES          : u32 = 0x80;
+const FILE_WRITE_ATTRIBUTES         : u32 = 0x100;
+const ERROR_IO_PENDING              : u32 = 997;
+const WAIT_TIMEOUT                  : u32 = 258;
+const WAIT_OBJECT_0                 : u32 = 0;
+const PROC_THREAD_ATTRIBUTE_HANDLE_LIST : u64 = 131074; // 0x00020002
 #linkc("GetTickCount64")       fn GetTickCount64(): u64;
 
 // ---- portable OS API ----
@@ -391,35 +436,101 @@ fn os_tls_key_free(key: OsTlsKey): bool {
     return win_fls_free(key.cast(u32)) != 0;
 }
 
+#linkc("atexit") fn c_atexit(f: *fn(): void): i32;
+#linkc("exit")   fn c_exit(code: i32): void;
+
+// panic state (see panic.mox): 0 = no panic, 1 = panicking, 2 = the panic message was printed at exit
+is_panicking: u8 = 0;
+panic_message: []u8 = 0;
+_os_panic_printer: bool = false;
+
+// runs after every os_atexit handler, so the panic message is the last thing printed even when a handler cleared the screen
+fn _os_print_panic_at_exit(): void {
+    if (is_panicking != 1) { return; }
+    os_stderr_write(panic_message.ptr, panic_message.len);
+    nl := "\n";
+    os_stderr_write(nl.ptr, nl.len);
+    is_panicking = 2;
+}
+
+// false when the panic printer could not be registered
+fn os_register_panic_printer(): bool {
+    if (!_os_panic_printer) { _os_panic_printer = c_atexit(_os_print_panic_at_exit.^) == 0; }
+    return _os_panic_printer;
+}
+
+// f runs when the process exits through exit(), a return from main or a panic, on the thread that exits it
+fn os_atexit(f: *fn(): void): bool {
+    os_register_panic_printer();
+    return c_atexit(f) == 0;
+}
+
+// exits through exit(): os_atexit handlers and the exiting thread's thread_on_exit callbacks run
+fn os_exit(code: i32): void {
+    c_exit(code);
+}
+
+// threads
+
+const OsThreadStart : __type_ptr = #type *fn(arg: *u8): *u8;
+
+#linkc("CreateThread") fn win_thread_create(sec: *u8, stack_size: u64, start: OsThreadStart, arg: *u8, flags: u32, id_out: *u32): WIN_HANDLE;
+
+fn os_thread_create(start: OsThreadStart, arg: *u8, handle_out: *u64): bool {
+    h := win_thread_create(nullptr(u8), 0, start, arg, 0, nullptr(u32));
+    if (h == 0) { return false; }
+    handle_out.* = h.cast(u64);
+    return true;
+}
+
+fn os_thread_join(handle: u64): bool {
+    h := handle.cast(WIN_HANDLE);
+    if (WaitForSingleObject(h, INFINITE) != 0) { return false; }
+    return CloseHandle(h) != 0;
+}
+
 // console
 
+_os_console_saved: bool = false;
+_os_console_atexit: bool = false;
 _os_saved_in_mode: u32 = 0;
 _os_saved_out_mode: u32 = 0;
+_os_saved_out_is_console: bool = false;
+_os_saved_out_cp: u32 = 0;
 
-// raw input (window + mouse events, no line/echo/quick-edit) + VT output + UTF-8
+// raw input (window + mouse events, no line/echo/quick-edit) + VT output + UTF-8. false when stdin is not a console: nothing is changed then.
+// The first call saves the console state for os_console_restore, which also runs at process exit and after a panic (not after _exit or os_abort).
 fn os_console_setup_raw(): bool {
     hin := GetStdHandle(STD_INPUT_HANDLE);
     hout := GetStdHandle(STD_OUTPUT_HANDLE);
-    if ((hin.cast(u64) == INVALID_HANDLE_VALUE) || (hout.cast(u64) == INVALID_HANDLE_VALUE)) {
-        return false;
+    in_mode: u32 = 0;
+    if (GetConsoleMode(hin, in_mode.^) == 0) { return false; }
+    out_mode: u32 = 0;
+    out_is_console := GetConsoleMode(hout, out_mode.^) != 0;
+
+    // a second setup keeps the state saved by the first, so restore still goes back to the original
+    if (!_os_console_saved) {
+        _os_saved_in_mode = in_mode;
+        _os_saved_out_mode = out_mode;
+        _os_saved_out_is_console = out_is_console;
+        _os_saved_out_cp = GetConsoleOutputCP();
+        _os_console_saved = true;
+        if (!_os_console_atexit) { _os_console_atexit = os_atexit(os_console_restore.^); }
     }
 
-    in_mode: u32 = 0;
-    out_mode: u32 = 0;
-    GetConsoleMode(hin, in_mode.^);
-    GetConsoleMode(hout, out_mode.^);
-    _os_saved_in_mode = in_mode;
-    _os_saved_out_mode = out_mode;
-
-    SetConsoleMode(hin, ConsoleInMode.window.cast(u32) | ConsoleInMode.mouse.cast(u32) | ConsoleInMode.extended.cast(u32));
-    SetConsoleMode(hout, out_mode | ConsoleOutMode.processed.cast(u32) | ConsoleOutMode.vt.cast(u32));
+    if (SetConsoleMode(hin, ConsoleInMode.window.cast(u32) | ConsoleInMode.mouse.cast(u32) | ConsoleInMode.extended.cast(u32)) == 0) { return false; }
+    if (out_is_console) { SetConsoleMode(hout, out_mode | ConsoleOutMode.processed.cast(u32) | ConsoleOutMode.vt.cast(u32)); }
     SetConsoleOutputCP(CP_UTF8);
     return true;
 }
 
+// puts back what the first os_console_setup_raw saved; does nothing when nothing is saved
 fn os_console_restore(): void {
+    if (!_os_console_saved) { return; }
+    _os_console_saved = false;
     SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), _os_saved_in_mode);
-    SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), _os_saved_out_mode);
+    if (_os_saved_out_is_console) { SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), _os_saved_out_mode); }
+    if (_os_saved_out_cp != 0) { SetConsoleOutputCP(_os_saved_out_cp); }
 }
 
 fn os_console_size(cols: *u32, rows: *u32): bool {
@@ -434,71 +545,170 @@ fn os_stdout_write(buf: *u8, len: i64): void {
     win_write_all(GetStdHandle(STD_OUTPUT_HANDLE), buf, len);
 }
 
-fn os_stdin_wait(ms: u32): void {
-    WaitForSingleObject(GetStdHandle(STD_INPUT_HANDLE), ms);
+fn os_stderr_write(buf: *u8, len: i64): void {
+    win_write_all(GetStdHandle(STD_ERROR_HANDLE), buf, len);
 }
 
-// clipboard: text goes out as CF_UNICODETEXT; input is ASCII, so byte to u16 widening is exact
+// waits up to ms for input on stdin, negative = no limit
+fn os_stdin_wait(ms: i64): void {
+    wait: u32 = INFINITE;
+    if (ms >= 0) { wait = min(ms, 4294967294).cast(u32); }
+    WaitForSingleObject(GetStdHandle(STD_INPUT_HANDLE), wait);
+}
 
-fn os_clipboard_set(text: *u8, a: u32, b: u32): void {
-    n: u32 = b - a;
-    if (OpenClipboard(nullptr(u8)) == 0) { return; }
-    EmptyClipboard();
-    hmem := GlobalAlloc(GMEM_MOVEABLE, ((n + 1) * 2).cast(u64));
-    if (hmem != nullptr(u8)) {
-        dst := GlobalLock(hmem);
-        if (dst != nullptr(u8)) {
-            wdst := dst.cast(*u16);
-            src := text |> byte_offset(a.cast(i64));
-            for (i : it_range(n.cast(i64))) {
-                type_offset(wdst, i).* = type_offset(src, i).*.cast(u16);
-            }
-            type_offset(wdst, n.cast(i64)).* = 0;
-            GlobalUnlock(hmem);
-            SetClipboardData(CF_UNICODETEXT, hmem); // clipboard owns hmem now
-        }
+// clipboard: UTF-8 text in and out, stored as CF_UNICODETEXT
+
+// another program may hold the clipboard for a moment
+fn _win_clipboard_open(): bool {
+    for (i : it_range(10i64)) {
+        if (OpenClipboard(nullptr(u8)) != 0) { return true; }
+        win_Sleep(10);
     }
-    CloseClipboard();
+    return false;
 }
 
-// reads at most cap-1 bytes, non-ASCII chars are dropped
-fn os_clipboard_get(buf: *u8, cap: u32): u32 {
-    if (cap == 0) { return 0; } // cap - 1 below would underflow the u32
-    n: u32 = 0;
-    if (OpenClipboard(nullptr(u8)) == 0) { return 0; }
+// false when the clipboard could not be opened or set; the old content is kept unless it was emptied for the new one
+fn os_clipboard_set(text: []u8): bool {
+    t := scratch_begin();
+    defer scratch_end(t);
+    wide := utf8_to_utf16(text, t.alloc); // NULL-terminated
+    bytes := (wide.len + 1) * 2;
+    hmem := GlobalAlloc(GMEM_MOVEABLE, bytes.cast(u64));
+    if (hmem == nullptr(u8)) { return false; }
+    dst := GlobalLock(hmem);
+    if (dst == nullptr(u8)) {
+        GlobalFree(hmem);
+        return false;
+    }
+    mem_copy(dst, wide.ptr.cast(*u8), bytes);
+    GlobalUnlock(hmem);
+
+    if (!_win_clipboard_open()) {
+        GlobalFree(hmem);
+        return false;
+    }
+    EmptyClipboard();
+    ok := SetClipboardData(CF_UNICODETEXT, hmem) != nullptr(u8);
+    CloseClipboard();
+    if (!ok) { GlobalFree(hmem); } // the clipboard owns hmem only after a successful SetClipboardData
+    return ok;
+}
+
+// the clipboard text as UTF-8 on alloc; empty when there is no text or the clipboard could not be opened
+fn os_clipboard_get(alloc: *Alloc = get_context_temp_arena_as_alloc()): []u8 {
+    if (!_win_clipboard_open()) { return empty_slice(u8); }
+    out := empty_slice(u8);
     hdata := GetClipboardData(CF_UNICODETEXT);
     if (hdata != nullptr(u8)) {
         src := GlobalLock(hdata);
         if (src != nullptr(u8)) {
             wsrc := src.cast(*u16);
-            i: i64 = 0;
-            while (n < (cap - 1)) {
-                c := type_offset(wsrc, i).*;
-                if (c == 0) { break; }
-                if (c < 128) {
-                    type_offset(buf, n.cast(i64)).* = c.cast(u8);
-                    n += 1;
-                }
-                i += 1;
-            }
+            cap := (GlobalSize(hdata) / 2).cast(i64); // bounds the scan when the data has no NULL
+            n: i64 = 0;
+            while ((n < cap) && (type_offset(wsrc, n).* != 0)) { n += 1; }
+            out = utf16_to_utf8(slice(wsrc, n), alloc, false);
             GlobalUnlock(hdata);
         }
     }
     CloseClipboard();
-    return n;
+    return out;
+}
+
+// ---- UTF-16 paths ----
+// Win32 takes UTF-16, mox strings are UTF-8: every path, env and command line string is converted at the call.
+
+const _WIN_LONG_PATH_UNKNOWN : i32 = 0;
+const _WIN_LONG_PATH_NO      : i32 = 1;
+const _WIN_LONG_PATH_YES     : i32 = 2;
+_win_long_path_state: i32 = 0;
+
+const _RtlAreLongPathsEnabledFn : __type_ptr = #type fn(): u8;
+
+// true when Win32 takes paths over 260 chars as they are: needs LongPathsEnabled in the registry AND longPathAware in the exe manifest.
+// RtlAreLongPathsEnabled answers exactly that; it is missing before Windows 10 1607, then the answer is false.
+// Computed once; two threads computing it at the same time get the same answer.
+fn has_long_path_support(): bool {
+    if (_win_long_path_state == _WIN_LONG_PATH_UNKNOWN) {
+        state := _WIN_LONG_PATH_NO;
+        ntdll := GetModuleHandleA("ntdll.dll".ptr);
+        if (ntdll != nullptr(u8)) {
+            f := GetProcAddress(ntdll, "RtlAreLongPathsEnabled".ptr);
+            if (f != nullptr(u8)) {
+                rtl_fn := f.cast(*_RtlAreLongPathsEnabledFn);
+                if (rtl_fn() != 0) { state = _WIN_LONG_PATH_YES; }
+            }
+        }
+        _win_long_path_state = state;
+    }
+    return _win_long_path_state == _WIN_LONG_PATH_YES;
+}
+
+fn _win_is_sep(c: u8): bool {
+    return c == char("\\") || c == char("/");
+}
+
+// An absolute drive path of 248+ bytes gets the \\?\ prefix so Win32 takes it over 260 chars.
+// The prefix turns off Win32 path cleanup, so "/" becomes "\", "." segments are dropped and ".." removes the previous segment.
+// Unchanged: long path support on, short paths, relative paths, UNC and already prefixed paths.
+fn _fix_long_path(path: []u8, alloc: *Alloc): []u8 {
+    if (path.len < 248 || has_long_path_support()) { return path; }
+    if (_win_is_sep(path[0]) && _win_is_sep(path[1])) { return path; }
+    if (path[1] != char(":") || !_win_is_sep(path[2]) || !is_letter_char(path[0])) { return path; }
+
+    prefix: []u8 = "\\\\?\\";
+    out := mem_alloc_slice(alloc, u8, prefix.len + path.len + 1, 1);
+    mem_copy(out.ptr, prefix.ptr, prefix.len);
+    out[prefix.len] = path[0];
+    out[prefix.len + 1] = char(":");
+    root_end := prefix.len + 2;   // just after "C:"
+    w := root_end;
+    r: i64 = 2;
+    while (r < path.len) {
+        if (_win_is_sep(path[r])) {
+            r += 1;
+            continue;
+        }
+        start := r;
+        while (r < path.len && !_win_is_sep(path[r])) { r += 1; }
+        seg := slice(path, start, r - start);
+        if (seg == ".") { continue; }
+        if (seg == "..") {
+            while (w > root_end && out[w - 1] != char("\\")) { w -= 1; }
+            if (w > root_end) { w -= 1; }
+            continue;
+        }
+        out[w] = char("\\");
+        w += 1;
+        mem_copy(type_offset(out.ptr, w), seg.ptr, seg.len);
+        w += seg.len;
+    }
+    // a root needs its trailing separator
+    if (w == root_end) {
+        out[w] = char("\\");
+        w += 1;
+    }
+    out[w] = 0;
+    return slice(out, 0, w);
+}
+
+// NULL-terminated UTF-16 path for Win32 with long paths fixed, on the scratch arena until the end of the caller's block
+fn #temp_win_path(path: []u8): *u16 {
+    t := scratch_begin();
+    defer scratch_end(t);
+    return utf8_to_utf16(_fix_long_path(path, t.alloc), t.alloc).ptr;
 }
 
 // files, handle model: u64, 0 = invalid/failed
 
-fn os_file_open_read(path: *u8): OsFile {
-    h := CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr(u8), OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr(u8));
+fn os_file_open_read(path: []u8): OsFile {
+    h := CreateFileW(#temp_win_path(path), GENERIC_READ, FILE_SHARE_READ, nullptr(u8), OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr(u8));
     if (h.cast(u64) == INVALID_HANDLE_VALUE) { return 0; }
     return h.cast(u64);
 }
 
 // create/truncate for writing
-fn os_file_open_write(path: *u8): OsFile {
-    h := CreateFileA(path, GENERIC_WRITE, 0, nullptr(u8), CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr(u8));
+fn os_file_open_write(path: []u8): OsFile {
+    h := CreateFileW(#temp_win_path(path), GENERIC_WRITE, 0, nullptr(u8), CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr(u8));
     if (h.cast(u64) == INVALID_HANDLE_VALUE) { return 0; }
     return h.cast(u64);
 }
@@ -530,8 +740,8 @@ fn os_file_close(h: OsFile): void {
     if (h != 0) { CloseHandle(h.cast(*u8)); }
 }
 
-fn os_file_delete(path: *u8): bool {
-    return DeleteFileA(path) != 0;
+fn os_file_delete(path: []u8): bool {
+    return DeleteFileW(#temp_win_path(path)) != 0;
 }
 
 // stdout as a writable OsFile
@@ -539,28 +749,50 @@ fn os_stdout_file(): OsFile {
     return GetStdHandle(STD_OUTPUT_HANDLE).cast(u64);
 }
 
-// writes the cwd NUL-terminated into buf, returns the length without the NUL. Separators become "/".
+// writes the cwd NULL-terminated into buf, returns the length without the NULL, 0 = failed or does not fit. Separators become "/".
 fn os_cwd(buf: *u8, cap: i64): i64 {
-    n := GetCurrentDirectoryA(cap.cast(u32), buf);
-    // n >= cap: buffer too small, GetCurrentDirectoryA returns the required size and leaves buf untouched
-    if ((n == 0) || (n.cast(i64) >= cap)) { return 0; }
-    replace_inplace(slice(buf, n.cast(i64)), char("\\"), char("/"));
-    return n.cast(i64);
+    need := GetCurrentDirectoryW(0, nullptr(u16));   // size with the NULL
+    if (need == 0) { return 0; }
+    wbuf := #temp_buffer(need.cast(i64) * 2).ptr.cast(*u16);
+    n := GetCurrentDirectoryW(need, wbuf);
+    if ((n == 0) || (n >= need)) { return 0; }
+    len := utf16_to_utf8_buf(slice(wbuf, n.cast(i64)), slice(buf, cap));
+    if (len <= 0) { return 0; }
+    replace_inplace(slice(buf, len), char("\\"), char("/"));
+    return len;
+}
+
+// writes the absolute form of path NULL-terminated into buf, returns the length without the NULL, 0 = failed or does not fit. Separators become "/".
+// Works on the text only, the file does not need to exist: a relative path is joined to the cwd, "." and ".." segments are resolved.
+fn os_path_abs(buf: *u8, cap: i64, path: []u8): i64 {
+    if (path.len == 0) { return 0; }
+    wpath := #temp_utf8_to_utf16(path).ptr;
+    need := GetFullPathNameW(wpath, 0, nullptr(u16), nullptr(*u16));   // size with the NULL
+    if (need == 0) { return 0; }
+    wbuf := #temp_buffer(need.cast(i64) * 2).ptr.cast(*u16);
+    n := GetFullPathNameW(wpath, need, wbuf, nullptr(*u16));
+    if ((n == 0) || (n >= need)) { return 0; }
+    len := utf16_to_utf8_buf(slice(wbuf, n.cast(i64)), slice(buf, cap));
+    if (len <= 0) { return 0; }
+    replace_inplace(slice(buf, len), char("\\"), char("/"));
+    return len;
 }
 
 // directory listing: os_dir_open(it, "<dir>") then os_dir_next(it) until false. "." and ".." are included.
 
 struct OsDirIter {
     handle: u64;
-    pending: bool;      // fd holds the FindFirstFileA entry, not returned yet
-    is_dir: bool;
-    name: []u8;         // view into fd.cFileName, valid until the next os_dir_next; copy to keep
-    fd: WIN32_FIND_DATAA;
+    pending: bool;      // fd holds the FindFirstFileW entry, not returned yet
+    is_dir: bool;       // false for a symlink or junction to a directory: walks do not follow links
+    is_symlink: bool;   // a symlink or junction
+    name: []u8;         // view into name_buf, valid until the next os_dir_next; copy to keep
+    fd: WIN32_FIND_DATAW;
+    name_buf: [781]u8;  // fd.cFileName as UTF-8: 260 units, at most 3 bytes each, plus NULL
 };
 
 fn os_dir_open(it: *OsDirIter, dir_path: []u8): bool {
-    // build "<dir>/*" with a trailing NUL, Win32 accepts "/" separators
-    pat := #temp_buffer(dir_path.len + 3); // separator + '*' + NUL
+    // build "<dir>/*", Win32 accepts "/" separators and _fix_long_path turns them into "\"
+    pat := #temp_buffer(dir_path.len + 2); // separator + '*'
     n := dir_path.len;
     mem_copy(pat.ptr, dir_path.ptr, n);
     if (n > 0) {
@@ -571,9 +803,9 @@ fn os_dir_open(it: *OsDirIter, dir_path: []u8): bool {
         }
     }
     pat[n] = char("*");
-    pat[n + 1] = 0;
+    n += 1;
 
-    h := FindFirstFileA(pat.ptr, it.fd.^);
+    h := FindFirstFileW(#temp_win_path(slice(pat, 0, n)), it.fd.^);
     if (h.cast(u64) == INVALID_HANDLE_VALUE) {
         it.handle = 0;
         return false;
@@ -583,16 +815,25 @@ fn os_dir_open(it: *OsDirIter, dir_path: []u8): bool {
     return true;
 }
 
+// a symlink or junction. Other reparse points (OneDrive placeholders, dedup) are real files and directories.
+fn _win_is_link(fd: *WIN32_FIND_DATAW): bool {
+    if ((fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) { return false; }
+    tag := fd.dwReserved0; // the reparse tag when FILE_ATTRIBUTE_REPARSE_POINT is set
+    return (tag == IO_REPARSE_TAG_SYMLINK) || (tag == IO_REPARSE_TAG_MOUNT_POINT);
+}
+
 fn os_dir_next(it: *OsDirIter): bool {
     if (it.handle == 0) { return false; }
     if (!it.pending) {
-        if (FindNextFileA(it.handle.cast(*u8), it.fd.^) == 0) { return false; }
+        if (FindNextFileW(it.handle.cast(*u8), it.fd.^) == 0) { return false; }
     }
     it.pending = false;
 
-    it.name.ptr = it.fd.cFileName.ptr;
-    it.name.len = c_strlen(it.fd.cFileName.ptr, 260);
-    it.is_dir = (it.fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    wname := slice(it.fd.cFileName.ptr, utf16_len(it.fd.cFileName.ptr));
+    it.name.ptr = it.name_buf.ptr;
+    it.name.len = utf16_to_utf8_buf(wname, slice(it.name_buf.^));
+    it.is_symlink = _win_is_link(it.fd.^);
+    it.is_dir = ((it.fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) && !it.is_symlink; // as on posix, a link to a directory is not one
     return true;
 }
 
@@ -609,11 +850,13 @@ fn os_dir_close(it: *OsDirIter): void {
 struct OsTermInput {
     hin: WIN_HANDLE;
     prev_button_state: u32;
+    high_surrogate: u16; // first half of a UTF-16 pair, waiting for the second record
 };
 
 fn os_term_input_init(ti: *OsTermInput): void {
     ti.hin = GetStdHandle(STD_INPUT_HANDLE);
     ti.prev_button_state = 0;
+    ti.high_surrogate = 0;
 }
 
 fn _os_bit(flags: u32, f: $E): bool {
@@ -666,18 +909,59 @@ fn _os_changed_button(now: u32, was: u32): MouseButton {
     return .none;
 }
 
-fn _os_decode_input_record(rec: *INPUT_RECORD, prev_button: *u32, ev: *Event): bool {
+const _OS_VK_SHIFT : u16 = 16;
+const _OS_VK_CTRL  : u16 = 17;
+const _OS_VK_ALT   : u16 = 18;
+const _OS_VK_LWIN  : u16 = 91;
+const _OS_VK_RWIN  : u16 = 92;
+
+fn _os_vk_is_modifier(vk: u16): bool {
+    return (vk == _OS_VK_SHIFT) || (vk == _OS_VK_CTRL) || (vk == _OS_VK_ALT) || (vk == _OS_VK_LWIN) || (vk == _OS_VK_RWIN) || ((vk >= 160) && (vk <= 165)); // 160..165: left/right shift, ctrl, alt
+}
+
+fn _os_decode_input_record(rec: *INPUT_RECORD, prev_button: *u32, high_surrogate: *u16, ev: *Event): bool {
     et := rec.EventType;
     ev.repeat = 1;
 
     if (et == .key) {
         kr := rec.Event.ptr.cast(*KEY_EVENT_RECORD);
-        if (kr.bKeyDown == 0) { return false; } // ignore key-up
+        vk := kr.wVirtualKeyCode;
+        ch := kr.UnicodeChar.cast(u32);
+        packed := false;
+        if (kr.bKeyDown == 0) {
+            // a character that is not on the keyboard (emoji, paste, Alt+Numpad) arrives on the Alt key-up; other key-ups are ignored
+            if ((vk != _OS_VK_ALT) || (ch == 0)) { return false; }
+            packed = true;
+        } else if (_os_vk_is_modifier(vk)) {
+            return false; // a modifier going down types nothing; terminals on posix do not report it either, mods carries it
+        }
+
+        // UTF-16 comes one unit per record: a high surrogate waits for its low half, so one event carries the whole code point
+        if ((ch >= 55296) && (ch <= 56319)) { // D800..DBFF
+            high_surrogate.* = ch.cast(u16);
+            return false;
+        }
+        high := high_surrogate.*.cast(u32);
+        high_surrogate.* = 0; // a high half without its low half is dropped
+        if ((ch >= 56320) && (ch <= 57343)) { // DC00..DFFF
+            if (high == 0) {
+                ch = 65533; // U+FFFD for a lone low half
+            } else {
+                ch = 65536 + #shl(high - 55296, 10) + (ch - 56320);
+            }
+        }
+
         ev.kind = .key;
-        ev.vk = kr.wVirtualKeyCode;
-        ev.code = _os_vk_to_keycode(kr.wVirtualKeyCode);
+        ev.vk = vk;
+        ev.code = _os_vk_to_keycode(vk);
         ev.mods = _os_decode_mods(kr.dwControlKeyState);
-        ev.ch = kr.UnicodeChar.cast(u32); // carry the char for every key, typing needs it
+        ev.ch = ch; // carry the char for every key, typing needs it
+        if (packed) {
+            // only the character: the Alt that carried it is not a modifier of it
+            ev.vk = 0;
+            ev.code = .char;
+            ev.mods = 0;
+        }
         if (kr.wRepeatCount > 1) { ev.repeat = kr.wRepeatCount; } // held key: one record, N repeats
         return true;
     }
@@ -742,7 +1026,7 @@ fn os_term_poll(ti: *OsTermInput, ev: *Event): bool {
         if (ReadConsoleInputW(ti.hin, rec.^, 1, read.^) == 0) { return false; }
         if (read == 0) { return false; }
 
-        if (_os_decode_input_record(rec.^, ti.prev_button_state.^, ev)) {
+        if (_os_decode_input_record(rec.^, ti.prev_button_state.^, ti.high_surrogate.^, ev)) {
             return true;
         }
         // skipped record, read the next one
@@ -776,78 +1060,121 @@ fn os_stdin_read_bytes(ti: *OsTermInput, buf: *u8, cap: i64): i64 {
 
 fn os_stdin_read_bytes(ti: *OsTermInput, buf: []u8): i64 { return os_stdin_read_bytes(ti, buf.ptr, buf.len); }
 
-fn os_file_open_read(path: []u8): OsFile {
-    return os_file_open_read(#temp_c_string(path));
+fn os_file_open_read(path: *u8): OsFile {
+    return os_file_open_read(slice(path, c_strlen(path)));
 }
-fn os_file_open_write(path: []u8): OsFile {
-    return os_file_open_write(#temp_c_string(path));
+fn os_file_open_write(path: *u8): OsFile {
+    return os_file_open_write(slice(path, c_strlen(path)));
 }
-fn os_file_delete(path: []u8): bool {
-    return os_file_delete(#temp_c_string(path));
+fn os_file_delete(path: *u8): bool {
+    return os_file_delete(slice(path, c_strlen(path)));
 }
 
 // one level; false when it already exists or the parent is missing
 fn os_make_dir(path: []u8): bool {
-    return CreateDirectoryA(#temp_c_string(path), nullptr(u8)) != 0;
+    return CreateDirectoryW(#temp_win_path(path), nullptr(u8)) != 0;
 }
 
 // the directory must be empty
 fn os_delete_dir(path: []u8): bool {
-    return RemoveDirectoryA(#temp_c_string(path)) != 0;
+    return RemoveDirectoryW(#temp_win_path(path)) != 0;
 }
 
 // files and (same-volume) directories; an existing `to` file is replaced
 fn os_rename(from: []u8, to: []u8): bool {
-    return MoveFileExA(#temp_c_string(from), #temp_c_string(to), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED) != 0;
+    return MoveFileExW(#temp_win_path(from), #temp_win_path(to), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED) != 0;
 }
 
 fn os_copy_file(from: []u8, to: []u8): bool {
-    return CopyFileA(#temp_c_string(from), #temp_c_string(to), 0) != 0;
+    return CopyFileW(#temp_win_path(from), #temp_win_path(to), 0) != 0;
 }
 
 // "file" means any non-directory entry
 
 fn os_path_exists(path: []u8): bool {
-    return GetFileAttributesA(#temp_c_string(path)) != INVALID_FILE_ATTRIBUTES;
+    return GetFileAttributesW(#temp_win_path(path)) != INVALID_FILE_ATTRIBUTES;
 }
 fn os_dir_exists(path: []u8): bool {
-    attrs := GetFileAttributesA(#temp_c_string(path));
+    attrs := GetFileAttributesW(#temp_win_path(path));
     if (attrs == INVALID_FILE_ATTRIBUTES) { return false; }
     return (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 fn os_file_exists(path: []u8): bool {
-    attrs := GetFileAttributesA(#temp_c_string(path));
+    attrs := GetFileAttributesW(#temp_win_path(path));
     if (attrs == INVALID_FILE_ATTRIBUTES) { return false; }
     return (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
-// runs cmd through the platform shell (cmd.exe /C here, /bin/sh -c on posix), waits, returns its exit code. -1 = could not start.
+// os_is_dir / os_is_file / os_is_symlink describe path itself, like the OsDirIter flags: a link is neither a dir nor a file.
+// os_dir_exists / os_file_exists above follow links.
 
-fn _win_shell_cmdline(cmd: []u8, arena: *Arena): *u8 {
-    prefix: []u8 = "cmd.exe /C ";
-    full := arena_push(arena, prefix.len + cmd.len + 1);
-    mem_copy(full.ptr, prefix.ptr, prefix.len);
-    mem_copy(full.ptr |> byte_offset(prefix.len), cmd.ptr, cmd.len);
-    full[prefix.len + cmd.len] = 0;
-    return full.ptr;
+// attributes of path itself; is_link_out = symlink or junction. false = it does not exist
+fn _win_path_kind(path: []u8, attrs_out: *u32, is_link_out: *bool): bool {
+    attrs := GetFileAttributesW(#temp_win_path(path));
+    if (attrs == INVALID_FILE_ATTRIBUTES) { return false; }
+    attrs_out.* = attrs;
+    is_link_out.* = false;
+    if ((attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        fd: WIN32_FIND_DATAW = #memory_garbage;
+        h := FindFirstFileW(#temp_win_path(path), fd.^); // without wildcards it describes path itself, reparse tag included
+        if (h.cast(u64) != INVALID_HANDLE_VALUE) {
+            FindClose(h);
+            is_link_out.* = _win_is_link(fd.^);
+        }
+    }
+    return true;
 }
 
-fn os_exec(cmd: []u8): i32 {
-    full := _win_shell_cmdline(cmd, #temp_arena());
+fn os_is_dir(path: []u8): bool {
+    attrs: u32 = 0;
+    link := false;
+    if (!_win_path_kind(path, attrs.^, link.^)) { return false; }
+    return ((attrs & FILE_ATTRIBUTE_DIRECTORY) != 0) && !link;
+}
+fn os_is_file(path: []u8): bool {
+    attrs: u32 = 0;
+    link := false;
+    if (!_win_path_kind(path, attrs.^, link.^)) { return false; }
+    return ((attrs & FILE_ATTRIBUTE_DIRECTORY) == 0) && !link;
+}
+// a symlink or junction
+fn os_is_symlink(path: []u8): bool {
+    attrs: u32 = 0;
+    link := false;
+    if (!_win_path_kind(path, attrs.^, link.^)) { return false; }
+    return link;
+}
 
-    si: STARTUPINFOEXA = 0;
-    si.StartupInfo.cb = sizeof_type(STARTUPINFOA).cast(u32);
-    pi: PROCESS_INFORMATION = 0;
-    // inherit=1: child shares our console and stdio
-    if (CreateProcessA(nullptr(u8), full, nullptr(u8), nullptr(u8), 1, 0, nullptr(u8), nullptr(u8), si.^, pi.^) == 0) {
-        return -1;
-    }
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    code: u32 = 0;
-    GetExitCodeProcess(pi.hProcess, code.^);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    return code.cast(i32);
+// writable NULL-terminated UTF-16 command line, as CreateProcessW wants it.
+// /s strips exactly the outer quotes added here, so cmd reaches the shell unchanged; /d skips the AutoRun registry commands.
+fn _win_shell_cmdline(cmd: []u8, alloc: *Alloc): *u16 {
+    prefix: []u8 = "cmd.exe /d /s /c \"";
+    full := mem_alloc_slice(alloc, u8, prefix.len + cmd.len + 1, 1);
+    mem_copy(full.ptr, prefix.ptr, prefix.len);
+    mem_copy(full.ptr |> byte_offset(prefix.len), cmd.ptr, cmd.len);
+    full[full.len - 1] = char("\"");
+    return utf8_to_utf16(full, alloc).ptr;
+}
+
+// full path of System32\cmd.exe, so a cmd.exe in the exe folder or the current folder is never picked. nullptr = failed.
+fn _win_shell_app(alloc: *Alloc): *u16 {
+    name: []u8 = "\\cmd.exe";
+    n := GetSystemDirectoryW(nullptr(u16), 0);   // size with the NULL
+    if (n == 0) { return nullptr(u16); }
+    buf := mem_alloc_slice(alloc, u16, n.cast(i64) + name.len);
+    got := GetSystemDirectoryW(buf.ptr, n).cast(i64);
+    if ((got == 0) || (got >= n.cast(i64))) { return nullptr(u16); }
+    for (i : it_range(name.len)) { buf[got + i] = name[i].cast(u16); }
+    buf[got + name.len] = 0;
+    return buf.ptr;
+}
+
+// runs cmd through the platform shell, waits, returns its exit code. -1 = could not start or its status could not be read; a real exit code -1 looks the same, os_exec_ex tells them apart.
+fn os_exec(cmd: []u8): i32 {
+    opts: ExecOptions = 0;
+    r := os_exec_ex(cmd, opts);
+    if (!r.exited) { return -1; }
+    return r.exit_code;
 }
 
 fn os_monotonic_ms(): i64 {
@@ -880,14 +1207,16 @@ fn os_sleep_ms(ms: i64): void {
     win_Sleep(ms.cast(u32));
 }
 
-// writes the temp directory into buf (with a trailing separator), returns the length, 0 = failed.
+// writes the temp directory into buf (with a trailing separator, NULL-terminated), returns the length, 0 = failed or does not fit.
 // Separators become "/".
 fn os_temp_dir(buf: *u8, cap: i64): i64 {
-    n := GetTempPathA(cap.cast(u32), buf);
-    // n > cap: buffer too small, GetTempPathA returns the required size
-    if ((n == 0) || (n.cast(i64) > cap)) { return 0; }
-    replace_inplace(slice(buf, n.cast(i64)), char("\\"), char("/"));
-    return n.cast(i64);
+    wbuf: [261]u16 = #memory_garbage;   // GetTempPathW never returns more than MAX_PATH + 1 units
+    n := GetTempPathW(261, wbuf.ptr);
+    if ((n == 0) || (n > 261)) { return 0; }
+    len := utf16_to_utf8_buf(slice(wbuf.ptr, n.cast(i64)), slice(buf, cap));
+    if (len <= 0) { return 0; }
+    replace_inplace(slice(buf, len), char("\\"), char("/"));
+    return len;
 }
 
 enum OsExecStreamMode : u8 {
@@ -907,42 +1236,78 @@ struct ExecOptions {
     stderr_mode: OsExecStreamMode;
     stderr_file: OsFile;
     cwd: []u8;          // empty = inherit
-    timeout_ms: i64;    // 0 = wait forever; on expiry the child is killed and timed_out is set
+    timeout_ms: i64;    // 0 = wait forever; on expiry the child and every process it started are killed and timed_out is set. Posix: with a timeout the child runs in its own process group, so Ctrl+C in the terminal does not reach it and reading from the terminal stops it
     no_window: bool;    // windows only: CREATE_NO_WINDOW, no console flashes up from a GUI parent
+    inherit_handles: bool; // false = the child gets only its stdin/stdout/stderr; true = also every inheritable handle (windows) / every fd without close-on-exec (posix)
 };
 
 struct ExecResult {
     started: bool;      // false = the command could not be started, nothing else is meaningful
     ok: bool;
     timed_out: bool;
-    exit_code: i32;     // -1 when not started; 128+signal when killed by a signal on posix (also after a timeout kill)
+    exited: bool;       // exit_code is the child's own code; false when not started or its status could not be read
+    exit_code: i32;     // only meaningful when exited; 128+signal when killed by a signal on posix (also after a timeout kill)
     stdout: []u8;       // on arena, filled only when stdout_mode == .buffer
     stderr: []u8;       // on arena, filled only when stderr_mode == .buffer
 };
 
-// resolves the child's handle for one standard stream from its option.
+const OsProcess := #type u64; // process handle
+
+enum OsWaitStatus : u8 {
+    exited  := 0; // exit_code is the process's code
+    running := 1; // timeout_ms passed first
+    failed  := 2; // its status can not be read
+};
+
+struct OsWaitResult {
+    status: OsWaitStatus;
+    exit_code: i32; // only meaningful when status == .exited, 0 otherwise
+};
+
+_win_pipe_counter: u64 = 0; #thread_local
+
+// pipe with an async (overlapped) end for us and a normal blocking end for the other side. Both are non-inheritable.
+// Named because anonymous pipes can not do overlapped I/O; pid + thread id + counter keeps the name unique.
+fn _win_async_pipe(child_reads: bool, alloc: *Alloc, child_out: *u64, ours_out: *u64): bool {
+    _win_pipe_counter += 1;
+    sb: StringBuilder = #memory_garbage;
+    init(sb.^, alloc);
+    push(sb.^, "\\\\.\\pipe\\mox-pipe-"); // format would read these backslashes as escapes
+    format(sb.^, "{}-{}-{}", .{ GetCurrentProcessId(); GetCurrentThreadId(); _win_pipe_counter; });
+    name := utf8_to_utf16(finalize(sb.^, alloc, false), alloc).ptr;
+
+    access := PIPE_ACCESS_INBOUND;
+    child_access := GENERIC_WRITE | FILE_READ_ATTRIBUTES;
+    if (child_reads) {
+        access = PIPE_ACCESS_OUTBOUND;
+        child_access = GENERIC_READ | FILE_WRITE_ATTRIBUTES;
+    }
+    // FIRST_PIPE_INSTANCE: fail instead of joining a pipe that someone else created with this name first
+    ours := CreateNamedPipeW(name, access | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_REJECT_REMOTE_CLIENTS, 1, _WIN_ASYNC_PIPE_BUF, _WIN_ASYNC_PIPE_BUF, 0, nullptr(u8));
+    if (ours.cast(u64) == INVALID_HANDLE_VALUE) { return false; }
+    child := CreateFileW(name, child_access, 0, nullptr(u8), OPEN_EXISTING, 0, nullptr(u8));
+    if (child.cast(u64) == INVALID_HANDLE_VALUE) {
+        CloseHandle(ours);
+        return false;
+    }
+    child_out.* = child.cast(u64);
+    ours_out.* = ours.cast(u64);
+    return true;
+}
+
+// resolves the child's handle for one standard stream from its option. Every handle made here is non-inheritable.
 // child_out: what the child gets; ours_out: our end of the pipe (0 = none); owned_out: child_out is ours to close after CreateProcess.
-// pipe_size is the pipe buffer hint (0 = default).
-fn _win_exec_child_handle(mode: OsExecStreamMode, std_id: u32, file: OsFile, child_reads: bool, pipe_size: u32, sa: *SECURITY_ATTRIBUTES, child_out: *u64, ours_out: *u64, owned_out: *bool): bool {
+fn _win_exec_child_handle(mode: OsExecStreamMode, std_id: u32, file: OsFile, child_reads: bool, alloc: *Alloc, child_out: *u64, ours_out: *u64, owned_out: *bool): bool {
     child_out.* = 0;
     ours_out.* = 0;
     owned_out.* = false;
     if (mode == .buffer) {
-        r: u64 = 0;
-        w: u64 = 0;
-        if (CreatePipe(r.^, w.^, sa.cast(*u8), pipe_size) == 0) { return false; }
-        child: u64 = w;
-        ours: u64 = r;
-        if (child_reads) { child = r; ours = w; }
-        SetHandleInformation(ours.cast(*u8), HANDLE_FLAG_INHERIT, 0); // only the child's end may be inherited
-        child_out.* = child;
-        ours_out.* = ours;
+        if (!_win_async_pipe(child_reads, alloc, child_out, ours_out)) { return false; }
         owned_out.* = true;
         return true;
     }
     if (mode == .null) {
-        nul := "NUL";
-        h := CreateFileA(nul.ptr, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, sa.cast(*u8), OPEN_EXISTING, 0, nullptr(u8));
+        h := CreateFileW(#temp_utf8_to_utf16("NUL").ptr, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr(u8), OPEN_EXISTING, 0, nullptr(u8));
         if (h.cast(u64) == INVALID_HANDLE_VALUE) { return false; }
         child_out.* = h.cast(u64);
         owned_out.* = true;
@@ -950,7 +1315,6 @@ fn _win_exec_child_handle(mode: OsExecStreamMode, std_id: u32, file: OsFile, chi
     }
     if (mode == .file) {
         if (file == 0) { return false; }
-        SetHandleInformation(file.cast(*u8), HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT); // cleared again after CreateProcess
         child_out.* = file;
         return true;
     }
@@ -958,100 +1322,262 @@ fn _win_exec_child_handle(mode: OsExecStreamMode, std_id: u32, file: OsFile, chi
     return true;
 }
 
+// inheritable copy of h for the child, closed by us after CreateProcess. h = 0 (no such stream) gives 0.
+fn _win_inheritable_copy(h: u64, out: *u64): bool {
+    out.* = 0;
+    if ((h == 0) || (h == INVALID_HANDLE_VALUE)) { return true; }
+    return DuplicateHandle(GetCurrentProcess(), h.cast(*u8), GetCurrentProcess(), out, 0, 1, DUPLICATE_SAME_ACCESS) != 0;
+}
+
 fn _win_close_if(h: u64): void {
     if (h != 0) { CloseHandle(h.cast(*u8)); }
 }
 
-// moves whatever the pipe holds right now into a fresh scratch chunk pushed on sb. Returns false when nothing was pending.
-// At EOF (every write end closed) the handle is closed and zeroed.
-fn _win_exec_pump(h: *u64, sb: *StringBuilder, alloc: *Alloc): bool {
-    hv := h.*;
-    avail: u32 = 0;
-    if (PeekNamedPipe(hv.cast(*u8), nullptr(u8), 0, nullptr(u32), avail.^, nullptr(u32)) == 0) {
-        CloseHandle(hv.cast(*u8));
-        h.* = 0;
-        return true;
-    }
-    if (avail == 0) { return false; }
-    n := min(avail.cast(i64), _OS_EXEC_READ_CHUNK);
-    chunk := mem_alloc(alloc, n, 1);
-    got: u32 = 0;
-    if (ReadFile(hv.cast(*u8), chunk, n.cast(u32), got.^, nullptr(u8)) == 0) {
-        CloseHandle(hv.cast(*u8));
-        h.* = 0;
-        return true;
-    }
-    push(sb, slice(chunk, got.cast(i64)));
+// our async end of a pipe, with at most one overlapped read or write in flight
+struct _WinAsyncIo {
+    h: u64;         // 0 = closed
+    ev: u64;        // signaled when the op in flight finishes
+    ov: OVERLAPPED;
+    pending: bool;
+    buf: []u8;      // read target, or the bytes a writer keeps in flight (empty when the caller's data is used)
+};
+
+// takes over h (closed by _win_async_io_close even when this fails). buf_size > 0 gives it a buffer on alloc.
+fn _win_async_io_init(io: *_WinAsyncIo, h: u64, buf_size: i64, alloc: *Alloc): bool {
+    io.h = h;
+    io.ev = 0;
+    io.pending = false;
+    io.buf = 0;
+    if (h == 0) { return true; }
+    ev := CreateEventW(nullptr(u8), 1, 0, nullptr(u16));
+    if (ev == 0) { return false; }
+    io.ev = ev.cast(u64);
+    if (buf_size > 0) { io.buf = mem_alloc_slice(alloc, u8, buf_size, 1); }
     return true;
 }
 
-// runs cmd through the platform shell (cmd.exe /C here, /bin/sh -c on posix) with options
-// Captured output lives on arena.
-fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): ExecResult {
-    res: ExecResult = 0;
-    res.exit_code = -1;
+fn _win_async_io_reset_ov(io: *_WinAsyncIo): void {
+    ov: OVERLAPPED = 0;
+    ov.hEvent = io.ev.cast(*u8);
+    io.ov = ov;
+}
 
-    scratch := scratch_begin(arena);
+// stops the op in flight and waits until the system is done with ov and buf. Returns the bytes it moved when it finished before the cancel, else -1.
+fn _win_async_io_cancel(io: *_WinAsyncIo): i64 {
+    if (!io.pending) { return -1; }
+    CancelIoEx(io.h.cast(*u8), io.ov.^);
+    got: u32 = 0;
+    ok := GetOverlappedResult(io.h.cast(*u8), io.ov.^, got.^, 1);
+    io.pending = false;
+    if (ok == 0) { return -1; }
+    return got.cast(i64);
+}
+
+fn _win_async_io_close(io: *_WinAsyncIo): void {
+    _win_async_io_cancel(io);
+    _win_close_if(io.h);
+    _win_close_if(io.ev);
+    io.h = 0;
+    io.ev = 0;
+}
+
+// result of the op that signaled io.ev: bytes moved, -1 = EOF / the other end is gone
+fn _win_async_io_finish(io: *_WinAsyncIo): i64 {
+    io.pending = false;
+    got: u32 = 0;
+    if (GetOverlappedResult(io.h.cast(*u8), io.ov.^, got.^, 0) == 0) { return -1; }
+    return got.cast(i64);
+}
+
+// queues the next read; on failure (EOF included) the stream is closed
+fn _win_async_read_start(io: *_WinAsyncIo): void {
+    _win_async_io_reset_ov(io);
+    if ((ReadFile(io.h.cast(*u8), io.buf.ptr, io.buf.len.cast(u32), nullptr(u32), io.ov.^.cast(*u8)) != 0) || (GetLastError() == ERROR_IO_PENDING)) {
+        io.pending = true;
+        return;
+    }
+    _win_async_io_close(io);
+}
+
+// queues the next chunk of data from off; on failure (the child closed its stdin) the stream is closed
+fn _win_async_write_start(io: *_WinAsyncIo, data: []u8, off: i64): void {
+    _win_async_io_reset_ov(io);
+    n := min(data.len - off, _WIN_ASYNC_PIPE_BUF.cast(i64));
+    if ((WriteFile(io.h.cast(*u8), data.ptr |> byte_offset(off), n.cast(u32), nullptr(u32), io.ov.^.cast(*u8)) != 0) || (GetLastError() == ERROR_IO_PENDING)) {
+        io.pending = true;
+        return;
+    }
+    _win_async_io_close(io);
+}
+
+// after a kill: takes what the pipe already holds without waiting for more
+fn _win_exec_drain(io: *_WinAsyncIo, sb: *StringBuilder): void {
+    while (io.h != 0) {
+        if (!io.pending) {
+            _win_async_read_start(io);
+            if (io.h == 0) { return; }
+        }
+        if (WaitForSingleObject(io.ev.cast(*u8), 0) != 0) {
+            got := _win_async_io_cancel(io);
+            if (got > 0) { push_copy(sb, slice(io.buf.ptr, got)); }
+            return;
+        }
+        got := _win_async_io_finish(io);
+        if (got < 0) { return; }
+        if (got > 0) { push_copy(sb, slice(io.buf.ptr, got)); }
+    }
+}
+
+// waits up to timeout_ms for the process to end: 0 = only check, -1 = no limit
+fn os_wait_process_exit(proc: OsProcess, timeout_ms: i64): OsWaitResult {
+    res: OsWaitResult = 0;
+    ms: u32 = INFINITE;
+    if (timeout_ms >= 0) { ms = min(timeout_ms, 4294967294).cast(u32); }
+    w := WaitForSingleObject(proc.cast(*u8), ms);
+    if (w == WAIT_TIMEOUT) {
+        res.status = .running;
+        return res;
+    }
+    // only an ended wait proves the process is gone: GetExitCodeProcess alone cannot tell STILL_ACTIVE from a real exit code 259
+    code: u32 = 0;
+    if ((w != WAIT_OBJECT_0) || (GetExitCodeProcess(proc.cast(*u8), code.^) == 0)) {
+        res.status = .failed;
+        return res;
+    }
+    res.status = .exited;
+    res.exit_code = code.cast(i32);
+    return res;
+}
+
+// with a timeout the child runs in a job, so the kill also reaches every process it started
+fn _win_exec_kill(proc: WIN_HANDLE, job: WIN_HANDLE): void {
+    if ((job != 0) && (TerminateJobObject(job, 1) != 0)) { return; }
+    TerminateProcess(proc, 1);
+}
+
+// runs cmd through the platform shell (cmd.exe /C here, /bin/sh -c on posix) with options
+// Captured output lives on alloc.
+fn os_exec_ex(cmd: []u8, opts: ExecOptions, alloc: *Alloc = get_context_temp_arena_as_alloc()): ExecResult {
+    res: ExecResult = 0;
+
+    scratch := scratch_begin(alloc);
     defer scratch_end(scratch);
 
-    full := _win_shell_cmdline(cmd, scratch.arena);
-    cwd := nullptr(u8);
-    if (opts.cwd.len > 0) { cwd = arena_push_str_copy_c(scratch.arena, opts.cwd).ptr; }
-
-    sa: SECURITY_ATTRIBUTES = 0;
-    sa.nLength = sizeof_type(SECURITY_ATTRIBUTES).cast(u32);
-    sa.bInheritHandle = 1;
+    app := _win_shell_app(scratch.alloc);
+    if (app == 0) { return res; }
+    full := _win_shell_cmdline(cmd, scratch.alloc);
+    cwd := nullptr(u16);
+    if (opts.cwd.len > 0) { cwd = utf8_to_utf16(opts.cwd, scratch.alloc).ptr; }
 
     in_child: u64 = 0;  in_ours: u64 = 0;  in_owned := false;
     out_child: u64 = 0; out_ours: u64 = 0; out_owned := false;
     err_child: u64 = 0; err_ours: u64 = 0; err_owned := false;
 
-    stdin_pipe_size := min(max(opts.stdin_data.len, 1), 2147483647).cast(u32);
-    ok := _win_exec_child_handle(opts.stdin_mode, STD_INPUT_HANDLE, opts.stdin_file, true, stdin_pipe_size, sa.^, in_child.^, in_ours.^, in_owned.^);
-    if (ok) { ok = _win_exec_child_handle(opts.stdout_mode, STD_OUTPUT_HANDLE, opts.stdout_file, false, 0, sa.^, out_child.^, out_ours.^, out_owned.^); }
+    ok := _win_exec_child_handle(opts.stdin_mode, STD_INPUT_HANDLE, opts.stdin_file, true, scratch.alloc, in_child.^, in_ours.^, in_owned.^);
+    if (ok) { ok = _win_exec_child_handle(opts.stdout_mode, STD_OUTPUT_HANDLE, opts.stdout_file, false, scratch.alloc, out_child.^, out_ours.^, out_owned.^); }
     if (ok) {
         if (opts.stderr_mode == .merge) {
             err_child = out_child; // same handle, closed once through out_owned
         } else {
-            ok = _win_exec_child_handle(opts.stderr_mode, STD_ERROR_HANDLE, opts.stderr_file, false, 0, sa.^, err_child.^, err_ours.^, err_owned.^);
+            ok = _win_exec_child_handle(opts.stderr_mode, STD_ERROR_HANDLE, opts.stderr_file, false, scratch.alloc, err_child.^, err_ours.^, err_owned.^);
         }
     }
 
-    pi: PROCESS_INFORMATION = 0;
+    // our pipe ends move into these, which close them
+    io_in: _WinAsyncIo = 0;
+    io_out: _WinAsyncIo = 0;
+    io_err: _WinAsyncIo = 0;
+    if (!_win_async_io_init(io_in.^, in_ours, 0, scratch.alloc)) { ok = false; }
+    if (!_win_async_io_init(io_out.^, out_ours, _WIN_ASYNC_PIPE_BUF.cast(i64), scratch.alloc)) { ok = false; }
+    if (!_win_async_io_init(io_err.^, err_ours, _WIN_ASYNC_PIPE_BUF.cast(i64), scratch.alloc)) { ok = false; }
+
+    // only these copies are inheritable, and only for the moment of CreateProcess
+    in_dup: u64 = 0; out_dup: u64 = 0; err_dup: u64 = 0;
+    if (ok) { ok = _win_inheritable_copy(in_child, in_dup.^); }
+    if (ok) { ok = _win_inheritable_copy(out_child, out_dup.^); }
     if (ok) {
-        si: STARTUPINFOEXA = 0;
-        si.StartupInfo.cb = sizeof_type(STARTUPINFOA).cast(u32);
-        si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-        si.StartupInfo.hStdInput = in_child.cast(*u8);
-        si.StartupInfo.hStdOutput = out_child.cast(*u8);
-        si.StartupInfo.hStdError = err_child.cast(*u8);
-        flags: u32 = 0;
-        if (opts.no_window) { flags = CREATE_NO_WINDOW; }
-        // inherit=1 hands over the marked handles
-        ok = CreateProcessA(nullptr(u8), full, nullptr(u8), nullptr(u8), 1, flags, nullptr(u8), cwd, si.^, pi.^) != 0;
+        if (opts.stderr_mode == .merge) {
+            err_dup = out_dup;
+        } else {
+            ok = _win_inheritable_copy(err_child, err_dup.^);
+        }
     }
 
-    // the child holds its own copies now (or never started): release the child ends and un-mark caller files
+    // by default the handle list limits inheritance to the 3 copies, so handles other threads made inheritable stay out
+    handles: [3]u64 = 0;
+    handles_n: i64 = 0;
+    if (in_dup != 0)  { handles[handles_n] = in_dup;  handles_n += 1; }
+    if (out_dup != 0) { handles[handles_n] = out_dup; handles_n += 1; }
+    if ((err_dup != 0) && (err_dup != out_dup)) { handles[handles_n] = err_dup; handles_n += 1; }
+    inherit: i32 = 1;
+    attr := nullptr(u8);
+    if (ok && !opts.inherit_handles) {
+        if (handles_n == 0) {
+            inherit = 0;
+        } else {
+            attr_size: u64 = 0;
+            InitializeProcThreadAttributeList(nullptr(u8), 1, 0, attr_size.^); // first call always fails, it only fills attr_size
+            attr = mem_alloc(scratch.alloc, attr_size.cast(i64), 8);
+            if (InitializeProcThreadAttributeList(attr, 1, 0, attr_size.^) == 0) {
+                attr = nullptr(u8);
+                ok = false;
+            } else {
+                ok = UpdateProcThreadAttribute(attr, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handles.ptr.cast(*u8), (handles_n * 8).cast(u64), nullptr(u8), nullptr(u64)) != 0;
+            }
+        }
+    }
+
+    // started suspended and resumed once inside the job, so nothing it starts escapes the job
+    job: WIN_HANDLE = 0;
+    if (ok && (opts.timeout_ms > 0)) { job = CreateJobObjectW(nullptr(u8), nullptr(u16)); }
+
+    pi: PROCESS_INFORMATION = 0;
+    if (ok) {
+        si: STARTUPINFOEXW = 0;
+        si.StartupInfo.cb = sizeof_type(STARTUPINFOW).cast(u32);
+        si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        si.StartupInfo.hStdInput = in_dup.cast(*u8);
+        si.StartupInfo.hStdOutput = out_dup.cast(*u8);
+        si.StartupInfo.hStdError = err_dup.cast(*u8);
+        flags: u32 = 0;
+        if (opts.no_window) { flags = CREATE_NO_WINDOW; }
+        if (job != 0) { flags = flags | CREATE_SUSPENDED; }
+        if (attr != 0) {
+            si.StartupInfo.cb = sizeof_type(STARTUPINFOEXW).cast(u32);
+            si.lpAttributeList = attr;
+            flags = flags | EXTENDED_STARTUPINFO_PRESENT;
+        }
+        ok = CreateProcessW(app, full, nullptr(u8), nullptr(u8), inherit, flags, nullptr(u8), cwd, si.^, pi.^) != 0;
+    }
+    if (ok && (job != 0)) {
+        if (AssignProcessToJobObject(job, pi.hProcess) == 0) {
+            CloseHandle(job); // the timeout then kills only the child
+            job = 0;
+        }
+        if (ResumeThread(pi.hThread) == 0xFFFFFFFF) {
+            TerminateProcess(pi.hProcess, 1);
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+            ok = false;
+        }
+    }
+
+    // the child holds its own copies now (or never started)
+    if (attr != 0) { DeleteProcThreadAttributeList(attr); }
+    _win_close_if(in_dup);
+    _win_close_if(out_dup);
+    if (err_dup != out_dup) { _win_close_if(err_dup); }
     if (in_owned)  { CloseHandle(in_child.cast(*u8)); }
     if (out_owned) { CloseHandle(out_child.cast(*u8)); }
     if (err_owned) { CloseHandle(err_child.cast(*u8)); }
-    if (opts.stdin_mode == .file)  { SetHandleInformation(in_child.cast(*u8), HANDLE_FLAG_INHERIT, 0); }
-    if (opts.stdout_mode == .file) { SetHandleInformation(out_child.cast(*u8), HANDLE_FLAG_INHERIT, 0); }
-    if (opts.stderr_mode == .file) { SetHandleInformation(err_child.cast(*u8), HANDLE_FLAG_INHERIT, 0); }
     if (!ok) {
-        _win_close_if(in_ours);
-        _win_close_if(out_ours);
-        _win_close_if(err_ours);
+        if (job != 0) { CloseHandle(job); }
+        _win_async_io_close(io_in.^);
+        _win_async_io_close(io_out.^);
+        _win_async_io_close(io_err.^);
         return res;
     }
     res.started = true;
-
-    // stdin first: the pipe buffer holds all of it, so this returns without waiting on the child. Closing = EOF for the child.
-    if (in_ours != 0) {
-        win_write_all(in_ours.cast(*u8), opts.stdin_data.ptr, opts.stdin_data.len);
-        CloseHandle(in_ours.cast(*u8));
-        in_ours = 0;
-    }
 
     out_sb: StringBuilder = #memory_garbage;
     err_sb: StringBuilder = #memory_garbage;
@@ -1059,85 +1585,143 @@ fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): Exec
     init(err_sb.^, scratch.alloc);
 
     deadline: i64 = 0;
-    if (opts.timeout_ms > 0) { deadline = os_monotonic_ms() + opts.timeout_ms; }
+    if (opts.timeout_ms > 0) { deadline = #wrap_add(os_monotonic_ms(), opts.timeout_ms); } // wraps for huge timeouts, #wrap_sub below gets the time left back
 
-    // drain both pipes until EOF; anonymous pipes have no overlapped I/O, so it is peek + short waits on the process
-    exited := false;
-    while ((out_ours != 0) || (err_ours != 0)) {
-        if ((deadline != 0) && (!res.timed_out) && (os_monotonic_ms() >= deadline)) {
-            TerminateProcess(pi.hProcess, 1);
-            res.timed_out = true;
-            exited = true;
+    in_off: i64 = 0;
+    if (io_in.h != 0) {
+        if (opts.stdin_data.len == 0) {
+            _win_async_io_close(io_in.^); // nothing to feed: EOF for the child right away
+        } else {
+            _win_async_write_start(io_in.^, opts.stdin_data, 0);
         }
-        progressed := false;
-        if (out_ours != 0) { if (_win_exec_pump(out_ours.^, out_sb.^, scratch.alloc)) { progressed = true; } }
-        if (err_ours != 0) { if (_win_exec_pump(err_ours.^, err_sb.^, scratch.alloc)) { progressed = true; } }
-        if (progressed) { continue; }
-        if (exited) { break; } // child is gone and its pipes are drained; whoever still holds a write end is not our child
-        if (WaitForSingleObject(pi.hProcess, 10) == 0) { exited = true; }
     }
-    _win_close_if(out_ours);
-    _win_close_if(err_ours);
+    if (io_out.h != 0) { _win_async_read_start(io_out.^); }
+    if (io_err.h != 0) { _win_async_read_start(io_err.^); }
+
+    // one wait on every op in flight plus the process; runs until EOF on all pipes, also after the child exits:
+    // a process it started may still hold a write end. Only the timeout ends it early.
+    exited := false;
+    killed := false;
+    while ((io_in.h != 0) || (io_out.h != 0) || (io_err.h != 0)) {
+        waits: [4]u64 = 0;
+        who: [4]i64 = 0;
+        n: u32 = 0;
+        if (io_in.h != 0)  { waits[n] = io_in.ev;  who[n] = 0; n += 1; }
+        if (io_out.h != 0) { waits[n] = io_out.ev; who[n] = 1; n += 1; }
+        if (io_err.h != 0) { waits[n] = io_err.ev; who[n] = 2; n += 1; }
+        if (!exited) { waits[n] = pi.hProcess.cast(u64); who[n] = 3; n += 1; }
+        wait_ms: u32 = INFINITE;
+        if (deadline != 0) { wait_ms = min(max(#wrap_sub(deadline, os_monotonic_ms()), 0), 4294967294).cast(u32); } // INFINITE (max u32) must not be reachable
+
+        r := WaitForMultipleObjects(n, waits.ptr, 0, wait_ms);
+        if (r >= n) {
+            // timeout, or the wait itself failed: stop the child rather than hang
+            _win_exec_kill(pi.hProcess, job);
+            if (r == WAIT_TIMEOUT) { res.timed_out = true; }
+            killed = true;
+            break;
+        }
+        k := who[r];
+        if (k == 3) {
+            exited = true;
+            continue;
+        }
+        if (k == 0) {
+            got := _win_async_io_finish(io_in.^);
+            if (got < 0) {
+                _win_async_io_close(io_in.^); // the child closed its stdin, the rest of the data is not wanted
+                continue;
+            }
+            in_off += got;
+            if (in_off >= opts.stdin_data.len) {
+                _win_async_io_close(io_in.^); // all fed: EOF for the child
+            } else {
+                _win_async_write_start(io_in.^, opts.stdin_data, in_off);
+            }
+            continue;
+        }
+        io := io_out.^;
+        sb := out_sb.^;
+        if (k == 2) {
+            io = io_err.^;
+            sb = err_sb.^;
+        }
+        got := _win_async_io_finish(io);
+        if (got < 0) {
+            _win_async_io_close(io);
+            continue;
+        }
+        if (got > 0) { push_copy(sb, slice(io.buf.ptr, got)); }
+        _win_async_read_start(io);
+    }
+    if (killed) {
+        _win_exec_drain(io_out.^, out_sb.^);
+        _win_exec_drain(io_err.^, err_sb.^);
+    }
+    _win_async_io_close(io_in.^);
+    _win_async_io_close(io_out.^);
+    _win_async_io_close(io_err.^);
 
     // the child may outlive its pipes (closed stdout early); wait for it with whatever time is left
-    remaining: u32 = INFINITE;
-    if (deadline != 0) {
-        left := deadline - os_monotonic_ms();
-        if (left < 0) { left = 0; }
-        remaining = left.cast(u32);
-    }
-    if (WaitForSingleObject(pi.hProcess, remaining) != 0) {
-        TerminateProcess(pi.hProcess, 1);
+    remaining: i64 = -1;
+    if (deadline != 0) { remaining = max(#wrap_sub(deadline, os_monotonic_ms()), 0); }
+    wr := os_wait_process_exit(pi.hProcess.cast(u64), remaining);
+    if (wr.status == .running) {
+        _win_exec_kill(pi.hProcess, job);
         res.timed_out = true;
-        WaitForSingleObject(pi.hProcess, INFINITE);
+        wr = os_wait_process_exit(pi.hProcess.cast(u64), -1);
+    } else if (wr.status == .failed) {
+        _win_exec_kill(pi.hProcess, job); // the wait failed: stop the child rather than leave it running
     }
-    code: u32 = 0;
-    GetExitCodeProcess(pi.hProcess, code.^);
-    res.exit_code = code.cast(i32);
+    if (job != 0) { CloseHandle(job); } // no kill-on-close: what outlived the call without a timeout kill keeps running
+    res.exited = wr.status == .exited;
+    res.exit_code = wr.exit_code;
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
 
-    out_alloc := arena_as_allocator(arena);
-    if (opts.stdout_mode == .buffer) { res.stdout = finalize(out_sb.^, out_alloc, false); }
-    if (opts.stderr_mode == .buffer) { res.stderr = finalize(err_sb.^, out_alloc, false); }
-    res.ok = res.exit_code == 0 && res.started;
+    if (opts.stdout_mode == .buffer) { res.stdout = finalize(out_sb.^, alloc, false); }
+    if (opts.stderr_mode == .buffer) { res.stderr = finalize(err_sb.^, alloc, false); }
+    res.ok = res.started && res.exited && (res.exit_code == 0);
     return res;
 }
 
-// runs cmd through the platform shell, waits, returns everything it wrote to stdout (on arena).
+// runs cmd through the platform shell, waits, returns everything it wrote to stdout (on alloc).
 // Empty when the command could not start (or printed nothing). stdin and stderr stay inherited; append "2>&1" to capture stderr too.
-fn os_exec_output(cmd: []u8, arena: *Arena = #temp_arena()): []u8 {
+fn os_exec_output(cmd: []u8, alloc: *Alloc = get_context_temp_arena_as_alloc()): []u8 {
     opts: ExecOptions = 0;
     opts.stdout_mode = .buffer;
-    return os_exec_ex(cmd, opts, arena).stdout;
+    return os_exec_ex(cmd, opts, alloc).stdout;
 }
 
 fn os_stdout_write(buf: []u8): void { os_stdout_write(buf.ptr, buf.len); }
+fn os_stderr_write(buf: []u8): void { os_stderr_write(buf.ptr, buf.len); }
 fn os_file_read(h: OsFile, buf: []u8): i64 { return os_file_read(h, buf.ptr, buf.len); }
 fn os_file_write(h: OsFile, buf: []u8): i64 { return os_file_write(h, buf.ptr, buf.len); }
 fn os_cwd(buf: []u8): i64 { return os_cwd(buf.ptr, buf.len); }
 fn os_temp_dir(buf: []u8): i64 { return os_temp_dir(buf.ptr, buf.len); }
-fn os_clipboard_set(text: []u8): void { os_clipboard_set(text.ptr, 0 .cast(u32), text.len.cast(u32)); }
-fn os_clipboard_get(buf: []u8): u32 { return os_clipboard_get(buf.ptr, buf.len.cast(u32)); }
+fn os_path_abs(buf: []u8, path: []u8): i64 { return os_path_abs(buf.ptr, buf.len, path); }
 
-#linkc("GetEnvironmentVariableA") fn win_GetEnvironmentVariableA(name: *u8, buffer: *u8, size: u32): u32;
-#linkc("SetEnvironmentVariableA") fn win_SetEnvironmentVariableA(name: *u8, value: *u8): i32;
+#linkc("GetEnvironmentVariableW") fn win_GetEnvironmentVariableW(name: *u16, buffer: *u16, size: u32): u32;
+#linkc("SetEnvironmentVariableW") fn win_SetEnvironmentVariableW(name: *u16, value: *u16): i32;
 
 fn os_get_env(name: []u8, alloc: *Alloc = get_context_temp_arena_as_alloc()): []u8 {
-    name_c := #temp_c_string(name, alloc);
-    len := win_GetEnvironmentVariableA(name_c, nullptr(u8), 0);
-    if (len == 0) {
+    name_w := #temp_utf8_to_utf16(name, alloc).ptr;
+    need := win_GetEnvironmentVariableW(name_w, nullptr(u16), 0);   // size with the NULL
+    if (need == 0) {
         return empty_slice(u8);
     }
-    buf := mem_alloc_slice(alloc, u8, len);
-    win_GetEnvironmentVariableA(name_c, buf.ptr, len);
-    return slice(buf, 0, len - 1);
+    wbuf := #temp_buffer(need.cast(i64) * 2, alloc).ptr.cast(*u16);
+    n := win_GetEnvironmentVariableW(name_w, wbuf, need);
+    if (n == 0 || n >= need) {
+        return empty_slice(u8);
+    }
+    return utf16_to_utf8(slice(wbuf, n.cast(i64)), alloc);
 }
 
 fn os_set_env(name: []u8, value: []u8): void {
-    win_SetEnvironmentVariableA(#temp_c_string(name), #temp_c_string(value));
+    win_SetEnvironmentVariableW(#temp_utf8_to_utf16(name).ptr, #temp_utf8_to_utf16(value).ptr);
 }
 
 fn os_delete_env(name: []u8): void {
-    win_SetEnvironmentVariableA(#temp_c_string(name), nullptr(u8));
+    win_SetEnvironmentVariableW(#temp_utf8_to_utf16(name).ptr, nullptr(u16));
 }

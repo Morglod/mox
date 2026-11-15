@@ -2,7 +2,7 @@
 // Generator: gen_bindings (c99_parser)
 // Prefix filter: SDL_
 
-import "internal.mox";
+import "../internal.mox";
 import "./sdl3/link.mox";
 
 // Opaque types (forward-declared structs without definitions)

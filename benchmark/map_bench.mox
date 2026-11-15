@@ -2,13 +2,7 @@
 //  (JIT): mox backend=jit ./map_bench.mox
 // (LLVM): mox backend=llvm -O3 ./map_bench.mox
 
-import "internal.mox";
-import "alloc.mox";
-import "format.mox";
-import "time.mox";
-import "hash_map.mox";
-import "hash_map_swiss.mox";
-import "hash_map_node.mox";
+import "std.mox";
 
 const N : i64 = 1000000;
 

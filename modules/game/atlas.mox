@@ -1,0 +1,385 @@
+// Texture atlas packing (skyline bottom-left, least wasted area on ties).
+//
+//   atlas: Atlas(MySprite, PixelFormat) = 0;
+//   atlas_init(atlas.^, ATLAS_DEFAULT_SETTINGS);
+//   handle := atlas_add(atlas.^, w, h, kind, sprite);
+//   atlas_pack(atlas.^);
+//   for (page, page_index : iterate(atlas.pages.items)) {
+//       for (item : atlas_page_items(atlas.^, page_index)) { ... }
+//   }
+//
+// Items only share a page when their kinds are equal (==).
+// item.x/item.y point at the image itself, the extrude border is around it.
+
+import "internal.mox";
+import "std/alloc.mox";
+import "std/context.mox";
+import "std/dynarr.mox";
+import "std/slice.mox";
+import "std/assert.mox";
+
+struct AtlasSettings {
+    max_width: i32;
+    max_height: i32;
+    padding: i32;
+    extrude: i32;
+    align: i32;
+    power_of_two: bool;
+    allow_big_items: bool;
+};
+
+const ATLAS_DEFAULT_SETTINGS := AtlasSettings.{
+    max_width = 2048;
+    max_height = 2048;
+    padding = 1;
+    extrude = 0;
+    align = 1;
+    power_of_two = false;
+    allow_big_items = true;
+};
+
+struct AtlasItem($Data: __type_ptr, $Kind: __type_ptr) {
+    data: $Data;
+    kind: $Kind;
+    width: i32;
+    height: i32;
+
+    page: i64;
+    x: i32;
+    y: i32;
+};
+
+struct AtlasPage($Kind: __type_ptr) {
+    kind: $Kind;
+    width: i32;
+    height: i32;
+    big: bool;
+    first: i64;
+    count: i64;
+};
+
+struct Atlas($Data: __type_ptr, $Kind: __type_ptr) {
+    settings: AtlasSettings;
+    items: DynArr(AtlasItem($Data, $Kind));
+    pages: DynArr(AtlasPage($Kind));
+    order: DynArr(i64);
+};
+
+struct AtlasPageIterator($Data: __type_ptr, $Kind: __type_ptr) {
+    atlas: *Atlas($Data, $Kind);
+    index: i64;
+    end: i64;
+};
+
+// y is the top of the line, nodes cover the page width left to right without gaps
+struct _AtlasSkylineNode {
+    x: i32;
+    y: i32;
+    width: i32;
+};
+
+// a skyline only grows, so once a size did not fit, nothing at least that big will fit later
+struct _AtlasSkyline {
+    nodes: DynArr(_AtlasSkylineNode);
+    no_fit_width: i32;
+    no_fit_height: i32;
+};
+
+const _ATLAS_NO_LIMIT : i32 = 2147483647;
+
+struct _AtlasSkylineSpot {
+    node: i64;
+    x: i32;
+    y: i32;
+};
+
+// sort key packed in u64 so plain < sorts by height desc, width desc, index asc
+const _ATLAS_SORT_SIDE_BITS : u64 = 20;
+const _ATLAS_SORT_INDEX_BITS : u64 = 24;
+const _ATLAS_SORT_SIDE_MAX : i32 = 1048575;
+const _ATLAS_SORT_INDEX_MASK : u64 = 16777215;
+
+fn atlas_init(atlas: *Atlas($Data, $Kind), settings: AtlasSettings = ATLAS_DEFAULT_SETTINGS, alloc: *Alloc = get_context_alloc()): void {
+    atlas.settings = settings;
+    dynarr_init(atlas.items.^, alloc);
+    dynarr_init(atlas.pages.^, alloc);
+    dynarr_init(atlas.order.^, alloc);
+}
+
+fn atlas_free(atlas: *Atlas($Data, $Kind)): void {
+    dynarr_free(atlas.items.^);
+    dynarr_free(atlas.pages.^);
+    dynarr_free(atlas.order.^);
+}
+
+fn atlas_add(atlas: *Atlas($Data, $Kind), width: i32, height: i32, kind: $Kind, data: $Data): i64 {
+    push(atlas.items.^, AtlasItem($Data, $Kind).{
+        data = data;
+        kind = kind;
+        width = width;
+        height = height;
+        page = -1;
+        x = 0;
+        y = 0;
+    });
+    return atlas.items.len - 1;
+}
+
+fn atlas_item(atlas: *Atlas($Data, $Kind), handle: i64): *AtlasItem($Data, $Kind) {
+    return dynarr_at(atlas.items.^, handle);
+}
+
+fn atlas_page_items(atlas: *Atlas($Data, $Kind), page: i64): AtlasPageIterator($Data, $Kind) {
+    first := dynarr_at(atlas.pages.^, page).first;
+    return .{
+        atlas = atlas;
+        index = first;
+        end = first + dynarr_at(atlas.pages.^, page).count;
+    };
+}
+
+fn iterator_next(it: *AtlasPageIterator($Data, $Kind)): bool {
+    if (it.index >= it.end) { return false; }
+    it.index += 1;
+    return true;
+}
+
+fn iterator_end(it: *AtlasPageIterator($Data, $Kind)): void {}
+
+fn iterator_current(it: *AtlasPageIterator($Data, $Kind)): *AtlasItem($Data, $Kind) {
+    return dynarr_at(it.atlas.items.^, dynarr_at(it.atlas.order.^, it.index - 1).*);
+}
+
+// returns false when some item is bigger than max size and allow_big_items is off, such items get page = -1
+fn atlas_pack(atlas: *Atlas($Data, $Kind)): bool {
+    settings := atlas.settings;
+    alloc := atlas.items.alloc;
+    items := atlas.items.items;
+    dynarr_reset(atlas.pages.^);
+    dynarr_reset(atlas.order.^);
+
+    page_width := settings.max_width + settings.padding;
+    page_height := settings.max_height + settings.padding;
+    border := settings.extrude * 2;
+
+    assert(items.len <= _ATLAS_SORT_INDEX_MASK.cast(i64), "atlas: too many items");
+    sorted: DynArr(u64) = 0;
+    dynarr_init(sorted.^, alloc, items.len);
+    defer dynarr_free(sorted.^);
+    for (i : it_range(items.len)) {
+        items[i].page = -1;
+        push(sorted.^, _atlas_sort_key(items[i].width, items[i].height, i));
+    }
+    sort_quick(sorted.items);
+
+    skylines: DynArr(_AtlasSkyline) = 0;
+    dynarr_init(skylines.^, alloc);
+    defer _atlas_free_skylines(skylines.^);
+
+    ok := true;
+    for (key : iterate(sorted.items)) {
+        item := items.ptr |> type_offset((key.* & _ATLAS_SORT_INDEX_MASK).cast(i64));
+        slot_width := _atlas_round_up(item.width + border + settings.padding, settings.align);
+        slot_height := _atlas_round_up(item.height + border + settings.padding, settings.align);
+
+        if (slot_width > page_width || slot_height > page_height) {
+            if (!settings.allow_big_items) {
+                ok = false;
+                continue;
+            }
+            item.page = _atlas_add_page(atlas, skylines.^, item.kind, true, 0, alloc);
+            item.x = settings.extrude;
+            item.y = settings.extrude;
+            page := dynarr_at(atlas.pages.^, item.page);
+            page.width = item.width + border;
+            page.height = item.height + border;
+            continue;
+        }
+
+        spot: _AtlasSkylineSpot = 0;
+        spot_page: i64 = -1;
+        for (page_index : it_range(atlas.pages.len)) {
+            page := dynarr_at(atlas.pages.^, page_index);
+            if (page.big || !(page.kind == item.kind)) { continue; }
+            if (_atlas_skyline_find(dynarr_at(skylines.^, page_index), slot_width, slot_height, page_width, page_height, spot.^)) {
+                spot_page = page_index;
+                break;
+            }
+        }
+        if (spot_page < 0) {
+            spot_page = _atlas_add_page(atlas, skylines.^, item.kind, false, page_width, alloc);
+            _atlas_skyline_find(dynarr_at(skylines.^, spot_page), slot_width, slot_height, page_width, page_height, spot.^);
+        }
+        _atlas_skyline_place(dynarr_at(skylines.^, spot_page).nodes.^, spot, slot_width, slot_height);
+
+        item.page = spot_page;
+        item.x = spot.x + settings.extrude;
+        item.y = spot.y + settings.extrude;
+        page := dynarr_at(atlas.pages.^, spot_page);
+        page.width = max(page.width, spot.x + item.width + border);
+        page.height = max(page.height, spot.y + item.height + border);
+    }
+
+    for (page : iterate(atlas.pages.items)) {
+        if (settings.power_of_two && !page.big) {
+            page.width = min(_atlas_power_of_two(page.width), settings.max_width);
+            page.height = min(_atlas_power_of_two(page.height), settings.max_height);
+        }
+    }
+
+    _atlas_group_by_page(atlas);
+    return ok;
+}
+
+fn _atlas_add_page(atlas: *Atlas($Data, $Kind), skylines: *DynArr(_AtlasSkyline), kind: $Kind, big: bool, page_width: i32, alloc: *Alloc): i64 {
+    push(atlas.pages.^, AtlasPage($Kind).{
+        kind = kind;
+        width = 0;
+        height = 0;
+        big = big;
+        first = 0;
+        count = 0;
+    });
+    skyline: _AtlasSkyline = 0;
+    skyline.no_fit_width = _ATLAS_NO_LIMIT;
+    skyline.no_fit_height = _ATLAS_NO_LIMIT;
+    if (!big) {
+        dynarr_init(skyline.nodes.^, alloc);
+        push(skyline.nodes.^, _AtlasSkylineNode.{ x = 0; y = 0; width = page_width; });
+    }
+    push(skylines, skyline);
+    return atlas.pages.len - 1;
+}
+
+fn _atlas_free_skylines(skylines: *DynArr(_AtlasSkyline)): void {
+    for (skyline : iterate(skylines.items)) { dynarr_free(skyline.nodes.^); }
+    dynarr_free(skylines);
+}
+
+fn _atlas_group_by_page(atlas: *Atlas($Data, $Kind)): void {
+    items := atlas.items.items;
+    pages := atlas.pages.items;
+    for (item : iterate(items)) {
+        if (item.page >= 0) { pages[item.page].count += 1; }
+    }
+    total: i64 = 0;
+    for (page : iterate(pages)) {
+        page.first = total;
+        total += page.count;
+        page.count = 0;
+    }
+    dynarr_ensure(atlas.order.^, total);
+    for (i : it_range(total)) { push(atlas.order.^, 0i64); }
+    order := atlas.order.items;
+    for (i : it_range(items.len)) {
+        if (items[i].page < 0) { continue; }
+        page := pages.ptr |> type_offset(items[i].page);
+        order[page.first + page.count] = i;
+        page.count += 1;
+    }
+}
+
+// lowest spot wins, on equal height the one that leaves less empty area under the rect
+fn _atlas_skyline_find(skyline: *_AtlasSkyline, width: i32, height: i32, page_width: i32, page_height: i32, out: *_AtlasSkylineSpot): bool {
+    if (width >= skyline.no_fit_width && height >= skyline.no_fit_height) { return false; }
+    nodes := skyline.nodes.items;
+    max_y := page_height - height;
+    best_node: i64 = -1;
+    best_y := max_y + 1;
+    best_waste: i64 = 0;
+    for (i : it_range(nodes.len)) {
+        x := nodes[i].x;
+        if (x + width > page_width) { break; }
+        y := nodes[i].y;
+        if (y > max_y || y > best_y) { continue; }
+        waste: i64 = 0;
+        covered: i32 = 0;
+        j := i;
+        while (covered < width) {
+            node := nodes[j];
+            part := min(node.width, width - covered);
+            if (node.y > y) {
+                waste += covered.cast(i64) * (node.y - y).cast(i64);
+                y = node.y;
+                if (y > max_y || y > best_y) { break; }
+            } else {
+                waste += part.cast(i64) * (y - node.y).cast(i64);
+            }
+            covered += part;
+            j += 1;
+        }
+        if (covered < width) { continue; }
+        if (y < best_y || waste < best_waste) {
+            best_node = i;
+            best_y = y;
+            best_waste = waste;
+        }
+    }
+    if (best_node < 0) {
+        skyline.no_fit_width = width;
+        skyline.no_fit_height = height;
+        return false;
+    }
+    out.* = .{ node = best_node; x = nodes[best_node].x; y = best_y; };
+    return true;
+}
+
+fn _atlas_skyline_place(nodes: *DynArr(_AtlasSkylineNode), spot: _AtlasSkylineSpot, width: i32, height: i32): void {
+    items := nodes.items;
+    right := spot.x + width;
+    first := spot.node;
+    last := first;
+    while (last < items.len && items[last].x + items[last].width <= right) { last += 1; }
+    if (last < items.len && items[last].x < right) {
+        items[last].width -= right - items[last].x;
+        items[last].x = right;
+    }
+
+    top := _AtlasSkylineNode.{ x = spot.x; y = spot.y + height; width = width; };
+    if (first > 0 && items[first - 1].y == top.y) {
+        first -= 1;
+        top.x = items[first].x;
+        top.width += items[first].width;
+    }
+    if (last < items.len && items[last].y == top.y) {
+        top.width += items[last].width;
+        last += 1;
+    }
+    _atlas_replace_nodes(nodes, first, last, top);
+}
+
+fn _atlas_replace_nodes(nodes: *DynArr(_AtlasSkylineNode), first: i64, last: i64, node: _AtlasSkylineNode): void {
+    old_len := nodes.len;
+    if (first == last) {
+        push(nodes, node);
+        items := nodes.items;
+        i := old_len;
+        while (i > first) {
+            items[i] = items[i - 1];
+            i -= 1;
+        }
+    } else {
+        items := nodes.items;
+        removed := last - first - 1;
+        for (i : it_range(last, old_len)) { items[i - removed] = items[i]; }
+        for (i : it_range(removed)) { pop_back(nodes); }
+    }
+    nodes.items[first] = node;
+}
+
+fn _atlas_sort_key(width: i32, height: i32, index: i64): u64 {
+    height_key := (_ATLAS_SORT_SIDE_MAX - clamp(height, 0, _ATLAS_SORT_SIDE_MAX)).cast(u64);
+    width_key := (_ATLAS_SORT_SIDE_MAX - clamp(width, 0, _ATLAS_SORT_SIDE_MAX)).cast(u64);
+    return #shl(height_key, _ATLAS_SORT_SIDE_BITS + _ATLAS_SORT_INDEX_BITS) | #shl(width_key, _ATLAS_SORT_INDEX_BITS) | index.cast(u64);
+}
+
+fn _atlas_round_up(value: i32, align: i32): i32 {
+    if (align <= 1) { return value; }
+    return (value + align - 1) / align * align;
+}
+
+fn _atlas_power_of_two(value: i32): i32 {
+    result: i32 = 1;
+    while (result < value) { result *= 2; }
+    return result;
+}

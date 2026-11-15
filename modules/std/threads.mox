@@ -1,0 +1,110 @@
+import "internal.mox";
+import "./os.mox";
+import "./alloc.mox";
+import "./dynarr.mox";
+import "./panic.mox";
+
+// Thread exit callbacks: each thread keeps its own list, run last registered first.
+// They run when:
+//   - a thread_spawn thread's function returns
+//   - the process exits through exit(), a return from main or a panic (for the thread that exits it)
+//   - any other thread ends (a thread not started by thread_spawn, ExitThread, pthread_exit), from an OS TLS destructor
+// Threads still running when the process exits are killed without their callbacks.
+// _exit, os_abort and a panic inside a panic skip all callbacks.
+// At comptime thread_on_exit does nothing.
+
+const ThreadFn : __type_ptr = #type *fn(arg: *u8): void;
+const ThreadExitFn : __type_ptr = #type *fn(data: *u8): void;
+
+struct Thread {
+    handle: u64;   // 0 if thread_spawn failed
+};
+
+struct _ThreadExitCallback {
+    f: ThreadExitFn;
+    data: *u8;
+};
+
+struct _ThreadStart {
+    f: ThreadFn;
+    arg: *u8;
+};
+
+_thread_exit_callbacks: DynArr(_ThreadExitCallback) = 0; #thread_local
+_thread_exit_marked: bool = false; #thread_local
+
+// process-wide OS key whose destructor is the fallback runner; key + 1, 0 = not created yet
+_thread_exit_key_plus1: u64 = 0;
+
+fn _thread_exit_from_os(marker: *u8): void {
+    thread_run_exit_callbacks();
+}
+
+fn _thread_exit_from_process(): void {
+    thread_run_exit_callbacks();
+}
+
+// two threads racing here only waste one key: each marks its slot with the key it created
+fn _thread_exit_key(): u64 {
+    k := _thread_exit_key_plus1;
+    if (k == 0) {
+        key: OsTlsKey = 0;
+        if (!os_tls_key_create(key.^, _thread_exit_from_os.^)) {
+            panic("thread_on_exit: os_tls_key_create failed");
+        }
+        if (!os_atexit(_thread_exit_from_process.^)) {
+            panic("thread_on_exit: atexit failed");
+        }
+        k = key + 1;
+        _thread_exit_key_plus1 = k;
+    }
+    return k - 1;
+}
+
+fn thread_on_exit(f: ThreadExitFn, data: *u8): void {
+    if (#is_comptime) { return; }
+    if (!_thread_exit_marked) {
+        // any non-null value: the OS calls the destructor only for threads whose slot is set
+        os_tls_set(_thread_exit_key(), 1 .cast(u64).cast(*u8));
+        _thread_exit_marked = true;
+    }
+    if (_thread_exit_callbacks.alloc == 0) {
+        dynarr_init(_thread_exit_callbacks.^, default_alloc(), 0);
+    }
+    cb: _ThreadExitCallback = .{ f = f; data = data; };
+    push(_thread_exit_callbacks.^, cb);
+}
+
+// runs the current thread's callbacks now, including ones they register; later runs find nothing to do
+fn thread_run_exit_callbacks(): void {
+    while (_thread_exit_callbacks.len > 0) {
+        cb := dynarr_at(_thread_exit_callbacks.^, _thread_exit_callbacks.len - 1).*;
+        pop_back(_thread_exit_callbacks.^);
+        cb.f(cb.data);
+    }
+    dynarr_free(_thread_exit_callbacks.^);
+}
+
+fn _thread_start(p: *u8): *u8 {
+    start := p.cast(*_ThreadStart).*;
+    mem_free(default_alloc(), p);
+    start.f(start.arg);
+    thread_run_exit_callbacks();
+    return nullptr(u8);
+}
+
+fn thread_spawn(f: ThreadFn, arg: *u8): Thread {
+    start := mem_alloc(default_alloc(), _ThreadStart, 8);
+    start.f = f;
+    start.arg = arg;
+    t: Thread = 0;
+    if (!os_thread_create(_thread_start.^, start.cast(*u8), t.handle.^)) {
+        mem_free(default_alloc(), start);
+        t.handle = 0;
+    }
+    return t;
+}
+
+fn thread_join(t: Thread): bool {
+    return os_thread_join(t.handle);
+}

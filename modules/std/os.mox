@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 import "./slice.mox";
 
 #if (MOX_OS == .Windows) {

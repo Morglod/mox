@@ -440,9 +440,9 @@ fn comptime_and_globals() {
     }
 }
 
-import "slice.mox";
+import "std/slice.mox";
 
-// functions started with # are macro expantions
+// functions started with # are macro expansions
 // their body is placed in caller scope
 // but variable names are not visible for caller
 fn #temp_memory($size: i64): []u8 {
@@ -472,7 +472,8 @@ fn #leak_variable_name(): void {
 fn #repeat(n: u64, code: __ast_ptr) {
     `it: u64 = 0;               // caller see plain "it"
     while (`it < n) {
-        #land_ast code;
+        // `#land_ast lands the code in the caller's context (plain #land_ast inside a macro uses the macro's own)
+        `#land_ast code;
         `it = `it + 1;
     }
 }

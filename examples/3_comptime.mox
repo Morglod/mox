@@ -27,15 +27,17 @@ fn foo() {
 #linkc fn comptime_example(a: i32, b: i32): i32;
 
 #run {
+    // the library is built straight into the output dir, next to the exe
+    // a file built somewhere else can be copied there with build_copy_to_output("path/to/file")
+    out_dir := __compiler_output_dir();
+    temp := get_context_temp_arena_as_alloc();
     if (MOX_OS == .Windows) {
-        os_exec("echo __declspec(dllexport) int comptime_example(int a, int b) { return a + b; } | clang -x c - -shared -o comptime_example.dll");
-        __compiler_link_lib("comptime_example.dll", true);
-        build_copy_to_output("./comptime_example.dll");
+        os_exec(format(temp, "echo __declspec(dllexport) int comptime_example(int a, int b) { return a + b; } | clang -x c - -shared -o \"{}comptime_example.dll\"", .{ out_dir; }));
     } else {
-        os_exec("echo 'int comptime_example(int a, int b) { return a + b; }' | clang -x c - -shared -o comptime_example.so");
-        __compiler_link_lib("comptime_example.so", true);
-        build_copy_to_output("./comptime_example.so");
+        os_exec(format(temp, "echo 'int comptime_example(int a, int b) { return a + b; }' | clang -x c - -shared -o \"{}comptime_example.so\"", .{ out_dir; }));
     }
+    // path without the extension
+    __compiler_link_lib(format(temp, "{}comptime_example", .{ out_dir; }), true);
     println("\ncomptime_example(10,20) = {}\n", .{ comptime_example(10, 20) });
 }
 

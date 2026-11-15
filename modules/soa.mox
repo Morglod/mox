@@ -1,10 +1,10 @@
 import "internal.mox";
-import "string.mox";
-import "format.mox";
-import "context.mox";
-import "assert.mox";
-import "slice.mox";
-import "alloc.mox";
+import "std/string.mox";
+import "std/format.mox";
+import "std/context.mox";
+import "std/assert.mox";
+import "std/slice.mox";
+import "std/alloc.mox";
 
 // TODO: to avoid getting generic params we can add comptime alias
 // that will act as static alias
@@ -26,9 +26,7 @@ fn #soa($T: __type_ptr): __type_ptr {
     ast: __ast_ptr = #memory_garbage;
 
     {
-        alloc := #temp_arena_as_alloc();
-        sb := mem_alloc(alloc, StringBuilder);
-        init(sb, alloc);
+        sb := #temp_string_builder();
 
         members_count := T.fields.len;
 
@@ -40,7 +38,7 @@ fn #soa($T: __type_ptr): __type_ptr {
         }
         push(sb, "};");
 
-        code := finalize(sb, alloc, false);
+        code := finalize(sb, sb.alloc, false);
         ast = __compiler_parse(code);
     }
     #land_ast ast;
@@ -65,7 +63,8 @@ fn soa_alloc(soa: *$T, max_items: i64, alloc: *Alloc): void {
     #for (i : it_range(fields_count)) {
         const field_type := __soa_field_type($T, i);
         const field_type_size := field_type.size .cast(i64);
-        soa.__soa_slots[i] = mem_alloc_slice(alloc, u8, field_type_size * max_items);
+        const field_align : u32 = field_type.align;
+        soa.__soa_slots[i] = mem_alloc_slice(alloc, u8, field_type_size * max_items, field_align);
     }
 }
 
@@ -74,14 +73,15 @@ fn soa_realloc(soa: *$T, max_items: i64, alloc: *Alloc): void {
     #for (i : it_range(fields_count)) {
         const field_type := __soa_field_type($T, i);
         const field_type_size := field_type.size .cast(i64);
-        soa.__soa_slots[i] = mem_realloc_slice(alloc, soa.__soa_slots[i], field_type_size * max_items);
+        const field_align : u32 = field_type.align;
+        soa.__soa_slots[i] = mem_realloc_slice(alloc, soa.__soa_slots[i], field_type_size * max_items, field_align);
     }
 }
 
-fn soa_free(soa: *$T, max_items: i64, alloc: *Alloc): void {
+fn soa_free(soa: *$T, alloc: *Alloc): void {
     const fields_count := __soa_fields_count($T);
     #for (i : it_range(fields_count)) {
-        soa.__soa_slots[i] = mem_free(alloc, soa.__soa_slots[i]);
+        mem_free(alloc, soa.__soa_slots[i]);
         soa.__soa_slots[i].ptr = nullptr(u8);
         soa.__soa_slots[i].len = 0;
     }

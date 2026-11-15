@@ -1,7 +1,11 @@
-import "./internal.mox";
+import "internal.mox";
+
+// Invalid UTF-8 decodes to U+FFFD; a surrogate or a value above U+10FFFF encodes as U+FFFD.
+const UTF8_REPLACEMENT_CHAR : u32 = 0xFFFD;
 
 // writes 1-4 bytes at dst, returns how many were written
 fn utf8_encode(cp: u32, dst: *u8): u32 {
+    if (((cp >= 0xD800) && (cp <= 0xDFFF)) || (cp > 0x10FFFF)) { cp = UTF8_REPLACEMENT_CHAR; }
     if (cp < 128) {
         dst.* = cp.cast(u8);
         return 1;
@@ -35,57 +39,68 @@ fn utf8_encode(cp: u32, dst: *u8): u32 {
 
 // how many bytes utf8_encode writes for this codepoint
 fn utf8_encoded_len(cp: u32): i64 {
+    if (((cp >= 0xD800) && (cp <= 0xDFFF)) || (cp > 0x10FFFF)) { return 3; } // written as U+FFFD
     if (cp < 128) { return 1; }
     if (cp < 2048) { return 2; }
     if (cp < 65536) { return 3; }
     return 4;
 }
 
-// Byte count of the UTF-8 char starting with this lead byte, 1 for a bad lead.
-// 194 is the first valid 2 byte lead: below it a non ascii byte is a stray continuation (128..191) or an overlong lead (192, 193), taken as one raw byte.
-// utf8_decode uses the same lead table.
+// Byte count of the UTF-8 char starting with this lead byte, 1 for a byte that can not start one:
+// a continuation (128..191), an overlong lead (192, 193) or a lead above U+10FFFF (245..255).
 fn utf8_seq_len(lead_byte: u8): i64 {
     if (lead_byte < 194) { return 1; }
     if (lead_byte < 224) { return 2; }
     if (lead_byte < 240) { return 3; }
-    return 4;
+    if (lead_byte < 245) { return 4; }
+    return 1;
 }
 
 // Reads one codepoint at byte index i, returns how many bytes it took.
-// Malformed input (stray continuation, overlong lead, missing continuation, sequence cut by the end of the buffer) yields cp = the raw lead byte and a step of 1, so the caller always moves forward.
+// Malformed input (overlong form, surrogate, above U+10FFFF, bad or missing continuation) gives U+FFFD and steps over its
+// maximal subpart: the bytes that could still begin a valid char, at least 1. The byte that broke the char is not taken.
 fn utf8_decode(ptr: *u8, len: i64, i: i64, cp_out: *u32): i64 {
     b0 := type_offset(ptr, i).*;
-    // ascii, and also the fallback value for every malformed case below
-    cp_out.* = b0.cast(u32);
-    // ascii (< 128), stray continuation (128..191), overlong lead (192, 193)
-    if (b0 < 194) { return 1; }
+    if (b0 < 128) {
+        cp_out.* = b0.cast(u32);
+        return 1;
+    }
+    cp_out.* = UTF8_REPLACEMENT_CHAR;
 
-    left := len - i;
-
-    if (b0 < 224) {
-        if (left < 2) { return 1; }
-        c1 := type_offset(ptr, i + 1).*;
-        if ((c1 & 192) != 128) { return 1; }
-        cp_out.* = #shl((b0 & 31).cast(u32), 6) + (c1 & 63).cast(u32);
-        return 2;
+    // continuation count and the allowed range of the first continuation byte (Unicode table 3-7)
+    need: i64 = 0;
+    lo: u8 = 128;
+    hi: u8 = 191;
+    cp: u32 = 0;
+    if ((b0 >= 194) && (b0 <= 223)) {
+        need = 1;
+        cp = (b0 & 31).cast(u32);
+    } else if ((b0 >= 224) && (b0 <= 239)) {
+        need = 2;
+        cp = (b0 & 15).cast(u32);
+        if (b0 == 224) { lo = 160; } // E0: no overlong 3 byte form
+        if (b0 == 237) { hi = 159; } // ED: no surrogates
+    } else if ((b0 >= 240) && (b0 <= 244)) {
+        need = 3;
+        cp = (b0 & 7).cast(u32);
+        if (b0 == 240) { lo = 144; } // F0: no overlong 4 byte form
+        if (b0 == 244) { hi = 143; } // F4: nothing above U+10FFFF
+    } else {
+        return 1;
     }
 
-    if (b0 < 240) {
-        if (left < 3) { return 1; }
-        c1 := type_offset(ptr, i + 1).*;
-        c2 := type_offset(ptr, i + 2).*;
-        if (((c1 & 192) != 128) || ((c2 & 192) != 128)) { return 1; }
-        cp_out.* = #shl((b0 & 15).cast(u32), 12) + #shl((c1 & 63).cast(u32), 6) + (c2 & 63).cast(u32);
-        return 3;
+    n: i64 = 1;
+    while (n <= need) {
+        if ((i + n) >= len) { return n; }
+        c := type_offset(ptr, i + n).*;
+        if ((c < lo) || (c > hi)) { return n; }
+        cp = #shl(cp, 6) | (c & 63).cast(u32);
+        lo = 128;
+        hi = 191;
+        n += 1;
     }
-
-    if (left < 4) { return 1; }
-    c1 := type_offset(ptr, i + 1).*;
-    c2 := type_offset(ptr, i + 2).*;
-    c3 := type_offset(ptr, i + 3).*;
-    if (((c1 & 192) != 128) || ((c2 & 192) != 128) || ((c3 & 192) != 128)) { return 1; }
-    cp_out.* = #shl((b0 & 7).cast(u32), 18) + #shl((c1 & 63).cast(u32), 12) + #shl((c2 & 63).cast(u32), 6) + (c3 & 63).cast(u32);
-    return 4;
+    cp_out.* = cp;
+    return n;
 }
 
 // Slice variants of the raw pointer APIs.
@@ -119,6 +134,8 @@ fn iterator_next(it: *Utf8DecodeIterator): bool {
     }
     return false;
 }
+
+fn iterator_end(it: *Utf8DecodeIterator): void {}
 
 fn iterator_current(it: *Utf8DecodeIterator): u32 {
     return it.cur_cp;

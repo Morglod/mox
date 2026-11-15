@@ -1,0 +1,484 @@
+import "std.mox";
+import "./animate.mox";
+
+// Immediate mode state management
+// Reuses existing state by id's and ordering
+// Unmounts state that was used on previous frame and unused in current
+//
+// Each frame you ask for a state by key and get persistent storage plus an init flag that is true only on the frame it was created.
+// A state not asked for during a frame is dropped at frame end: its callback fires, then the memory is freed.
+//
+// const im := import "immediate_state.mox";
+// ctx := im.create(alloc);
+// while (true) {
+//     im.frame_start(ctx);
+//     state_ptr := im.state(ctx, im.key("hello"), 123);
+//     state_ptr.* = 456;
+//     im.frame_end(ctx);
+// }
+// im.free(ctx);
+//
+// Like the std containers: init / destroy work on a ctx you placed yourself and never free it, create / free allocate and free it.
+//
+// Provides two versions: passing ctx and using autoinitialized thread local
+// 
+// const im := import "immediate_state.mox";
+// while (true) {
+//     im.frame_start();
+//     state_ptr := im.state(im.key("hello"), 123);
+//     im.frame_end();
+// }
+//
+
+const _IM_MAX_STATES : u32 = 1024;
+
+#alias IM_TIME_NOW_NS = time_monotonic_ns();
+
+struct ImCtx {
+    parent_key: u32;
+    count: u32;
+    alloc: *Alloc;
+    keys:  [_IM_MAX_STATES]u32;   // key of each live slot, scanned on lookup
+    used:  [_IM_MAX_STATES]bool;  // asked for this frame
+    bases: [_IM_MAX_STATES]u64;   // slot address, header sits at offset 0
+    time_delta: f32;
+    frame_start_time_ns: i64;
+};
+
+const _ImInvalidateFn : __type_ptr = #type fn(ctx: *ImCtx, value: *u8): void;
+
+struct ImSlotHeader {
+    key: u32;
+    init: bool;
+    value_size: u32;
+    invalidate_cb: *_ImInvalidateFn;  // can be null
+};
+
+const _IM_HEADER_SIZE : i64 = #run align_up(sizeof_type(ImSlotHeader), 8);
+
+fn init(ctx: *ImCtx, alloc: *Alloc): void {
+    ctx.alloc = alloc;
+    ctx.count = 0;
+    ctx.frame_start_time_ns = IM_TIME_NOW_NS;
+    ctx.time_delta = 0;
+    ctx.parent_key = 0;
+}
+
+fn create(alloc: *Alloc): *ImCtx {
+    ctx := mem_alloc(alloc, ImCtx, 8);
+    init(ctx, alloc);
+    return ctx;
+}
+
+_default_im_ctx: *ImCtx = 0; #thread_local
+
+fn get_default_im_ctx(): *ImCtx {
+    if (_default_im_ctx == 0) {
+        _default_im_ctx = create(get_context_alloc());
+        thread_on_exit(_destroy_default_im_ctx.^, nullptr(u8));
+    }
+    return _default_im_ctx;
+}
+
+fn _destroy_default_im_ctx(data: *u8): void {
+    free(_default_im_ctx);
+    _default_im_ctx = 0;
+}
+
+fn _key(s: []u8): u32 {
+    return fnv1a_32(s) |> max(1);
+}
+
+fn _mix_key(parent: u32, key: u32): u32 {
+    return fnv1a_32_mix(parent, key);
+}
+
+fn key(parent: u32, s: []u8): u32 {
+    return fnv1a_32(parent, s) |> max(1);
+}
+
+fn key(ctx: *ImCtx, s: []u8): u32 {
+    return key(ctx.parent_key, s);
+}
+
+fn key(s: []u8): u32 {
+    return get_default_im_ctx().parent_key |> key(s);
+}
+
+fn #push_key(ctx: *ImCtx, k: u32): void {
+    prev_key := ctx.parent_key;
+    ctx.parent_key = _mix_key(prev_key, k);
+    `defer ctx.parent_key = prev_key;
+}
+
+fn #push_key(k: u32): void {
+    #push_key(get_default_im_ctx(), k);
+}
+
+fn _im_slot_value(base: u64): *u8 {
+    return base.cast(*u8) |> byte_offset(_IM_HEADER_SIZE);
+}
+
+fn _im_drop_slot(ctx: *ImCtx, base: u64): void {
+    h := base.cast(*ImSlotHeader);
+    if (h.invalidate_cb != nullptr(_ImInvalidateFn)) {
+        cb := h.invalidate_cb.cast(*_ImInvalidateFn);
+        cb(ctx, _im_slot_value(base));
+    }
+    mem_free(ctx.alloc, base.cast(*u8));
+}
+
+fn clear(ctx: *ImCtx): void {
+    for (i : it_range(ctx.count)) {
+        _im_drop_slot(ctx, ctx.bases[i]);
+    }
+    ctx.count = 0;
+}
+
+fn clear(): void {
+    clear(get_default_im_ctx());
+}
+
+// drops every state, the ctx itself stays
+fn destroy(ctx: *ImCtx): void {
+    clear(ctx);
+}
+
+// pairs with create
+fn free(ctx: *ImCtx): void {
+    destroy(ctx);
+    mem_free(ctx.alloc, ctx);
+}
+
+struct ImSlotResult {
+    base: u64;
+    is_new: bool;
+};
+
+fn _im_state_slot(ctx: *ImCtx, key: u32, size: i64, cb_raw: *_ImInvalidateFn): ImSlotResult {
+    r: ImSlotResult = #memory_garbage;
+
+    for (i : it_range(ctx.count)) {
+        if (ctx.keys[i] == key) {
+            ctx.used[i] = true;
+            base := ctx.bases[i];
+            h := base.cast(*ImSlotHeader);
+            // Same key must mean same type: a caller expecting a bigger type would write past the allocation.
+            if (h.value_size != size.cast(u32)) {
+                panic("im: state key reused with a different type/size (duplicate label in one layer?)");
+            }
+            h.init = false;
+            h.invalidate_cb = cb_raw;
+            r.base = base; r.is_new = false;
+            return r;
+        }
+    }
+
+    if (ctx.count >= _IM_MAX_STATES) {
+        panic("im: state store overflow (raise _IM_MAX_STATES)");
+    }
+
+    base := mem_alloc(ctx.alloc, _IM_HEADER_SIZE + size, 8).cast(u64);
+    h := base.cast(*ImSlotHeader);
+    h.key = key;
+    h.init = true;
+    h.value_size = size.cast(u32);
+    h.invalidate_cb = cb_raw;
+
+    idx := ctx.count;
+    ctx.keys[idx] = key;
+    ctx.used[idx] = true;
+    ctx.bases[idx] = base;
+    ctx.count = idx + 1;
+
+    r.base = base; r.is_new = true;
+    return r;
+}
+
+fn state(ctx: *ImCtx, key: u32, initial: $T, invalidate_cb: *fn(ctx: *ImCtx, value: *$T): void): *$T {
+    sr := _im_state_slot(ctx, key, sizeof_type($T), invalidate_cb.cast(*_ImInvalidateFn));
+    value := _im_slot_value(sr.base).cast(*$T);
+    if (sr.is_new) { value.* = initial; }
+    return value;
+}
+
+fn state(key: u32, initial: $T, invalidate_cb: *fn(ctx: *ImCtx, value: *$T): void): *$T {
+    return state(get_default_im_ctx(), key, initial, invalidate_cb);
+}
+
+fn state(ctx: *ImCtx, key: u32, initial: $T): *$T {
+    sr := _im_state_slot(ctx, key, sizeof_type($T), nullptr(_ImInvalidateFn));
+    value := _im_slot_value(sr.base).cast(*$T);
+    if (sr.is_new) { value.* = initial; }
+    return value;
+}
+
+fn state(key: u32, initial: $T): *$T {
+    return state(get_default_im_ctx(), key, initial);
+}
+
+// No init: storage is garbage on the first frame, the caller fills it after checking is_fresh().
+fn state_noinit(ctx: *ImCtx, key: u32, $T: __type_ptr): *$T {
+    sr := _im_state_slot(ctx, key, sizeof_type($T), nullptr(_ImInvalidateFn));
+    return _im_slot_value(sr.base).cast(*$T);
+}
+
+fn state_noinit(key: u32, $T: __type_ptr): *$T {
+    return state_noinit(get_default_im_ctx(), key, $T);
+}
+
+fn state_noinit(ctx: *ImCtx, key: u32, $T: __type_ptr, invalidate_cb: *fn(ctx: *ImCtx, value: *$T): void): *$T {
+    sr := _im_state_slot(ctx, key, sizeof_type($T), invalidate_cb.cast(*_ImInvalidateFn));
+    return _im_slot_value(sr.base).cast(*$T);
+}
+
+fn state_noinit(key: u32, $T: __type_ptr, invalidate_cb: *fn(ctx: *ImCtx, value: *$T): void): *$T {
+    return state_noinit(get_default_im_ctx(), key, $T, invalidate_cb);
+}
+
+// true only on the frame the state was created
+fn is_fresh(value: *$T): bool {
+    h := (value.cast(*u8) |> byte_offset(-_IM_HEADER_SIZE)).cast(*ImSlotHeader);
+    return h.init;
+}
+
+fn frame_start(ctx: *ImCtx): void {
+    mem_set(ctx.used.ptr.cast(*u8), 0, ctx.count.cast(i64));
+    time_now := IM_TIME_NOW_NS;
+    time_delta := max(time_now - ctx.frame_start_time_ns, 0);
+    ctx.frame_start_time_ns = time_now;
+    ctx.time_delta = time_delta.cast(f32) / TIME_SEC_NS;
+}
+
+fn frame_start(): void {
+    frame_start(get_default_im_ctx());
+}
+
+// Drop the states not asked for this frame (invalidation callback + free) and compact
+fn frame_end(ctx: *ImCtx): void {
+    w: u32 = 0;
+    for (r : it_range(ctx.count)) {
+        if (ctx.used[r]) {
+            if (w != r) {
+                ctx.keys[w] = ctx.keys[r];
+                ctx.bases[w] = ctx.bases[r];
+            }
+            w += 1;
+        } else {
+            _im_drop_slot(ctx, ctx.bases[r]);
+        }
+    }
+    ctx.count = w;
+}
+
+fn frame_end(): void {
+    frame_end(get_default_im_ctx());
+}
+
+// REPEAT loops forever
+// PING_PONG runs start-end-start animation for `duration` time
+enum ImStateAnimationFlags : u8 {
+    NONE;
+    REPEAT := 1;
+    PING_PONG := 2;
+};
+
+struct ImStateAnimationParams($T: __type_ptr) {
+    from: $T;
+    to: $T;
+    duration: f32;
+    curve: *fn(t: f32): f32;
+    flags: ImStateAnimationFlags;
+};
+
+struct ImStateAnimation($T: __type_ptr) {
+    params: ImStateAnimationParams($T);
+    value: $T;
+    elapsed: f32;
+    started: bool;
+    play: bool;
+    ended: bool;
+};
+
+// Animated state: the value moves from params.from to params.to over params.duration.
+// started going from false to true (re)starts the animation from the beginning.
+// play = false pauses it, play = true continues from the same place.
+// With the defaults it starts on the first frame and runs once.
+// duration <= 0 puts it at the end at once, on the restart frame.
+fn state_animate(ctx: *ImCtx, key: u32, params: ImStateAnimationParams($T), started: bool = true, play: bool = true): *ImStateAnimation($T) {
+    s := state_noinit(ctx, key, #type ImStateAnimation($T));
+    if (is_fresh(s)) {
+        s.* = .{
+            params = params;
+            value = params.from;
+            elapsed = 0;
+            started = false;
+            play = false;
+            ended = true;
+        };
+    } else {
+        s.params = params;
+    }
+
+    restarted := started && !s.started;
+    if (restarted) {
+        s.value = params.from;
+        s.elapsed = 0;
+        s.ended = false;
+    }
+    s.started = started;
+
+    s.play = !s.ended && play;
+    if (s.play) {
+        if (!restarted) { s.elapsed += ctx.time_delta; }
+        flags := s.params.flags;
+        cycle: f32 = 1;
+        if ((flags & .PING_PONG) != .NONE) { cycle = 2; }
+        t: f32 = cycle; // duration <= 0: the cycle takes no time
+        if (s.params.duration > 0) { t = s.elapsed / s.params.duration; }
+        if (t >= cycle) {
+            if ((flags & .REPEAT) == .NONE) {
+                t = cycle;
+                s.play = false;
+                s.ended = true;
+            } else if (s.params.duration > 0) {
+                t = fmod(t, cycle);
+                s.elapsed = t * s.params.duration;
+            } else {
+                t = cycle; // a zero-length repeating cycle holds its end value and never ends
+                s.elapsed = 0;
+            }
+        }
+        if (t > 1) { t = 2 - t; }
+        s.value = animate(s.params.from, s.params.to, t, s.params.curve);
+    }
+    return s;
+}
+
+fn state_animate(key: u32, params: ImStateAnimationParams($T), started: bool = true, play: bool = true): *ImStateAnimation($T) {
+    return state_animate(get_default_im_ctx(), key, params, started, play);
+}
+
+fn state_animate(ctx: *ImCtx, key: u32, from: $T, to: $T, duration: f32, curve: *fn(t: f32): f32, started: bool = true, play: bool = true): *ImStateAnimation($T) {
+    params : ImStateAnimationParams($T) = .{
+        from = from;
+        to = to;
+        duration = duration;
+        curve = curve;
+        flags = .NONE;
+    };
+    return state_animate(ctx, key, params, started, play);
+}
+
+fn state_animate(key: u32, from: $T, to: $T, duration: f32, curve: *fn(t: f32): f32, started: bool = true, play: bool = true): *ImStateAnimation($T) {
+    return state_animate(get_default_im_ctx(), key, from, to, duration, curve, started, play);
+}
+
+fn state_animate_move_towards(ctx: *ImCtx, key: u32, value: $T, speed: f32, play: bool = true): *$T {
+    s_value := state(ctx, key, value);
+    if (play) {
+        s_value.* = move_towards(s_value.*, value, speed * ctx.time_delta);
+    }
+    return s_value;
+}
+
+fn state_animate_move_towards(key: u32, value: $T, speed: f32, play: bool = true): *$T {
+    return state_animate_move_towards(get_default_im_ctx(), key, value, speed, play);
+}
+
+fn _im_distance(a: $T, b: $T): f32 {
+    return abs(b.cast(f64) - a.cast(f64)).cast(f32);
+}
+
+fn _im_distance(a: [$N]$T, b: [$N]$T): f32 {
+    sum: f64 = 0;
+    for (i : it_range($N)) {
+        d: f64 = b[i].cast(f64) - a[i].cast(f64);
+        sum += d * d;
+    }
+    return sqrt(sum).cast(f32);
+}
+
+struct ImStateMoveTowards($T: __type_ptr) {
+    value: $T;
+    from: $T;
+    to: $T;
+    t: f32;
+};
+
+struct _ImCurveHit {
+    t: f32;
+    dist: f32;
+};
+
+// t in 0..1 where animate(from, to, t, curve) is closest to value.
+fn _im_curve_closest_t(from: $T, to: $T, value: $T, curve: *fn(t: f32): f32): _ImCurveHit {
+    const STEPS : i32 = 32;
+    best: _ImCurveHit = .{ t = 0; dist = _im_distance(animate(from, to, 0, curve), value); };
+    for (i : it_range(1i32, STEPS + 1)) {
+        t: f32 = i.cast(f32) / STEPS.cast(f32);
+        d := _im_distance(animate(from, to, t, curve), value);
+        if (d < best.dist) { best.t = t; best.dist = d; }
+    }
+    step: f32 = 1.0f / STEPS.cast(f32);
+    for (i : it_range(12i32)) {
+        step *= 0.5f;
+        for (dir : it_range(2i32)) {
+            t: f32 = clamp(best.t + step * (dir * 2 - 1).cast(f32), 0, 1);
+            d := _im_distance(animate(from, to, t, curve), value);
+            if (d < best.dist) { best.t = t; best.dist = d; }
+        }
+    }
+    return best;
+}
+
+fn state_animate_move_towards(ctx: *ImCtx, key: u32, value: $T, speed: f32, curve: *fn(t: f32): f32, play: bool = true): *$T {
+    s := state_noinit(ctx, key, #type ImStateMoveTowards($T));
+    if (is_fresh(s)) {
+        s.* = .{
+            value = value;
+            from = value;
+            to = value;
+            t = 1;
+        };
+    }
+
+    // retargets t with curve to match closest position on the curve
+    if (_im_distance(s.to, value) != 0) {
+        new_from := s.value;
+        new_t: f32 = 0;
+        if (s.t < 1) {
+            best_dist: f32 = -1;
+            if (_im_distance(s.from, value) != 0) {
+                hit := _im_curve_closest_t(s.from, value, s.value, curve);
+                if (hit.dist <= _im_distance(s.from, value) * 0.02f) {
+                    new_from = s.from; new_t = hit.t; best_dist = hit.dist;
+                }
+            }
+            if (_im_distance(s.to, value) != 0) {
+                hit := _im_curve_closest_t(s.to, value, s.value, curve);
+                if (hit.dist <= _im_distance(s.to, value) * 0.02f && (best_dist < 0 || hit.dist < best_dist)) {
+                    new_from = s.to; new_t = hit.t;
+                }
+            }
+        }
+        s.from = new_from;
+        s.to = value;
+        s.t = new_t;
+    }
+
+    if (play && s.t < 1) {
+        dist := _im_distance(s.from, s.to);
+        if (dist == 0) {
+            s.t = 1;
+        } else {
+            s.t = clamp(s.t + speed * ctx.time_delta / dist, 0, 1);
+        }
+        s.value = animate(s.from, s.to, s.t, curve);
+    }
+    return s.value.^;
+}
+
+fn state_animate_move_towards(key: u32, value: $T, speed: f32, curve: *fn(t: f32): f32, play: bool = true): *$T {
+    return state_animate_move_towards(get_default_im_ctx(), key, value, speed, curve, play);
+}

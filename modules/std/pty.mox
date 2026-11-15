@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 
 #if (MOX_OS == .Windows) {
     import "./pty_win.mox" #export;

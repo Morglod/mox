@@ -3,8 +3,8 @@
 // A component set is a STRUCT type, every field of it is one component.
 
 import "internal.mox";
-import "alloc.mox";
-import "panic.mox";
+import "std/alloc.mox";
+import "std/panic.mox";
 
 const ECS_NO_SLOT : u32 = MAX_U32;
 
@@ -14,11 +14,14 @@ struct Entity {
 }
 
 struct Archetype($S: __type_ptr) {
-    slots: [__compiler_members_count($S)]*u8;  // one dense array per component
+    slots: [mox_struct_fields($S).len]*u8;  // one dense array per component
     slot_to_dense:   []u32;   // [cap] slot -> dense, ECS_NO_SLOT if free
     dense_to_slot:   []u32;   // [cap] dense -> slot
     slot_generation: []u32;   // [cap] per slot generation
     free_slots:      []u32;   // [cap] stack of freed slots
+    pending:         []Entity; // [cap] destroyed inside a loop, applied when the last loop ends
+    pending_count: i64;
+    iterating: i64;           // open arch_iter / ecs_query loops over this archetype
     free_count: i64;
     high_water: i64;
     count: i64;
@@ -28,7 +31,7 @@ struct Archetype($S: __type_ptr) {
 
 // comptime: position of component $T in component struct $S
 fn arch_member_index($S: __type_ptr, $T: __type_ptr): i64 {
-    idx := __compiler_member_index_of_type($S, $T);
+    idx := mox_struct_field_index_of_type($S, $T);
     if (idx < 0) {
         panic("ecs: component type is not a member of this archetype");
     }
@@ -36,7 +39,7 @@ fn arch_member_index($S: __type_ptr, $T: __type_ptr): i64 {
 }
 
 fn arch_has($S: __type_ptr, $T: __type_ptr): bool {
-    return __compiler_member_index_of_type($S, $T) >= 0;
+    return mox_struct_field_index_of_type($S, $T) >= 0;
 }
 
 fn arch_count(arch: *Archetype($S)): i64 {
@@ -49,11 +52,14 @@ fn arch_init(arch: *Archetype($S), alloc: *Alloc, cap: i64): void {
     arch.count = 0;
     arch.high_water = 0;
     arch.free_count = 0;
+    arch.pending_count = 0;
+    arch.iterating = 0;
 
     arch.slot_to_dense   = mem_alloc_slice(alloc, u32, cap);
     arch.dense_to_slot   = mem_alloc_slice(alloc, u32, cap);
     arch.slot_generation = mem_alloc_slice(alloc, u32, cap);
     arch.free_slots      = mem_alloc_slice(alloc, u32, cap);
+    arch.pending         = mem_alloc_slice(alloc, Entity, cap);
 
     for (i : it_range(cap)) {
         arch.slot_to_dense[i] = ECS_NO_SLOT;
@@ -61,10 +67,34 @@ fn arch_init(arch: *Archetype($S), alloc: *Alloc, cap: i64): void {
     }
 
     // one dense array per component, unrolled at comptime
-    #for (ci : it_range(__compiler_members_count($S))) {
-        const csize := sizeof_type(__compiler_member_type($S, ci));
-        arch.slots[ci] = mem_alloc(alloc, cap * csize, 64);
-    }
+    #run {
+        fields := mox_struct_fields($S);
+        for (ci : it_range(fields.len)) {
+            csize := fields[ci].type.size.cast(i64);
+            #emit {
+                arch.slots[ci] = mem_alloc(alloc, cap * csize, 64);
+            };
+        }
+    };
+}
+
+// frees what arch_init allocated, the archetype is zeroed
+fn arch_free(arch: *Archetype($S)): void {
+    alloc := arch.alloc;
+    mem_free(alloc, arch.slot_to_dense);
+    mem_free(alloc, arch.dense_to_slot);
+    mem_free(alloc, arch.slot_generation);
+    mem_free(alloc, arch.free_slots);
+    mem_free(alloc, arch.pending);
+    #run {
+        fields := mox_struct_fields($S);
+        for (ci : it_range(fields.len)) {
+            #emit {
+                mem_free(alloc, arch.slots[ci]);
+            };
+        }
+    };
+    arch.* = zeroed(#type Archetype($S));
 }
 
 fn arch_alive(arch: *Archetype($S), e: Entity): bool {
@@ -104,20 +134,37 @@ fn arch_get(arch: *Archetype($S), $T: __type_ptr, e: Entity): *$T {
     return arch_at(arch, $T, dense);
 }
 
+// inside an arch_iter / ecs_query loop the entity stays alive until the last loop over this archetype ends
 fn arch_destroy(arch: *Archetype($S), e: Entity): void {
+    if (arch.iterating > 0) {
+        if (arch.pending_count == arch.capacity) {
+            panic("ecs: too many arch_destroy calls inside one loop");
+        }
+        arch.pending[arch.pending_count] = e;
+        arch.pending_count += 1;
+        return;
+    }
+    _arch_destroy_now(arch, e);
+}
+
+// swap and pop: the last dense entity is copied over the dead one
+fn _arch_destroy_now(arch: *Archetype($S), e: Entity): void {
     if (!arch_alive(arch, e)) { return; }
 
-    // swap and pop
-    // last dense entity is copied over the dead one
     dead_dense := arch.slot_to_dense[e.index].cast(i64);
     arch.count -= 1;
     last_dense := arch.count;
 
     if (dead_dense != last_dense) {
-        #for (ci : it_range(__compiler_members_count($S))) {
-            const csize := __compiler_sizeof(__compiler_member_type($S, ci));
-            mem_copy(byte_offset(arch.slots[ci], dead_dense * csize), byte_offset(arch.slots[ci], last_dense * csize), csize);
-        }
+        #run {
+            fields := mox_struct_fields($S);
+            for (ci : it_range(fields.len)) {
+                csize := fields[ci].type.size.cast(i64);
+                #emit {
+                    mem_copy(byte_offset(arch.slots[ci], dead_dense * csize), byte_offset(arch.slots[ci], last_dense * csize), csize);
+                };
+            }
+        };
         moved_slot := arch.dense_to_slot[last_dense];
         arch.slot_to_dense[moved_slot] = dead_dense.cast(u32);
         arch.dense_to_slot[dead_dense] = moved_slot;
@@ -129,19 +176,38 @@ fn arch_destroy(arch: *Archetype($S), e: Entity): void {
     arch.free_count += 1;
 }
 
-// for (i : arch_iter(arch)) yields dense indices 0..count-1
-struct ArchIter { cur: i64; n: i64; }
-
-fn arch_iter(arch: *Archetype($S)): ArchIter {
-    return ArchIter.{ cur = -1; n = arch.count; };
+fn _arch_loop_begin(arch: *Archetype($S)): void {
+    arch.iterating += 1;
 }
 
-fn iterator_next(it: *ArchIter): bool {
+// the last loop over arch ended: apply the destroys made inside it, handles destroyed twice are skipped
+fn _arch_loop_end(arch: *Archetype($S)): void {
+    arch.iterating -= 1;
+    if (arch.iterating > 0 || arch.pending_count == 0) { return; }
+    for (i : it_range(arch.pending_count)) {
+        _arch_destroy_now(arch, arch.pending[i]);
+    }
+    arch.pending_count = 0;
+}
+
+// for (i : arch_iter(arch)) yields dense indices 0..count-1
+struct ArchIter($S: __type_ptr) { arch: *Archetype($S); cur: i64; n: i64; }
+
+fn arch_iter(arch: *Archetype($S)): ArchIter($S) {
+    _arch_loop_begin(arch);
+    return ArchIter($S).{ arch = arch; cur = -1; n = arch.count; };
+}
+
+fn iterator_next(it: *ArchIter($S)): bool {
     it.cur += 1;
     return it.cur < it.n;
 }
 
-fn iterator_current(it: *ArchIter): i64 {
+fn iterator_end(it: *ArchIter($S)): void {
+    _arch_loop_end(it.arch);
+}
+
+fn iterator_current(it: *ArchIter($S)): i64 {
     return it.cur;
 }
 
@@ -151,39 +217,66 @@ fn iterator_current(it: *ArchIter): i64 {
 // for per archetype capacity call arch_init on the fields directly
 fn ecs_init(world: *$W, alloc: *Alloc, cap: i64): void {
     base := world.cast(*u8);
-    #for (i : it_range(__compiler_members_count($W))) {
-        const atype := __compiler_member_type($W, i);
-        const aoff  := __compiler_member_offset($W, i);
-        arch_init(byte_offset(base, aoff).cast(#type *atype), alloc, cap);
-    }
+    #run {
+        fields := mox_struct_fields($W);
+        for (ai : it_range(fields.len)) {
+            atype := fields[ai].type.cast(__type_ptr);
+            aoff  := fields[ai].memory_offset.cast(u64);
+            #emit {
+                arch_init(byte_offset(base, aoff).cast(#type *atype), alloc, cap);
+            };
+        }
+    };
 }
 
+fn ecs_free(world: *$W): void {
+    base := world.cast(*u8);
+    #run {
+        fields := mox_struct_fields($W);
+        for (ai : it_range(fields.len)) {
+            atype := fields[ai].type.cast(__type_ptr);
+            aoff  := fields[ai].memory_offset.cast(u64);
+            #emit {
+                arch_free(byte_offset(base, aoff).cast(#type *atype));
+            };
+        }
+    };
+}
+
+// for (row : ecs_query(world, R)) visits every entity of every archetype that has all components of R;
+// read them with query_get(row, T)
 struct Query($W: __type_ptr, $R: __type_ptr) {
+    world: *$W;
     // flat [segment][required component] -> dense array base
-    seg_bases: [(__compiler_members_count($W) * __compiler_members_count($R))]*u8;
-    seg_count: [__compiler_members_count($W)]i64;
+    seg_bases: [(mox_struct_fields($W).len * mox_struct_fields($R).len)]*u8;
+    seg_count: [mox_struct_fields($W).len]i64;
     seg_n: i64;
-    cur_seg: i64;    // -1 before the first query_next
+    cur_seg: i64;    // -1 before the first iterator_next
     cur_row: i64;
+}
+
+// comptime: archetype $S has every component of $R
+fn _query_matches($S: __type_ptr, $R: __type_ptr): bool {
+    rfields := mox_struct_fields($R);
+    for (i : it_range(rfields.len)) {
+        if (!arch_has($S, rfields[i].type.cast(__type_ptr))) { return false; }
+    }
+    return true;
 }
 
 fn _query_scan(a: *Archetype($S), q: *Query($W, $R)): void {
     #run {
-        nr := __compiler_members_count($R);
-        matches := true;
-        for (i : it_range(nr)) {
-            if (!arch_has($S, __compiler_member_type($R, i))) {
-                matches = false;
-            }
-        }
-        if (matches) {
+        rfields := mox_struct_fields($R);
+        nr := rfields.len;
+        if (_query_matches($S, $R)) {
             #emit {
+                _arch_loop_begin(a);
                 _seg := q.seg_n;
-                const _nr : i64 = __compiler_members_count($R);
+                const _nr : i64 = mox_struct_fields($R).len;
                 q.seg_count[_seg] = arch_count(a);
             };
             for (ri : it_range(nr)) {
-                rcomp := __compiler_member_type($R, ri);
+                rcomp := rfields[ri].type.cast(__type_ptr);
                 #emit {
                     q.seg_bases[_seg * _nr + ri] = arch_at(a, rcomp, 0).cast(*u8);
                 };
@@ -195,19 +288,35 @@ fn _query_scan(a: *Archetype($S), q: *Query($W, $R)): void {
     };
 }
 
+fn _query_end_scan(a: *Archetype($S), $R: __type_ptr): void {
+    #run {
+        if (_query_matches($S, $R)) {
+            #emit {
+                _arch_loop_end(a);
+            };
+        }
+    };
+}
+
 fn ecs_query(world: *$W, $R: __type_ptr): Query($W, $R) {
     q : Query($W, $R) = 0;
+    q.world = world;
     q.cur_seg = -1;
     base := world.cast(*u8);
-    #for (i : it_range(__compiler_members_count($W))) {
-        const atype := __compiler_member_type($W, i);
-        const aoff  := __compiler_member_offset($W, i);
-        _query_scan(byte_offset(base, aoff).cast(#type *atype), q.^);
-    }
+    #run {
+        fields := mox_struct_fields($W);
+        for (ai : it_range(fields.len)) {
+            atype := fields[ai].type.cast(__type_ptr);
+            aoff  := fields[ai].memory_offset.cast(u64);
+            #emit {
+                _query_scan(byte_offset(base, aoff).cast(#type *atype), q.^);
+            };
+        }
+    };
     return q;
 }
 
-fn query_next(q: *Query($W, $R)): bool {
+fn iterator_next(q: *Query($W, $R)): bool {
     if (q.cur_seg < 0) {
         q.cur_seg = 0;
         q.cur_row = 0;
@@ -222,8 +331,26 @@ fn query_next(q: *Query($W, $R)): bool {
     return false;
 }
 
+fn iterator_current(q: *Query($W, $R)): *Query($W, $R) {
+    return q;
+}
+
+fn iterator_end(q: *Query($W, $R)): void {
+    base := q.world.cast(*u8);
+    #run {
+        fields := mox_struct_fields($W);
+        for (ai : it_range(fields.len)) {
+            atype := fields[ai].type.cast(__type_ptr);
+            aoff  := fields[ai].memory_offset.cast(u64);
+            #emit {
+                _query_end_scan(byte_offset(base, aoff).cast(#type *atype), $R);
+            };
+        }
+    };
+}
+
 fn query_get(q: *Query($W, $R), $T: __type_ptr): *$T {
-    const nr : i64 = __compiler_members_count($R);
+    const nr : i64 = mox_struct_fields($R).len;
     const k  : i64 = arch_member_index($R, $T);
     seg := q.cur_seg;
     base := q.seg_bases[seg * nr + k];

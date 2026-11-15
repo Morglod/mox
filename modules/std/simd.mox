@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 
 const _SWAR_LOW_BITS  : u64 = 0x0101010101010101;
 const _SWAR_LOW7_BITS : u64 = 0x7F7F7F7F7F7F7F7F;

@@ -1,3 +1,156 @@
+## 0.3.0
+
+## Compiler
+
+`#thread_local` global variables now supported:
+
+```rust
+global : i32 = 0; #thread_local
+```
+
+`iterator_end` now added along with iterator_next and iterator_current, which is called on iteration end (useful in case of break or return)
+
+`#ast` now works in non comptime context, producing ast value (same as `#run #ast` but without unneeded `#run`)
+
+``#land_ast` added inside macros which resolves everything in caller scope
+
+Fixed inf and nan constants in C backend
+
+Circular references for types in corner cases fixed (now works)
+
+Fixed expressions evaluation in poly function param types:
+
+```rust
+fn foo($N: i64, x: [$N * 100]$T);
+                       ^ $N*100    now works correctly and evaluates only after "is fixed array? is $T satisfied?" checks
+```
+
+For this `TypePolyExpr` type added which holds this expression on type level
+
+Fixed macro expansion used as default arg, now it works as it was passed to argument from caller
+
+Fixed macro expansion with control flow in interp mode used in arguments
+
+JIT backend stack usage changed, less runtime instructions and signals fixed
+
+Default expressions inside polymorphic funcs which refers to poly bindings (like $T as a type) works correctly now
+
+LLVM mox mangling fixed and its now zero copy so its much faster
+
+8 bit integer division fixed in JIT backend
+
+Compiler emits warning when user tries to take a pointer to misaligned field
+
+Void expression results fixed in different kind (overload pick, variable declaration, passing to arg)
+
+Proper decl name of types in compiler messages
+
+`#if` condition sees only declarations above it. A name declared below the `#if` in the same block is now an error there, instead of silently using an imported or outer declaration with the same name. A local const above the `#if` is no longer hidden by an imported one either
+
+A module imported inside `#if` that imports the importer back now sees all of the importer's top-level declarations outside `#if` branches, including those below the `#if`
+
+A pointer taken out of compile-time-only data (`text.ptr` of a const declared inside `#run`, or a pointer field of a const made by `#run`) used in runtime code is now a compile error. Before, the program silently got an address in compiler memory. Copy the slice into a runtime variable first (`s := text;` then `s.ptr`)
+
+`__compiler_link_lib(path, true)` on Linux and macOS now loads a library from the current directory by a relative name; before, dlopen only searched the system library paths for a name without "/". The load error lists every file name it tried
+
+The compiler creates the output directories (of `-o` and of `out`) before compiling. Before, `-o=./build/app` failed when `build/` did not exist: comptime code copying into the output dir (`build_copy_to_output`, the vendor library copies) and the linker both failed
+
+A string literal passed to a `[]$T` parameter at comptime now works (`#run starts_with(os_get_env("MODE"), "release")`, `split_iterator(text, "\n")` in a function called through `#run`). Before, it failed with `string literal cannot be used as type "[]$T"`
+
+A panic or failed assert in comptime code is now a compile error at the panic's line (with its message and a note at the `#run` that ran the code), followed by "Compilation failed". Before, the panic's exit ended the compiler process with exit code 3 and no compiler diagnostic
+
+## Modules
+
+Core/std modules moved to modules/std
+
+`Alloc` now is just pointer to function, and *Alloc is passed as self, so it takes less space and could be placed inside Arena itself
+
+Alignmnent fixes in containers
+
+Arena allocator reallocs now works so it could be an allocator for DynArr or other containers (last push reallocs or new push made)
+
+`std/alloc_bump.mox` added - bump allocator with chunks
+
+Allocator interface now accepts `get_arena` mode which returns backing arena allocator, use `get_alloc_backing_arena` helper for it  
+It solves bunch of bugs with arena conflicts behind allocators
+
+`std/threads.mox` added to work with threads
+
+`game/animate.mox` added to work with curves and animation functions
+
+`game/atlas.mox` added to pack rectangles by groups (used for packing textures to atlases)
+
+`game/immediate_state.mox` added as immediate state library, for UI
+
+`context.mox` moved to `#thread_local` instead of OS calls
+
+Fixes for corner cases of formatting and panic
+
+`trim_left` fixed
+
+StringBuilder refactored  
+`#temp_string_builder` added to easily init StringBuilder with arena conflict solving
+
+BufferBuilder reset fixed
+
+ecs refactored, arch_destroy inside iteration are now queeud until loop end
+
+utf16 module added
+
+win apis now use wide versions for paths and converts to utf16 on call
+
+win shell commands are now escaped properly
+
+os_exec_* apis now dont inherit stdin/stdout by default (but there is an option)
+
+os_exec_ex now uses async pipes on Windows so its much faster (30x speedup) and without limits now
+
+os_exec_* timeouts now handle subprocess group
+
+exit codes of os_exec handled properly
+
+pty now uses async pipes on windows for write
+
+changed console mode restores original on process exit properly
+
+os directory iterator now dont follow symlink dirs on both platforms
+
+term input now properly handles unicode input like emoji
+
+clipboard api fixed on windows
+
+os posix properly handles EINTR
+
+utf8 decoding fixed
+
+build.mox fixes for unix tools
+
+some math functions used from c lib and this fixes some corner cases
+
+math fixes for corner cases
+
+*Arena conflicts replaced with *Alloc so it now no overloads needed and it works for all allocators
+
+process_tree module added: os_process_children (with start times to detect reused pids), os_process_start_time, os_kill_tree (kills a process with all its descendants; Windows and Linux)
+
+pty_close now kills the whole shell process tree, not only the shell
+
+panic now exits through exit(3): it prints "panic happened", runs os_atexit handlers (console restore and others) and thread exit callbacks, then prints the message last. `is_panicking` global added; a panic inside a panic prints both messages and aborts at once
+
+os_exit added
+
+os_stderr_write added; panic output now goes to stderr instead of stdout
+
+err_print and err_println added (like print and println, but to stderr)
+
+panic and assert now print where they happened (`panic at: file:line`, only the line without -g) for every overload, not only the formatted one
+
+A failed assert says `assertion failed` (and its message), instead of `no panic callstack yet here`
+
+fs_path_abs and os_path_abs added: the absolute form of a path, with "." and ".." resolved (text only, the file does not need to exist)
+
+build_copy_to_output overwrites the file in the output dir
+
 ## 0.2.0
 
 A lot of things were fixed, tested and stabilized, so minor version is up.

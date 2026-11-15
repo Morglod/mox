@@ -104,7 +104,7 @@ fn contains(s: []$T, val: []$T): bool {
 
 fn trim_left(s: []$T, strip: []$T): []$T {
     start_from := index_of_not(s, strip);
-    if (start_from == -1) { return s; }
+    if (start_from == -1) { return slice(s, s.len); } // s is only strip: empty, still pointing into s
     return slice(s, start_from);
 }
 
@@ -136,13 +136,6 @@ fn slice(s: []$T, from: i64, len: i64 = -1): []$T {
     out.ptr = type_offset(s.ptr, from);
     if (len == -1) { len = s.len; }
     out.len = min(len, s.len - from);
-    return out;
-}
-
-fn slice(ptr: *$T, len: i64 = 1): []$T {
-    out: []$T = #memory_garbage;
-    out.ptr = ptr;
-    out.len = len;
     return out;
 }
 
@@ -182,10 +175,16 @@ fn remove_all_inplace(s: []$T, val: $T): []$T {
     return slice(s, 0, w);
 }
 
+// same memory viewed as []$DST_T; the byte length must be a multiple of sizeof($DST_T)
 fn cast(slice: []$T, $DST_T: __type_ptr): []$DST_T {
+    bytes := slice.len * sizeof_type($T);
+    if (bytes % sizeof_type($DST_T) != 0) {
+        msg := "slice cast: the byte length is not a multiple of the target element size";
+        __mox_panic(msg.ptr, msg.len);
+    }
     new_slice : []$DST_T = #memory_garbage;
-    new_slice.ptr = slice.ptr .cast($DST_T);
-    new_slice.len = slice.len;
+    new_slice.ptr = slice.ptr.cast(*$DST_T);
+    new_slice.len = bytes / sizeof_type($DST_T);
     return new_slice;
 }
 
@@ -360,6 +359,8 @@ fn iterator_next(it: *SplitIterator($T)): bool {
     }
     return true;
 }
+
+fn iterator_end(it: *SplitIterator($T)): void {}
 
 fn iterator_current(it: *SplitIterator($T)): []$T {
     return slice(it.value, it.cur_pos, it.cur_len);

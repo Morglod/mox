@@ -31,11 +31,11 @@ buf_mem_slice.len == 1024;
 With arenas:
 
 ```rust
-other_arena := get_context_temp_arena();
+other_alloc := get_context_temp_arena_as_alloc();
 
-// pick scratch arena that is not in conflict with other_arena
+// pick scratch arena that is not the arena behind other_alloc
 // and pop it back at the end of the scope
-arena := #temp_arena(other_arena);
+arena := #temp_arena(other_alloc);
 
 buf : []u8 = arena_push(arena, 1024);
 ptr : *i64 = arena_push(arena, i64);
@@ -52,12 +52,13 @@ Utils:
 // pick temp arena, push 1024 and pop back at the end of the scope
 buf := #temp_buffer(1024);
 
-// if you already have other arena in scope, pass it to avoid conflicts
-buf := #temp_buffer(1024, conflict_arena);
+// if your result goes to another allocator, pass it to avoid conflicts
+// (an allocator that is not backed by a scratch arena never conflicts)
+buf := #temp_buffer(1024, conflict_alloc);
 
 // make temporary null terminated string from passed string slice
 c_str := #temp_c_string("hello world");
-c_str := #temp_c_string("hello world", conflict_arena);
+c_str := #temp_c_string("hello world", conflict_alloc);
 ```
 
 ## Pointer arithmetics
@@ -151,7 +152,7 @@ fn read_string_from_stdin(arena: *Arena = get_context_temp_arena()): []u8 {
     // here #temp_buffer picks different scratch arena, that is not passed arena
     // so there is no conflict
     // but this tmp_buf will be freed at the end of scope, so we need to copy it to output arena
-    tmp_buf := #temp_buffer(max_len, arena);
+    tmp_buf := #temp_buffer(max_len, arena_as_allocator(arena));
     gets(tmp_buf.ptr);
 
     str_len := c_strlen(tmp_buf.ptr, max_len);

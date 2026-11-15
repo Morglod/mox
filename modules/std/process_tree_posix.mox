@@ -1,0 +1,271 @@
+import "internal.mox";
+import "./os_posix.mox";
+import "./alloc.mox";
+import "./context.mox";
+import "./dynarr.mox";
+
+// Linux reads /proc. macOS has no /proc: nothing is found there (see process_tree.mox).
+
+#linkc("getpid") fn posix_getpid(): i32;
+
+const _PT_SIGSTOP : i32 = 19; // linux
+const _PT_ESRCH   : i32 = 3;
+const _PT_ENOSYS  : i32 = 38;
+const _PT_MAX_PASSES : i64 = 16;
+const _PT_STAT_CAP : i64 = 1024; // /proc/<pid>/stat up to starttime (field 22) fits well inside
+
+struct OsProcessEntry {
+    pid: u64;
+    parent_pid: u64;
+    start_time: u64; // starttime from /proc/<pid>/stat + 1, so 0 always means none
+};
+
+fn os_current_pid(): u64 { return posix_getpid().cast(u64); }
+
+fn os_process_pid(proc: OsProcess): u64 { return proc; }
+
+// reads ppid (field 4) and starttime (field 22) of /proc/<pid>/stat. comm (field 2) can hold spaces and ')', so fields are counted from the last ')'.
+fn _pt_read_stat(pid: u64, entry: *OsProcessEntry): bool {
+    path: [40]u8 = 0;
+    prefix: []u8 = "/proc/";
+    suffix: []u8 = "/stat";
+    n: i64 = 0;
+    for (i : it_range(prefix.len)) { path[n] = prefix[i]; n += 1; }
+    digits: [20]u8 = 0;
+    d: i64 = 0;
+    v := pid;
+    while ((v > 0) || (d == 0)) {
+        digits[d] = char("0") + (v % 10).cast(u8);
+        v = v / 10;
+        d += 1;
+    }
+    while (d > 0) {
+        d -= 1;
+        path[n] = digits[d];
+        n += 1;
+    }
+    for (i : it_range(suffix.len)) { path[n] = suffix[i]; n += 1; }
+
+    fd := posix_open(path.ptr, POSIX_O_RDONLY, 0);
+    if (fd < 0) { return false; }
+    text: [1024]u8 = 0;
+    len: i64 = 0;
+    while (len < _PT_STAT_CAP) {
+        got := posix_read(fd, text.ptr |> byte_offset(len), (_PT_STAT_CAP - len).cast(u64));
+        if (got <= 0) { break; }
+        len += got;
+    }
+    posix_close(fd);
+
+    i := len - 1;
+    while ((i >= 0) && (text[i] != char(")"))) { i -= 1; }
+    if (i < 0) { return false; }
+    i += 1;
+    field: i64 = 2;
+    ppid: u64 = 0;
+    while ((i < len) && (field <= 22)) {
+        if (text[i] == char(" ")) {
+            field += 1;
+            i += 1;
+            continue;
+        }
+        if ((field == 4) || (field == 22)) {
+            x: u64 = 0;
+            while ((i < len) && (text[i] >= char("0")) && (text[i] <= char("9"))) {
+                x = x * 10 + (text[i] - char("0")).cast(u64);
+                i += 1;
+            }
+            if (field == 22) {
+                entry.pid = pid;
+                entry.parent_pid = ppid;
+                entry.start_time = x + 1;
+                return true;
+            }
+            ppid = x;
+            continue;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+#if (MOX_OS == .Darwin) {
+    fn _pt_pidfd_open(pid: u64): i32 { return -1; }
+    fn _pt_pidfd_signal(fd: i32, sig: i32): i64 { return -1; }
+} else {
+    fn _pt_pidfd_open(pid: u64): i32 { return posix_syscall4(434, pid.cast(i64), 0, 0, 0).cast(i32); } // pidfd_open, linux 5.3+
+    fn _pt_pidfd_signal(fd: i32, sig: i32): i64 { return posix_syscall4(424, fd.cast(i64), sig.cast(i64), 0, 0); } // pidfd_send_signal
+}
+
+// a process found by os_kill_tree or os_process_children. The pidfd follows the process itself, not the pid number: signals through it never reach a later owner of the pid.
+struct _PtPosixProc {
+    entry: OsProcessEntry;
+    pidfd: i32; // -1 on kernels before 5.3, then signals go by pid
+};
+
+enum _PtPin : u8 {
+    pinned := 0;
+    gone   := 1;
+    failed := 2;
+};
+
+// 0 = sent. Signal 0 sends nothing: it only checks the process was not reaped yet, so its pid still belongs to it.
+fn _pt_raw_signal(p: *_PtPosixProc, sig: i32): i64 {
+    if (p.pidfd >= 0) { return _pt_pidfd_signal(p.pidfd, sig); }
+    return posix_kill(p.entry.pid.cast(i32), sig).cast(i64);
+}
+
+// a process that is already gone counts as done
+fn _pt_signal(p: *_PtPosixProc, sig: i32): bool {
+    return (_pt_raw_signal(p, sig) == 0) || (_posix_errno() == _PT_ESRCH);
+}
+
+fn _pt_unpin(p: *_PtPosixProc): void {
+    if (p.pidfd >= 0) { posix_close(p.pidfd); }
+    p.pidfd = -1;
+}
+
+// Pins pid with a pidfd, then reads its stat. The process was alive from before the pin until the check after the read, so the pid was its own the whole time and the entry is really its own.
+fn _pt_pin(pid: u64, out: *_PtPosixProc): _PtPin {
+    out.pidfd = -1;
+    if (pid > 2147483647) { return .gone; }
+    out.pidfd = _pt_pidfd_open(pid);
+    if (out.pidfd < 0) {
+        err := _posix_errno();
+        if (err == _PT_ESRCH) { return .gone; }
+        if (err != _PT_ENOSYS) { return .failed; }
+    }
+    if (!_pt_read_stat(pid, out.entry.^) || (_pt_raw_signal(out, 0) != 0)) {
+        _pt_unpin(out);
+        return .gone;
+    }
+    return .pinned;
+}
+
+// 0 = no such process
+fn os_process_start_time(pid: u64): u64 {
+    e: OsProcessEntry = 0;
+    if (!_pt_read_stat(pid, e.^)) { return 0; }
+    return e.start_time;
+}
+
+// every process in /proc
+fn _pt_snapshot(all: *DynArr(OsProcessEntry)): void {
+    dynarr_reset(all);
+    it: OsDirIter = 0;
+    if (!os_dir_open(it.^, "/proc")) { return; }
+    while (os_dir_next(it.^)) {
+        pid: u64 = 0;
+        is_pid := it.name.len > 0;
+        for (i : it_range(it.name.len)) {
+            ch := it.name[i];
+            if ((ch < char("0")) || (ch > char("9"))) {
+                is_pid = false;
+                break;
+            }
+            pid = pid * 10 + (ch - char("0")).cast(u64);
+        }
+        e: OsProcessEntry = 0;
+        if (is_pid && _pt_read_stat(pid, e.^)) { push(all, e); }
+    }
+    os_dir_close(it.^);
+}
+
+fn _pt_find(tree: *DynArr(_PtPosixProc), pid: u64): i64 {
+    for (i : it_range(dynarr_len(tree))) {
+        if (dynarr_at(tree, i).entry.pid == pid) { return i; }
+    }
+    return -1;
+}
+
+// the processes started by pid. Only those started after pid count, so a pid that was reused never picks up an earlier owner's children.
+fn os_process_children(pid: u64, alloc: *Alloc = get_context_temp_arena_as_alloc()): []OsProcessEntry {
+    out: []OsProcessEntry = 0;
+    parent: _PtPosixProc = 0;
+    if (_pt_pin(pid, parent.^) != .pinned) { return out; }
+    defer _pt_unpin(parent.^);
+    all: DynArr(OsProcessEntry) = 0;
+    dynarr_init(all.^);
+    defer dynarr_free(all.^);
+    _pt_snapshot(all.^);
+    // every stat was read before this check: the parent was alive through all of them, so a matching parent pid really was it
+    if (_pt_raw_signal(parent.^, 0) != 0) { return out; }
+
+    n: i64 = 0;
+    for (i : it_range(all.len)) {
+        e := dynarr_at(all.^, i);
+        if ((e.parent_pid == pid) && (e.start_time >= parent.entry.start_time)) {
+            all.items[n] = e.*;
+            n += 1;
+        }
+    }
+    out = mem_alloc_slice(alloc, OsProcessEntry, n);
+    for (i : it_range(n)) { out[i] = all.items[i]; }
+    return out;
+}
+
+// Force-kills pid and every process under it. Every process found is stopped first so it cannot start more, the scan repeats until it finds nothing new, then all get SIGKILL.
+// start_time != 0: kill pid only while it is still that process (an OsProcessEntry.start_time), otherwise it counts as already gone.
+// Returns true when every process found got the kill, also when pid was already gone. False when one could not be checked or signalled, or new ones kept coming after 16 passes.
+fn os_kill_tree(pid: u64, start_time: u64 = 0): bool {
+    if (MOX_OS == .Darwin) { return false; }
+    root: _PtPosixProc = 0;
+    pin := _pt_pin(pid, root.^);
+    if (pin != .pinned) { return pin == .gone; }
+    if ((start_time != 0) && (root.entry.start_time != start_time)) {
+        _pt_unpin(root.^);
+        return true;
+    }
+
+    tree: DynArr(_PtPosixProc) = 0;
+    dynarr_init(tree.^);
+    defer dynarr_free(tree.^);
+    all: DynArr(OsProcessEntry) = 0;
+    dynarr_init(all.^);
+    defer dynarr_free(all.^);
+
+    self := os_current_pid();
+    ok := true;
+    push(tree.^, root);
+    if (pid != self) { ok = _pt_signal(root.^, _PT_SIGSTOP); }
+
+    done := false;
+    pass: i64 = 0;
+    while (!done && (pass < _PT_MAX_PASSES)) {
+        pass += 1;
+        _pt_snapshot(all.^);
+        done = true;
+        for (i : it_range(all.len)) {
+            e := dynarr_at(all.^, i);
+            if ((_pt_find(tree.^, e.pid) >= 0) || (_pt_find(tree.^, e.parent_pid) < 0)) { continue; }
+            // the snapshot only picks the candidate: the pinned read decides
+            p: _PtPosixProc = 0;
+            pin = _pt_pin(e.pid, p.^);
+            if (pin == .failed) { ok = false; }
+            if (pin != .pinned) { continue; }
+            // the parent must still be alive after the child's read, or its pid may already be someone else's
+            parent := _pt_find(tree.^, p.entry.parent_pid);
+            if ((parent < 0) || (p.entry.start_time < dynarr_at(tree.^, parent).entry.start_time) || (_pt_raw_signal(dynarr_at(tree.^, parent), 0) != 0)) {
+                _pt_unpin(p.^);
+                continue;
+            }
+            push(tree.^, p);
+            done = false;
+            if (p.entry.pid != self) { ok = _pt_signal(p.^, _PT_SIGSTOP) && ok; }
+        }
+    }
+    if (!done) { ok = false; }
+
+    kill_self := false;
+    for (i : it_range(tree.len)) {
+        t := dynarr_at(tree.^, i);
+        if (t.entry.pid == self) {
+            kill_self = true;
+        } else {
+            ok = _pt_signal(t, POSIX_SIGKILL) && ok;
+        }
+        _pt_unpin(t);
+    }
+    if (kill_self) { posix_kill(self.cast(i32), POSIX_SIGKILL); }
+    return ok;
+}

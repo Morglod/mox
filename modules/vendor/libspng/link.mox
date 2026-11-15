@@ -1,0 +1,39 @@
+import "internal.mox";
+import "build.mox";
+import "std/format.mox";
+
+fn link_libspng($link_comptime: bool): void {
+    if (!#is_comptime) { return; }
+
+    link_path := "";
+    dll_path := "";
+
+    switch (MOX_OS) {
+        case .Windows:
+            link_path = "./win64/libspng.dll.a";
+            dll_path = "./win64/libspng.dll";
+        case .Linux:
+            link_path = "./linux64/libspng.so";
+            dll_path = "./linux64/libspng.so";
+            __compiler_link_lib("m", false);
+            __compiler_append_linker("-Wl,-rpath,'$ORIGIN'");
+        case .Darwin:
+            println("\n\nlibspng binaries on Darwin is not shipped yet, link it manually\n\n");
+            return;
+        case .Unknown:
+    }
+
+    __compiler_link_lib(build_resolve_path(link_path), false);
+    if ($link_comptime) {
+        __compiler_link_lib(build_resolve_path(dll_path), true);
+    }
+    build_copy_to_output(build_resolve_path(dll_path));
+}
+
+#run link_libspng(false);
+
+// example of comptime usage:
+// #run {
+//     link_libspng(true);
+//     use libspng here
+// }

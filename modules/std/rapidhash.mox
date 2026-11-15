@@ -1,7 +1,7 @@
 // rapidhash v3 implementation
 
 import "internal.mox";
-import "math.mox";
+import "std/math.mox";
 
 fn _rapid_likely_(x: bool): bool {
     return x;

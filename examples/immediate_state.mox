@@ -1,0 +1,95 @@
+import "std.mox";
+const im := import "game/immediate_state.mox";
+const rl := import "vendor/raylib.mox";
+import "game/animate.mox";
+
+fn random_f32(min: f32, max: f32): f32 {
+    return rl.GetRandomValue((min * 1000.0f).cast(i32), (max * 1000.0f).cast(i32)).cast(f32) / 1000.0f;
+}
+
+fn random_vec2f(min: f32, max: f32): vec2f {
+    return .{
+        random_f32(min, max);
+        random_f32(min, max);
+    };
+}
+
+struct ButtonState {
+    hover: bool;
+    down: bool;
+    clicked: bool;
+}
+
+fn button(text: []u8, pos: vec2f): ButtonState {
+    button_key := im.key(text);
+
+    ctext := #temp_c_string(text);
+
+    font := rl.GetFontDefault();
+    size := rl.MeasureTextEx(font, ctext, 40, 1.0f);
+    
+    is_hovered := rl.CheckCollisionPointRec(rl.GetMousePosition(), rl.Rectangle.{ pos.x, pos.y, size.x.cast(f32), size.y.cast(f32) });
+    is_down := rl.IsMouseButtonDown(0) && is_hovered;
+    is_clicked := rl.IsMouseButtonPressed(0) && is_hovered;
+
+    button_color := rl.COLOR_YELLOW;
+    if (is_hovered) {
+        button_color = rl.COLOR_BLUE;
+    }
+    if (is_down) {
+        button_color = rl.COLOR_GREEN;
+    }
+
+    color_state := im.state_animate_move_towards(im.key(button_key, "anim"), vec_cast(f32, button_color), 1500.0f);
+
+    rl.DrawRectangleV(pos, size, vec_cast(u8, color_state.*));
+    rl.DrawTextEx(font, ctext, pos, 40, 1, rl.COLOR_BLACK);
+
+    return .{
+        hover = is_hovered;
+        down = is_down;
+        clicked = is_clicked;
+    };
+}
+
+fn checkbox(text: []u8, pos: vec2f): bool {
+    button_key := im.key(text);
+
+    check_state := im.state(im.key(button_key, "checkbox"), false);
+
+    if (button(text, pos).clicked) {
+        check_state.* = !check_state.*;
+    }
+
+    return check_state.*;
+}
+
+#linkc fn main(): i32 {
+    rl.InitWindow(800, 800, "im demo");
+    defer rl.CloseWindow();
+
+    while (!rl.WindowShouldClose()) {
+        im.frame_start();
+        rl.BeginDrawing();
+        rl.ClearBackground(rl.COLOR_BLACK);
+
+        move_boxes_button := button("move boxes", .{ 10, 10 });
+        scale_boxes_check := checkbox("scale boxes", .{ 500, 10 });
+
+        for (i : it_range(10u32)) {
+            target_y := select(move_boxes_button.down, 10.0f, 760.0f);
+            target_scale := select(scale_boxes_check, 1.0f, 5.0f);
+
+            pos_origin := vec2f.{ 10.0f + i.cast(f32) * 70.0f, target_y };
+            pos_state := im.state_animate_move_towards(im.key(i, "box_pos"), pos_origin, i.cast(f32) * 20.0f + 700.0f, ease_in_out.^);
+
+            state_scale := im.state_animate_move_towards(im.key(i, "box_scale"), target_scale, 10.0f, ease_in_out_elastic.^);
+            
+            rl.DrawRectangleV(pos_state.*, vec2f.{ 10.0f; 10.0f; } * state_scale.*, rl.COLOR_RED);
+        }
+
+        rl.EndDrawing();
+        im.frame_end();
+    }
+    return 0;
+}

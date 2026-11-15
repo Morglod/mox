@@ -1,0 +1,11 @@
+import "internal.mox";
+
+// Process trees: list a process's children with their start times, and kill a process together with all its descendants.
+// start_time is opaque: compare it only with other start_time values. It stays the same while a pid belongs to the same process, so a changed value means the pid was reused.
+// macOS is not done yet: nothing is listed and os_kill_tree returns false.
+
+#if (MOX_OS == .Windows) {
+    import "./process_tree_win.mox" #export;
+} else {
+    import "./process_tree_posix.mox" #export;
+}

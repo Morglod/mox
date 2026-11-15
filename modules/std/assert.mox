@@ -1,20 +1,26 @@
-import "./internal.mox";
+import "internal.mox";
 import "./panic.mox";
+import "./format.mox";
+import "./slice.mox";
 
 fn assert(condition: bool, loc: MoxSourceLocation = #caller_location): void {
     if (!condition) {
-        panic("no panic callstack yet here", loc);
+        panic("assertion failed", loc);
     }
 }
 
 fn assert(condition: bool, msg: []u8, loc: MoxSourceLocation = #caller_location): void {
     if (!condition) {
-        panic(msg, loc);
+        panic("assertion failed: {}", .{ msg; }, loc);
     }
 }
 
 fn assert(condition: bool, $msg_format: []u8, format_values: $T, loc: MoxSourceLocation = #caller_location): void {
     if (!condition) {
-        panic($msg_format, format_values, loc);
+        buf_mem : [1024]u8 = #memory_garbage;
+        buf := buf_mem.^ |> slice();
+        off := format(buf, 0, "assertion failed: ", .{});
+        off = format(buf, off, $msg_format, format_values);
+        panic(slice(buf, 0, format_fit(buf, off)), loc);
     }
 }

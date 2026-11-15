@@ -1,0 +1,192 @@
+// Curves and animation utils
+
+// animate(from, to, t, curve) returns from + (to - from) * curve(t).
+// t goes from 0 to 1 and is clamped. Works on ints, floats and [N]T vectors of them, ints are rounded.
+// Curves take t in 0..1 and return the progress, most of them stay in 0..1 (back and elastic overshoot).
+
+import "internal.mox";
+import "std/math.mox";
+
+const _ANIMATE_BACK : f32 = 1.70158f;
+const _ANIMATE_ELASTIC : f32 = 2 * 3.1415927f / 3;
+const _ANIMATE_ELASTIC_IN_OUT : f32 = 2 * 3.1415927f / 4.5;
+
+fn linear(t: f32): f32 { return t; }
+
+fn ease_in_quad(t: f32): f32 { return t * t; }
+fn ease_out_quad(t: f32): f32 { return 1 - (1 - t) * (1 - t); }
+fn ease_in_out_quad(t: f32): f32 {
+    if (t < 0.5) { return 2 * t * t; }
+    u: f32 = -2 * t + 2;
+    return 1 - u * u / 2;
+}
+
+fn ease_in_cubic(t: f32): f32 { return t * t * t; }
+fn ease_out_cubic(t: f32): f32 { u: f32 = 1 - t; return 1 - u * u * u; }
+fn ease_in_out_cubic(t: f32): f32 {
+    if (t < 0.5) { return 4 * t * t * t; }
+    u: f32 = -2 * t + 2;
+    return 1 - u * u * u / 2;
+}
+
+fn ease_in_quart(t: f32): f32 { return t * t * t * t; }
+fn ease_out_quart(t: f32): f32 { u: f32 = 1 - t; return 1 - u * u * u * u; }
+fn ease_in_out_quart(t: f32): f32 {
+    if (t < 0.5) { return 8 * t * t * t * t; }
+    u: f32 = -2 * t + 2;
+    return 1 - u * u * u * u / 2;
+}
+
+fn ease_in_quint(t: f32): f32 { return t * t * t * t * t; }
+fn ease_out_quint(t: f32): f32 { u: f32 = 1 - t; return 1 - u * u * u * u * u; }
+fn ease_in_out_quint(t: f32): f32 {
+    if (t < 0.5) { return 16 * t * t * t * t * t; }
+    u: f32 = -2 * t + 2;
+    return 1 - u * u * u * u * u / 2;
+}
+
+fn ease_in_sine(t: f32): f32 { return 1 - cos(t * PI_F32 / 2); }
+fn ease_out_sine(t: f32): f32 { return sin(t * PI_F32 / 2); }
+fn ease_in_out_sine(t: f32): f32 { return -(cos(t * PI_F32) - 1) / 2; }
+
+fn ease_in_expo(t: f32): f32 {
+    if (t == 0) { return 0; }
+    return pow(2.0f, 10 * t - 10);
+}
+fn ease_out_expo(t: f32): f32 {
+    if (t == 1) { return 1; }
+    return 1 - pow(2.0f, -10 * t);
+}
+fn ease_in_out_expo(t: f32): f32 {
+    if (t == 0) { return 0; }
+    if (t == 1) { return 1; }
+    if (t < 0.5) { return pow(2.0f, 20 * t - 10) / 2; }
+    return (2 - pow(2.0f, -20 * t + 10)) / 2;
+}
+
+fn ease_in_circ(t: f32): f32 { return 1 - sqrt(1 - t * t); }
+fn ease_out_circ(t: f32): f32 { u: f32 = t - 1; return sqrt(1 - u * u); }
+fn ease_in_out_circ(t: f32): f32 {
+    if (t < 0.5) { return (1 - sqrt(1 - 4 * t * t)) / 2; }
+    u: f32 = -2 * t + 2;
+    return (sqrt(1 - u * u) + 1) / 2;
+}
+
+fn ease_in_back(t: f32): f32 { return (_ANIMATE_BACK + 1) * t * t * t - _ANIMATE_BACK * t * t; }
+fn ease_out_back(t: f32): f32 {
+    u: f32 = t - 1;
+    return 1 + (_ANIMATE_BACK + 1) * u * u * u + _ANIMATE_BACK * u * u;
+}
+fn ease_in_out_back(t: f32): f32 {
+    c: f32 = _ANIMATE_BACK * 1.525f;
+    if (t < 0.5) {
+        u: f32 = 2 * t;
+        return u * u * ((c + 1) * u - c) / 2;
+    }
+    u: f32 = 2 * t - 2;
+    return (u * u * ((c + 1) * u + c) + 2) / 2;
+}
+
+fn ease_in_elastic(t: f32): f32 {
+    if (t == 0) { return 0; }
+    if (t == 1) { return 1; }
+    return -pow(2.0f, 10 * t - 10) * sin((t * 10 - 10.75) * _ANIMATE_ELASTIC);
+}
+fn ease_out_elastic(t: f32): f32 {
+    if (t == 0) { return 0; }
+    if (t == 1) { return 1; }
+    return pow(2.0f, -10 * t) * sin((t * 10 - 0.75) * _ANIMATE_ELASTIC) + 1;
+}
+fn ease_in_out_elastic(t: f32): f32 {
+    if (t == 0) { return 0; }
+    if (t == 1) { return 1; }
+    if (t < 0.5) { return -(pow(2.0f, 20 * t - 10) * sin((20 * t - 11.125) * _ANIMATE_ELASTIC_IN_OUT)) / 2; }
+    return pow(2.0f, -20 * t + 10) * sin((20 * t - 11.125) * _ANIMATE_ELASTIC_IN_OUT) / 2 + 1;
+}
+
+fn ease_out_bounce(t: f32): f32 {
+    n1: f32 = 7.5625;
+    d1: f32 = 2.75;
+    if (t < 1 / d1) { return n1 * t * t; }
+    if (t < 2 / d1) { t -= 1.5 / d1; return n1 * t * t + 0.75; }
+    if (t < 2.5 / d1) { t -= 2.25 / d1; return n1 * t * t + 0.9375; }
+    t -= 2.625 / d1;
+    return n1 * t * t + 0.984375;
+}
+fn ease_in_bounce(t: f32): f32 { return 1 - ease_out_bounce(1 - t); }
+fn ease_in_out_bounce(t: f32): f32 {
+    if (t < 0.5) { return (1 - ease_out_bounce(1 - 2 * t)) / 2; }
+    return (1 + ease_out_bounce(2 * t - 1)) / 2;
+}
+
+// one axis of a bezier with p0 = 0 and p3 = 1
+fn _bezier3(s: f32, p1: f32, p2: f32): f32 {
+    c: f32 = 3 * p1;
+    b: f32 = 3 * (p2 - p1) - c;
+    a: f32 = 1 - c - b;
+    return ((a * s + b) * s + c) * s;
+}
+
+fn _bezier3_slope(s: f32, p1: f32, p2: f32): f32 {
+    c: f32 = 3 * p1;
+    b: f32 = 3 * (p2 - p1) - c;
+    a: f32 = 1 - c - b;
+    return (3 * a * s + 2 * b) * s + c;
+}
+
+// same as css cubic-bezier(x1, y1, x2, y2)
+fn cubic_bezier(t: f32, x1: f32, y1: f32, x2: f32, y2: f32): f32 {
+    if (t <= 0) { return 0; }
+    if (t >= 1) { return 1; }
+    s: f32 = t;
+    for (i : it_range(8i32)) {
+        x: f32 = _bezier3(s, x1, x2) - t;
+        if (abs(x) < 0.00001f) { return _bezier3(s, y1, y2); }
+        slope: f32 = _bezier3_slope(s, x1, x2);
+        if (abs(slope) < 0.00001f) { break; }
+        s -= x / slope;
+    }
+    lo: f32 = 0;
+    hi: f32 = 1;
+    s = t;
+    while (hi - lo > 0.00001f) {
+        if (_bezier3(s, x1, x2) < t) { lo = s; } else { hi = s; }
+        s = (lo + hi) / 2;
+    }
+    return _bezier3(s, y1, y2);
+}
+
+// bezier with p0 = 0 and p2 = 1, (x1, y1) is the control point
+fn quad_bezier(t: f32, x1: f32, y1: f32): f32 {
+    if (t <= 0) { return 0; }
+    if (t >= 1) { return 1; }
+    a: f32 = 1 - 2 * x1;
+    s: f32 = t;
+    if (abs(a) > 0.00001f) { s = (sqrt(x1 * x1 + a * t) - x1) / a; }
+    return 2 * (1 - s) * s * y1 + s * s;
+}
+
+// css presets
+fn ease(t: f32): f32 { return cubic_bezier(t, 0.25, 0.1f, 0.25, 1); }
+fn ease_in(t: f32): f32 { return cubic_bezier(t, 0.42f, 0, 1, 1); }
+fn ease_out(t: f32): f32 { return cubic_bezier(t, 0, 0, 0.58f, 1); }
+fn ease_in_out(t: f32): f32 { return cubic_bezier(t, 0.42f, 0, 0.58f, 1); }
+
+fn _mix(from: f32, to: f32, k: f32): f32 { return from + (to - from) * k; }
+fn _mix(from: f64, to: f64, k: f32): f64 { return from + (to - from) * k.cast(f64); }
+fn _mix(from: $T, to: $T, k: f32): $T {
+    v: f64 = from.cast(f64) + (to.cast(f64) - from.cast(f64)) * k.cast(f64);
+    if (v < 0) { return (v - 0.5).cast($T); }
+    return (v + 0.5).cast($T);
+}
+
+fn animate(from: $T, to: $T, t: f32, curve: *fn(t: f32): f32): $T {
+    return _mix(from, to, curve(clamp(t, 0, 1)));
+}
+
+fn animate(from: [$N]$T, to: [$N]$T, t: f32, curve: *fn(t: f32): f32): [$N]$T {
+    k: f32 = curve(clamp(t, 0, 1));
+    out: [$N]$T = from;
+    for (i : it_range($N)) { out[i] = _mix(from[i], to[i], k); }
+    return out;
+}

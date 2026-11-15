@@ -49,10 +49,10 @@
 //   the slider/number format is a decimal count instead of a printf format;
 //   commands are 8-byte aligned.
 
-import "internal.mox";
-import "slice.mox";
-import "assert.mox";
-import "parse_float.mox";
+import "../internal.mox";
+import "../std/slice.mox";
+import "../std/assert.mox";
+import "../std/parse_float.mox";
 
 const MU_COMMAND_LIST_SIZE    : i64 = 256 * 1024;
 const MU_ROOT_LIST_SIZE       : i64 = 32;
@@ -642,6 +642,8 @@ fn mu_commands(ctx: *MuContext): MuCommandIterator {
 fn iterator_next(it: *MuCommandIterator): bool {
     return mu_next_command(it.ctx, it.cmd.^);
 }
+
+fn iterator_end(it: *MuCommandIterator): void {}
 
 fn iterator_current(it: *MuCommandIterator): *MuCommand {
     return it.cmd;

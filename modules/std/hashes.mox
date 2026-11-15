@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 import "./slice.mox";
 
 const FNV1A32_OFFSET : u32 = 0x811C9DC5;

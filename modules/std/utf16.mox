@@ -1,0 +1,128 @@
+import "internal.mox";
+import "./alloc.mox";
+import "./context.mox";
+import "./utf8.mox";
+import "./slice.mox";
+
+// UTF-8 <-> UTF-16 conversion, pure mox, works on every OS and at comptime.
+// Invalid input becomes U+FFFD: bad UTF-8 bytes one way, unpaired surrogates the other way.
+// With null_terminate the allocation has one extra zero unit after the result, the result len does not count it.
+
+const UTF16_REPLACEMENT_CHAR : u32 = 0xFFFD;
+
+// codepoint at unit i, returns how many units it took
+fn _utf16_cp_from_utf16(s: []u16, i: i64, cp: *u32): i64 {
+    u := s[i].cast(u32);
+    if (u >= 0xD800 && u <= 0xDBFF && i + 1 < s.len) {
+        u2 := s[i + 1].cast(u32);
+        if (u2 >= 0xDC00 && u2 <= 0xDFFF) {
+            cp.* = 0x10000 + #shl(u - 0xD800, 10) + (u2 - 0xDC00);
+            return 2;
+        }
+    }
+    if (u >= 0xD800 && u <= 0xDFFF) {
+        cp.* = UTF16_REPLACEMENT_CHAR;
+        return 1;
+    }
+    cp.* = u;
+    return 1;
+}
+
+fn utf8_to_utf16(s: []u8, alloc: *Alloc, null_terminate: bool = true): []u16 {
+    cp: u32 = 0;
+    count: i64 = 0;
+    i: i64 = 0;
+    while (i < s.len) {
+        i += utf8_decode(s, i, cp.^); // invalid bytes come back as U+FFFD
+        if (cp >= 0x10000) { count += 2; } else { count += 1; }
+    }
+
+    total := count;
+    if (null_terminate) { total += 1; }
+    out := mem_alloc_slice(alloc, u16, total);
+    w: i64 = 0;
+    i = 0;
+    while (i < s.len) {
+        i += utf8_decode(s, i, cp.^); // invalid bytes come back as U+FFFD
+        if (cp >= 0x10000) {
+            v := cp - 0x10000;
+            out[w] = (0xD800 + #shr(v, 10)).cast(u16);
+            out[w + 1] = (0xDC00 + (v & 0x3FF)).cast(u16);
+            w += 2;
+        } else {
+            out[w] = cp.cast(u16);
+            w += 1;
+        }
+    }
+    if (null_terminate) { out[w] = 0; }
+    return slice(out, 0, count);
+}
+
+fn utf16_to_utf8(s: []u16, alloc: *Alloc, null_terminate: bool = true): []u8 {
+    cp: u32 = 0;
+    count: i64 = 0;
+    i: i64 = 0;
+    while (i < s.len) {
+        i += _utf16_cp_from_utf16(s, i, cp.^);
+        count += utf8_encoded_len(cp);
+    }
+
+    total := count;
+    if (null_terminate) { total += 1; }
+    out := mem_alloc_slice(alloc, u8, total, 1);
+    w: i64 = 0;
+    i = 0;
+    while (i < s.len) {
+        i += _utf16_cp_from_utf16(s, i, cp.^);
+        w += utf8_encode(cp, type_offset(out.ptr, w)).cast(i64);
+    }
+    if (null_terminate) { out[w] = 0; }
+    return slice(out, 0, count);
+}
+
+// converts into dst and adds a NULL, returns the length without the NULL, or -1 when it does not fit (dst is then left partly written)
+fn utf16_to_utf8_buf(s: []u16, dst: []u8): i64 {
+    cp: u32 = 0;
+    w: i64 = 0;
+    i: i64 = 0;
+    while (i < s.len) {
+        i += _utf16_cp_from_utf16(s, i, cp.^);
+        n := utf8_encoded_len(cp);
+        if (w + n + 1 > dst.len) { return -1; }
+        w += utf8_encode(cp, type_offset(dst.ptr, w)).cast(i64);
+    }
+    if (w + 1 > dst.len) { return -1; }
+    dst[w] = 0;
+    return w;
+}
+
+// length of a NULL-terminated UTF-16 string, in units
+fn utf16_len(p: *u16): i64 {
+    n: i64 = 0;
+    while (type_offset(p, n).* != 0) { n += 1; }
+    return n;
+}
+
+fn #temp_utf8_to_utf16(s: []u8): []u16 {
+    t := scratch_begin();
+    defer scratch_end(t);
+    return utf8_to_utf16(s, t.alloc);
+}
+
+fn #temp_utf8_to_utf16(s: []u8, conflict: *Alloc): []u16 {
+    t := scratch_begin(conflict);
+    defer scratch_end(t);
+    return utf8_to_utf16(s, t.alloc);
+}
+
+fn #temp_utf16_to_utf8(s: []u16): []u8 {
+    t := scratch_begin();
+    defer scratch_end(t);
+    return utf16_to_utf8(s, t.alloc);
+}
+
+fn #temp_utf16_to_utf8(s: []u16, conflict: *Alloc): []u8 {
+    t := scratch_begin(conflict);
+    defer scratch_end(t);
+    return utf16_to_utf8(s, t.alloc);
+}

@@ -1,4 +1,4 @@
-import "./internal.mox";
+import "internal.mox";
 import "./slice.mox";
 import "./vt_input.mox"; // shared Event model + the VT byte parser
 import "./context.mox";
@@ -59,12 +59,12 @@ struct PosixDirent {
 #linkc("pipe")     fn posix_pipe(fds: *i32): i32; // fds: int[2], [0] = read end, [1] = write end
 #linkc("fork")     fn posix_fork(): i32;
 #linkc("setsid")   fn posix_setsid(): i32;
+#linkc("setpgid")  fn posix_setpgid(pid: i32, pgid: i32): i32;
 #linkc("dup2")     fn posix_dup2(oldfd: i32, newfd: i32): i32;
 #linkc("execvp")   fn posix_execvp(file: *u8, argv: *u8): i32; // argv: char* const argv[]
 #linkc("_exit")    fn posix_exit_now(code: i32): void;
 #linkc("kill")     fn posix_kill(pid: i32, sig: i32): i32;
 #linkc("waitpid")  fn posix_waitpid(pid: i32, status: *i32, options: i32): i32;
-#linkc("system")   fn posix_system(cmd: *u8): i32; // returns a wait status, not an exit code
 #linkc("chdir")    fn posix_chdir(path: *u8): i32;
 #linkc("signal")   fn posix_signal(sig: i32, handler: *u8): *u8; // returns the previous handler
 
@@ -73,6 +73,7 @@ struct PosixTimespec { tv_sec: i64; tv_nsec: i64; };
 #linkc("mkdir")    fn posix_mkdir(path: *u8, mode: u32): i32;
 #linkc("rmdir")    fn posix_rmdir(path: *u8): i32;
 #linkc("rename")   fn posix_rename(from: *u8, to: *u8): i32;
+#linkc("readlink") fn posix_readlink(path: *u8, buf: *u8, size: u64): i64;
 #linkc("getenv")   fn posix_getenv(name: *u8): *u8;
 #linkc("setenv")   fn posix_setenv(name: *u8, value: *u8, overwrite: i32): i32;
 #linkc("unsetenv") fn posix_unsetenv(name: *u8): i32;
@@ -97,6 +98,106 @@ const POSIX_SEEK_CUR : i32 = 1;
 const POSIX_SEEK_END : i32 = 2;
 
 const POSIX_F_SETFL  : i32 = 4;
+const POSIX_F_SETFD  : i32 = 2;
+const POSIX_FD_CLOEXEC : i32 = 1;
+const POSIX_EINTR    : i32 = 4;
+
+#if (MOX_OS == .Darwin) {
+    const POSIX_O_CLOEXEC       : i32 = 16777216; // 0x1000000
+    const POSIX_F_DUPFD_CLOEXEC : i32 = 67;
+    const POSIX_EAGAIN          : i32 = 35;
+    #linkc("__error") fn _posix_errno_ptr(): *i32;
+
+    // Darwin keeps reading d_type only; its dirent/stat layouts belong to the macOS constants work
+    fn _posix_entry_mode(d: *u8, name: *u8): u32 { return 0; }
+
+    // the file type of path itself, made up without stat (see above); 0 = it does not exist
+    fn _posix_path_mode(path: []u8): u32 {
+        b: [1]u8 = 0;
+        if (posix_readlink(#temp_c_string(path), b.ptr, 1) >= 0) { return POSIX_S_IFLNK; }
+        if (os_dir_exists(path)) { return POSIX_S_IFDIR; }
+        if (os_path_exists(path)) { return POSIX_S_IFREG; }
+        return 0;
+    }
+} else {
+    const POSIX_O_CLOEXEC       : i32 = 524288;   // 0x80000
+    const POSIX_F_DUPFD_CLOEXEC : i32 = 1030;
+    const POSIX_EAGAIN          : i32 = 11;
+    const POSIX_SYS_CLOSE_RANGE : i64 = 436;
+    #linkc("__errno_location") fn _posix_errno_ptr(): *i32;
+    #linkc("pipe2")   fn posix_pipe2(fds: *i32, flags: i32): i32;
+    #linkc("syscall") fn posix_syscall4(n: i64, a: i64, b: i64, c: i64, d: i64): i64;
+
+    // x86_64 Linux struct stat (144 bytes)
+    struct _PosixStat {
+        st_dev: u64;
+        st_ino: u64;
+        st_nlink: u64;
+        st_mode: u32;
+        st_uid: u32;
+        st_gid: u32;
+        _pad0: u32;
+        st_rdev: u64;
+        st_size: i64;
+        st_blksize: i64;
+        st_blocks: i64;
+        st_times: [6]i64; // atime, mtime, ctime as sec + nsec
+        _reserved: [3]i64;
+    };
+    #linkc("fstat")     fn posix_fstat(fd: i32, st: *_PosixStat): i32;
+    #linkc("fstatat")   fn posix_fstatat(dirfd: i32, path: *u8, st: *_PosixStat, flags: i32): i32;
+    #linkc("dirfd")     fn posix_dirfd(d: *u8): i32;
+    const POSIX_AT_SYMLINK_NOFOLLOW : i32 = 256; // 0x100
+
+    const POSIX_AT_FDCWD : i32 = -100;
+
+    // st_mode of an entry whose d_type is DT_UNKNOWN, asked without following a symlink; 0 when it can not be read
+    fn _posix_entry_mode(d: *u8, name: *u8): u32 {
+        st: _PosixStat = 0;
+        if (posix_fstatat(posix_dirfd(d), name, st.^, POSIX_AT_SYMLINK_NOFOLLOW) != 0) { return 0; }
+        return st.st_mode;
+    }
+
+    // st_mode of path itself (lstat); 0 = it does not exist or can not be read
+    fn _posix_path_mode(path: []u8): u32 {
+        st: _PosixStat = 0;
+        if (posix_fstatat(POSIX_AT_FDCWD, #temp_c_string(path), st.^, POSIX_AT_SYMLINK_NOFOLLOW) != 0) { return 0; }
+        return st.st_mode;
+    }
+}
+
+fn _posix_errno(): i32 {
+    return _posix_errno_ptr().*;
+}
+
+// calls again while it fails with EINTR: a signal handler ran before the call did anything
+fn #posix_retry(call: __ast_ptr): i64 {
+    while (true) {
+        r := (`#land_ast call).cast(i64); // the call returns i32 or i64
+        if ((r >= 0) || (_posix_errno() != POSIX_EINTR)) { return r; }
+    }
+    return -1;
+}
+
+// both ends close on exec
+fn _posix_pipe_cloexec(fds: *i32): bool {
+    #if (MOX_OS == .Darwin) {
+        if (posix_pipe(fds) != 0) { return false; }
+        posix_fcntl(fds.*, POSIX_F_SETFD, POSIX_FD_CLOEXEC);
+        posix_fcntl(type_offset(fds, 1).*, POSIX_F_SETFD, POSIX_FD_CLOEXEC);
+        return true;
+    } else {
+        return posix_pipe2(fds, POSIX_O_CLOEXEC) == 0;
+    }
+}
+
+// child side, after fork: closes every fd above 2. Linux only (an old kernel without close_range skips it);
+// elsewhere the fds std opens are close-on-exec, fds other code opened without it still reach the child.
+fn _posix_child_close_from_3(): void {
+    #if (MOX_OS != .Darwin) {
+        posix_syscall4(POSIX_SYS_CLOSE_RANGE, 3, 4294967295, 0, 0);
+    }
+}
 
 const POSIX_TCSANOW      : i32 = 0;
 const POSIX_TIOCGWINSZ   : u64 = 21523; // 0x5413
@@ -116,8 +217,15 @@ const POSIX_CLOCK_MONOTONIC : i32 = 1;
 const POSIX_CLOCK_REALTIME  : i32 = 0;
 const POSIX_MODE_0755 : u32 = 493;
 
-const _OS_EXEC_READ_CHUNK      : i64 = 4096;
+const _POSIX_EXEC_READ_BUF     : i64 = 65536; // read block per pump call, as big as a Linux pipe
+const _POSIX_EXEC_WRITE_CHUNK  : i64 = 4096;  // = PIPE_BUF: POLLOUT only promises that much room, a bigger write on our blocking pipe could block
+const POSIX_DT_UNKNOWN : u8 = 0; // the filesystem does not fill d_type (some XFS, NFS, FUSE)
 const POSIX_DT_DIR  : u8 = 4;
+const POSIX_DT_LNK  : u8 = 10;
+const POSIX_S_IFMT  : u32 = 61440; // 0o170000
+const POSIX_S_IFDIR : u32 = 16384; // 0o040000
+const POSIX_S_IFLNK : u32 = 40960; // 0o120000
+const POSIX_S_IFREG : u32 = 32768; // 0o100000
 
 const POSIX_MAP_FAILED : u64 = 18446744073709551615; // (void*)-1
 
@@ -219,26 +327,85 @@ fn os_tls_key_free(key: OsTlsKey): bool {
     return posix_pthread_key_delete(key.cast(u32)) == 0;
 }
 
-// console
+#linkc("atexit") fn c_atexit(f: *fn(): void): i32;
+#linkc("exit")   fn c_exit(code: i32): void;
 
-_os_saved_termios: [64]u8 = #memory_garbage;
-_os_termios_saved: bool = false;
+// panic state (see panic.mox): 0 = no panic, 1 = panicking, 2 = the panic message was printed at exit
+is_panicking: u8 = 0;
+panic_message: []u8 = 0;
+_os_panic_printer: bool = false;
 
-// raw mode on the controlling tty (fd 0); output is plain VT, no setup needed
-fn os_console_setup_raw(): bool {
-    if (posix_tcgetattr(0, _os_saved_termios.ptr) != 0) { return false; }
-    raw: [64]u8 = #memory_garbage;
-    mem_copy(raw.ptr, _os_saved_termios.ptr, 64);
-    posix_cfmakeraw(raw.ptr);
-    if (posix_tcsetattr(0, POSIX_TCSANOW, raw.ptr) != 0) { return false; }
-    _os_termios_saved = true;
+// runs after every os_atexit handler, so the panic message is the last thing printed even when a handler cleared the screen
+fn _os_print_panic_at_exit(): void {
+    if (is_panicking != 1) { return; }
+    os_stderr_write(panic_message.ptr, panic_message.len);
+    nl := "\n";
+    os_stderr_write(nl.ptr, nl.len);
+    is_panicking = 2;
+}
+
+// false when the panic printer could not be registered
+fn os_register_panic_printer(): bool {
+    if (!_os_panic_printer) { _os_panic_printer = c_atexit(_os_print_panic_at_exit.^) == 0; }
+    return _os_panic_printer;
+}
+
+// f runs when the process exits through exit(), a return from main or a panic, on the thread that exits it
+fn os_atexit(f: *fn(): void): bool {
+    os_register_panic_printer();
+    return c_atexit(f) == 0;
+}
+
+// exits through exit(): os_atexit handlers and the exiting thread's thread_on_exit callbacks run
+fn os_exit(code: i32): void {
+    c_exit(code);
+}
+
+// threads
+
+const OsThreadStart : __type_ptr = #type *fn(arg: *u8): *u8;
+
+#linkc("pthread_create") fn posix_thread_create(th_out: *u64, attr: *u8, start: OsThreadStart, arg: *u8): i32;
+#linkc("pthread_join")   fn posix_thread_join(th: u64, ret_out: **u8): i32;
+
+fn os_thread_create(start: OsThreadStart, arg: *u8, handle_out: *u64): bool {
+    th: u64 = 0;
+    if (posix_thread_create(th.^, nullptr(u8), start, arg) != 0) { return false; }
+    handle_out.* = th;
     return true;
 }
 
-fn os_console_restore(): void {
-    if (_os_termios_saved) {
-        posix_tcsetattr(0, POSIX_TCSANOW, _os_saved_termios.ptr);
+fn os_thread_join(handle: u64): bool {
+    return posix_thread_join(handle, nullptr(*u8)) == 0;
+}
+
+// console
+
+const _POSIX_TERMIOS_BUF : i64 = 128; // struct termios: 60 bytes on Linux, 72 on Darwin
+_os_saved_termios: [128]u8 = #memory_garbage;
+_os_termios_saved: bool = false;
+_os_console_atexit: bool = false;
+
+// raw mode on the controlling tty (fd 0); output is plain VT, no setup needed. false when fd 0 is not a tty: nothing is changed then.
+// The first call saves the tty state for os_console_restore, which also runs at process exit and after a panic (not after _exit or os_abort).
+fn os_console_setup_raw(): bool {
+    cur: [128]u8 = #memory_garbage;
+    if (posix_tcgetattr(0, cur.ptr) != 0) { return false; }
+    // a second setup keeps the state saved by the first, so restore still goes back to the original
+    if (!_os_termios_saved) {
+        mem_copy(_os_saved_termios.ptr, cur.ptr, _POSIX_TERMIOS_BUF);
+        _os_termios_saved = true;
+        if (!_os_console_atexit) { _os_console_atexit = os_atexit(os_console_restore.^); }
     }
+    posix_cfmakeraw(cur.ptr);
+    return #posix_retry(#ast posix_tcsetattr(0, POSIX_TCSANOW, cur.ptr)) == 0;
+}
+
+// puts back what the first os_console_setup_raw saved; does nothing when nothing is saved
+fn os_console_restore(): void {
+    if (!_os_termios_saved) { return; }
+    _os_termios_saved = false;
+    #posix_retry(#ast posix_tcsetattr(0, POSIX_TCSANOW, _os_saved_termios.ptr));
 }
 
 fn os_console_size(cols: *u32, rows: *u32): bool {
@@ -250,44 +417,56 @@ fn os_console_size(cols: *u32, rows: *u32): bool {
     return true;
 }
 
-fn os_stdout_write(buf: *u8, len: i64): void {
-    // write() can return short (EINTR, 2 GiB single-call cap); loop until all bytes are out
+fn _posix_write_all(fd: i32, buf: *u8, len: i64): void {
+    // write() can return short (2 GiB single-call cap); loop until all bytes are out
     total: i64 = 0;
     while (total < len) {
         p := buf |> byte_offset(total);
-        r := posix_write(1, p, (len - total).cast(u64));
+        r := #posix_retry(#ast posix_write(fd, p, (len - total).cast(u64)));
         if (r <= 0) { break; }
         total += r;
     }
 }
 
-fn os_stdin_wait(ms: u32): void {
+fn os_stdout_write(buf: *u8, len: i64): void {
+    _posix_write_all(1, buf, len);
+}
+
+fn os_stderr_write(buf: *u8, len: i64): void {
+    _posix_write_all(2, buf, len);
+}
+
+// waits up to ms for input on stdin, negative = no limit
+fn os_stdin_wait(ms: i64): void {
     pfd: PosixPollFd = 0;
     pfd.fd = 0;
     pfd.events = POSIX_POLLIN;
-    posix_poll(pfd.^, 1, ms.cast(i32));
+    wait: i32 = -1;
+    if (ms >= 0) { wait = min(ms, 2147483647).cast(i32); }
+    posix_poll(pfd.^, 1, wait);
 }
 
 // clipboard: stubs, a bare tty has no clipboard
 
-fn os_clipboard_set(text: *u8, a: u32, b: u32): void {
+fn os_clipboard_set(text: []u8): bool {
+    return false;
 }
 
-fn os_clipboard_get(buf: *u8, cap: u32): u32 {
-    return 0;
+fn os_clipboard_get(alloc: *Alloc = get_context_temp_arena_as_alloc()): []u8 {
+    return empty_slice(u8);
 }
 
 // files, handle model: u64, 0 = invalid/failed, fd stored as fd+1
 
 fn os_file_open_read(path: *u8): OsFile {
-    fd := posix_open(path, POSIX_O_RDONLY, 0);
+    fd := #posix_retry(#ast posix_open(path, POSIX_O_RDONLY | POSIX_O_CLOEXEC, 0)).cast(i32);
     if (fd < 0) { return 0; }
     return (fd + 1).cast(u64);
 }
 
 // create/truncate for writing
 fn os_file_open_write(path: *u8): OsFile {
-    fd := posix_open(path, POSIX_O_WRONLY_CREAT_TRUNC, POSIX_MODE_0644);
+    fd := #posix_retry(#ast posix_open(path, POSIX_O_WRONLY_CREAT_TRUNC | POSIX_O_CLOEXEC, POSIX_MODE_0644)).cast(i32);
     if (fd < 0) { return 0; }
     return (fd + 1).cast(u64);
 }
@@ -306,7 +485,7 @@ fn os_file_size(h: OsFile): i64 {
 fn os_file_read(h: OsFile, buf: *u8, n: i64): i64 {
     if (h == 0) { return 0; }
     fd := (h.cast(i64) - 1).cast(i32);
-    r := posix_read(fd, buf, n.cast(u64));
+    r := #posix_retry(#ast posix_read(fd, buf, n.cast(u64)));
     if (r <= 0) { return 0; }
     return r;
 }
@@ -318,7 +497,7 @@ fn os_file_write(h: OsFile, buf: *u8, n: i64): i64 {
     total: i64 = 0;
     while (total < n) {
         p := buf |> byte_offset(total);
-        r := posix_write(fd, p, (n - total).cast(u64));
+        r := #posix_retry(#ast posix_write(fd, p, (n - total).cast(u64)));
         if (r <= 0) { break; }
         total += r;
     }
@@ -351,12 +530,54 @@ fn os_cwd(buf: *u8, cap: i64): i64 {
     return n;
 }
 
+// writes the absolute form of path NULL-terminated into buf, returns the length without the NULL, 0 = failed or does not fit.
+// Works on the text only, the file does not need to exist and symlinks are not followed: a relative path is joined to the cwd, "." and ".." segments are resolved.
+fn os_path_abs(buf: *u8, cap: i64, path: []u8): i64 {
+    if (path.len == 0) { return 0; }
+    out := slice(buf, cap);
+    w: i64 = 0;   // out holds "/seg" parts, so the root is empty until the end
+    if (path[0] != char("/")) {
+        w = os_cwd(buf, cap);
+        if (w == 0) { return 0; }
+        if (out[w - 1] == char("/")) { w -= 1; }
+    }
+    r: i64 = 0;
+    while (r < path.len) {
+        if (path[r] == char("/")) {
+            r += 1;
+            continue;
+        }
+        start := r;
+        while (r < path.len && path[r] != char("/")) { r += 1; }
+        seg := slice(path, start, r - start);
+        if (seg == ".") { continue; }
+        if (seg == "..") {
+            while (w > 0 && out[w - 1] != char("/")) { w -= 1; }
+            if (w > 0) { w -= 1; }
+            continue;
+        }
+        if (w + 1 + seg.len >= cap) { return 0; }
+        out[w] = char("/");
+        mem_copy(type_offset(buf, w + 1), seg.ptr, seg.len);
+        w += 1 + seg.len;
+    }
+    // the root, or a trailing separator kept like Windows keeps it
+    if ((w == 0) || (path[path.len - 1] == char("/"))) {
+        if (w + 1 >= cap) { return 0; }
+        out[w] = char("/");
+        w += 1;
+    }
+    out[w] = 0;
+    return w;
+}
+
 // directory listing: os_dir_open(it, "<dir>") then os_dir_next(it) until false. "." and ".." are included.
 
 struct OsDirIter {
     handle: u64;    // DIR*
     pending: bool;  // unused, matches the os_win struct shape
-    is_dir: bool;
+    is_dir: bool;   // false for a symlink to a directory: walks do not follow links
+    is_symlink: bool;
     name: []u8;     // view into the readdir entry, valid until the next os_dir_next; copy to keep
 };
 
@@ -382,6 +603,12 @@ fn os_dir_next(it: *OsDirIter): bool {
     it.name.ptr = e.d_name.ptr;
     it.name.len = c_strlen(e.d_name.ptr, name_cap);
     it.is_dir = e.d_type == POSIX_DT_DIR;
+    it.is_symlink = e.d_type == POSIX_DT_LNK;
+    if (e.d_type == POSIX_DT_UNKNOWN) {
+        kind := _posix_entry_mode(it.handle.cast(*u8), e.d_name.ptr) & POSIX_S_IFMT;
+        it.is_dir = kind == POSIX_S_IFDIR;
+        it.is_symlink = kind == POSIX_S_IFLNK;
+    }
     return true;
 }
 
@@ -429,19 +656,19 @@ fn os_term_poll(ti: *OsTermInput, ev: *Event): bool {
     // buffered bytes may already hold a full event
     if (vt_next(ti.parser.^, false, ev)) { return true; }
 
-    // pull whatever stdin has
-    tmp: [128]u8 = #memory_garbage;
-    n := os_stdin_read_bytes(ti, tmp.ptr, 128);
+    // pull whatever stdin has, only as much as the parser has room for, so every byte read gets fed
+    tmp: [VT_BUF_CAP]u8 = #memory_garbage;
+    n := os_stdin_read_bytes(ti, tmp.ptr, (VT_BUF_CAP - ti.parser.len).cast(i64));
     while (n > 0) {
         vt_feed_bytes(ti.parser.^, tmp.ptr, n);
         if (vt_next(ti.parser.^, false, ev)) { return true; }
-        n = os_stdin_read_bytes(ti, tmp.ptr, 128);
+        n = os_stdin_read_bytes(ti, tmp.ptr, (VT_BUF_CAP - ti.parser.len).cast(i64));
     }
 
     // undecided tail (lone ESC or split sequence): wait briefly for the rest, then flush so a lone ESC becomes the escape key
     if (ti.parser.len > 0) {
         os_stdin_wait(10);
-        n = os_stdin_read_bytes(ti, tmp.ptr, 128);
+        n = os_stdin_read_bytes(ti, tmp.ptr, (VT_BUF_CAP - ti.parser.len).cast(i64));
         if (n > 0) {
             vt_feed_bytes(ti.parser.^, tmp.ptr, n);
             if (vt_next(ti.parser.^, false, ev)) { return true; }
@@ -507,20 +734,61 @@ fn os_rename(from: []u8, to: []u8): bool {
     // ssize_t copy_file_range(int fd_in, off64_t* off_in, int fd_out, off64_t* off_out, size_t len, unsigned flags)
     #linkc("copy_file_range") fn posix_copy_file_range(fd_in: i32, off_in: *i64, fd_out: i32, off_out: *i64, len: u64, flags: u32): i64;
 
-    fn os_copy_file(from: []u8, to: []u8): bool {
-        src := os_file_open_read(from);
-        if (src == 0) { return false; }
-        defer os_file_close(src);
-        dst := os_file_open_write(to);
-        if (dst == 0) { return false; }
-        defer os_file_close(dst);
-        fd_in := (src.cast(i64) - 1).cast(i32);
-        fd_out := (dst.cast(i64) - 1).cast(i32);
+    #linkc("ftruncate") fn posix_ftruncate(fd: i32, len: i64): i32;
+    #linkc("fchmod")    fn posix_fchmod(fd: i32, mode: u32): i32;
+    const _POSIX_O_WRONLY_CREAT : i32 = 65; // O_WRONLY|O_CREAT
+    const _POSIX_COPY_BUF       : i64 = 65536;
+
+    // copies the rest of fd_in with plain read/write
+    fn _posix_copy_rw(fd_in: i32, fd_out: i32): bool {
+        t := scratch_begin();
+        defer scratch_end(t);
+        buf := mem_alloc(t.alloc, _POSIX_COPY_BUF, 1);
         while (true) {
-            r := posix_copy_file_range(fd_in, nullptr(i64), fd_out, nullptr(i64), 1073741824, 0);
+            r := #posix_retry(#ast posix_read(fd_in, buf, _POSIX_COPY_BUF.cast(u64)));
+            if (r == 0) { return true; }
             if (r < 0) { return false; }
-            if (r == 0) { break; }
+            off: i64 = 0;
+            while (off < r) {
+                w := #posix_retry(#ast posix_write(fd_out, byte_offset(buf, off), (r - off).cast(u64)));
+                if (w < 0) { return false; }
+                off += w;
+            }
         }
+        return true;
+    }
+
+    // copies the data and the permission bits (without setuid/setgid/sticky), also onto an existing file.
+    // Copying a file onto itself (same path, hard link or symlink) fails and leaves it untouched.
+    fn os_copy_file(from: []u8, to: []u8): bool {
+        from_z := #temp_c_string(from);
+        fd_in := #posix_retry(#ast posix_open(from_z, POSIX_O_RDONLY | POSIX_O_CLOEXEC, 0)).cast(i32);
+        if (fd_in < 0) { return false; }
+        defer posix_close(fd_in);
+        st_in: _PosixStat = 0;
+        if (posix_fstat(fd_in, st_in.^) != 0) { return false; }
+        mode := st_in.st_mode & 511; // 0777
+
+        // no O_TRUNC before the same-file check, it would empty the source
+        to_z := #temp_c_string(to);
+        fd_out := #posix_retry(#ast posix_open(to_z, _POSIX_O_WRONLY_CREAT | POSIX_O_CLOEXEC, mode)).cast(i32);
+        if (fd_out < 0) { return false; }
+        defer posix_close(fd_out);
+        st_out: _PosixStat = 0;
+        if (posix_fstat(fd_out, st_out.^) != 0) { return false; }
+        if ((st_in.st_dev == st_out.st_dev) && (st_in.st_ino == st_out.st_ino)) { return false; }
+        if (#posix_retry(#ast posix_ftruncate(fd_out, 0)) != 0) { return false; }
+        posix_fchmod(fd_out, mode); // some filesystems (FAT, some network mounts) refuse it, the data is copied anyway
+
+        // copy_file_range fails across some filesystems, on special files and on old kernels: read/write goes on from where it stopped
+        copied: i64 = 0;
+        while (true) {
+            r := #posix_retry(#ast posix_copy_file_range(fd_in, nullptr(i64), fd_out, nullptr(i64), 1073741824, 0));
+            if (r < 0) { return _posix_copy_rw(fd_in, fd_out); }
+            if (r == 0) { break; }
+            copied += r;
+        }
+        if (copied == 0) { return _posix_copy_rw(fd_in, fd_out); } // procfs-like files report size 0 and copy_file_range copies nothing
         return true;
     }
 }
@@ -541,12 +809,26 @@ fn os_file_exists(path: []u8): bool {
     return !os_dir_exists(path);
 }
 
-// runs cmd through the platform shell (/bin/sh -c here, cmd.exe /C on win), waits, returns its exit code. -1 = could not start.
+// os_is_dir / os_is_file / os_is_symlink describe path itself, like the OsDirIter flags: a link is neither a dir nor a file.
+// os_dir_exists / os_file_exists above follow links.
+fn os_is_dir(path: []u8): bool {
+    return (_posix_path_mode(path) & POSIX_S_IFMT) == POSIX_S_IFDIR;
+}
+fn os_is_file(path: []u8): bool {
+    mode := _posix_path_mode(path);
+    kind := mode & POSIX_S_IFMT;
+    return (mode != 0) && (kind != POSIX_S_IFDIR) && (kind != POSIX_S_IFLNK);
+}
+fn os_is_symlink(path: []u8): bool {
+    return (_posix_path_mode(path) & POSIX_S_IFMT) == POSIX_S_IFLNK;
+}
 
+// runs cmd through the platform shell, waits, returns its exit code. -1 = could not start or its status could not be read; a real exit code -1 looks the same, os_exec_ex tells them apart.
 fn os_exec(cmd: []u8): i32 {
-    status := posix_system(#temp_c_string(cmd));
-    if (status < 0) { return -1; }                // fork or wait failed
-    return _posix_status_to_exit_code(status);
+    opts: ExecOptions = 0;
+    r := os_exec_ex(cmd, opts);
+    if (!r.exited) { return -1; }
+    return r.exit_code;
 }
 
 fn os_monotonic_ms(): i64 {
@@ -568,10 +850,11 @@ fn os_unix_time_ms(): i64 {
 }
 
 fn os_sleep_ms(ms: i64): void {
-    while (ms > 0) {
-        chunk := min(ms, 2147483647);
-        _posix_sleep_ms(chunk.cast(i32));
-        ms -= chunk;
+    deadline := #wrap_add(os_monotonic_ms(), max(ms, 0));
+    while (true) {
+        left := #wrap_sub(deadline, os_monotonic_ms());
+        if (left <= 0) { return; }
+        _posix_sleep_ms(min(left, 2147483647).cast(i32)); // a signal handler can end it early
     }
 }
 
@@ -604,21 +887,36 @@ struct ExecOptions {
     stderr_mode: OsExecStreamMode;
     stderr_file: OsFile;
     cwd: []u8;          // empty = inherit
-    timeout_ms: i64;    // 0 = wait forever; on expiry the child is killed and timed_out is set
+    timeout_ms: i64;    // 0 = wait forever; on expiry the child and every process it started are killed and timed_out is set. Posix: with a timeout the child runs in its own process group, so Ctrl+C in the terminal does not reach it and reading from the terminal stops it
     no_window: bool;    // windows only: CREATE_NO_WINDOW, no console flashes up from a GUI parent
+    inherit_handles: bool; // false = the child gets only its stdin/stdout/stderr; true = also every inheritable handle (windows) / every fd without close-on-exec (posix)
 };
 
 struct ExecResult {
     started: bool;      // false = the command could not be started, nothing else is meaningful
     ok: bool;
     timed_out: bool;
-    exit_code: i32;     // -1 when not started; 128+signal when killed by a signal on posix (also after a timeout kill)
+    exited: bool;       // exit_code is the child's own code; false when not started or its status could not be read
+    exit_code: i32;     // only meaningful when exited; 128+signal when killed by a signal on posix (also after a timeout kill)
     stdout: []u8;       // on arena, filled only when stdout_mode == .buffer
     stderr: []u8;       // on arena, filled only when stderr_mode == .buffer
 };
 
+const OsProcess := #type u64; // pid
+
+enum OsWaitStatus : u8 {
+    exited  := 0; // exit_code is the process's code
+    running := 1; // timeout_ms passed first
+    failed  := 2; // its status can not be read
+};
+
+struct OsWaitResult {
+    status: OsWaitStatus;
+    exit_code: i32; // only meaningful when status == .exited, 0 otherwise
+};
+
 // resolves the child's fd for one standard stream from its option.
-// child_out: what the child dup2's onto 0/1/2 (-1 = inherit); ours_out: our end of the pipe (-1 = none);
+// child_out: what the child dup2's onto 0/1/2 (-1 = inherit, or .merge which the child does itself); ours_out: our end of the pipe (-1 = none);
 // owned_out: child_out was created here and is closed by the parent after fork.
 fn _posix_exec_child_fd(mode: OsExecStreamMode, file: OsFile, child_reads: bool, child_out: *i32, ours_out: *i32, owned_out: *bool): bool {
     child_out.* = POSIX_NO_FD;
@@ -626,7 +924,7 @@ fn _posix_exec_child_fd(mode: OsExecStreamMode, file: OsFile, child_reads: bool,
     owned_out.* = false;
     if (mode == .buffer) {
         fds: [2]i32 = 0;
-        if (posix_pipe(fds.ptr) != 0) { return false; }
+        if (!_posix_pipe_cloexec(fds.ptr)) { return false; }
         if (child_reads) {
             child_out.* = fds[0];
             ours_out.* = fds[1];
@@ -639,7 +937,7 @@ fn _posix_exec_child_fd(mode: OsExecStreamMode, file: OsFile, child_reads: bool,
     }
     if (mode == .null) {
         devnull := "/dev/null";
-        fd := posix_open(devnull.ptr, POSIX_O_RDWR, 0);
+        fd := #posix_retry(#ast posix_open(devnull.ptr, POSIX_O_RDWR | POSIX_O_CLOEXEC, 0)).cast(i32);
         if (fd < 0) { return false; }
         child_out.* = fd;
         owned_out.* = true;
@@ -661,17 +959,57 @@ fn _posix_close_extra(fd: i32): void {
     if (fd > 2) { posix_close(fd); }
 }
 
-// reads what is ready on fd into a fresh scratch chunk pushed on sb. At EOF the fd is closed and set to -1.
+// reads what is ready on fd straight into a 64 KB scratch block, then shrinks it in place to what was read
+// (alloc must be the scratch arena: only its newest block resizes without a copy). At EOF the fd is closed and set to -1.
 fn _posix_exec_pump(fd: *i32, sb: *StringBuilder, alloc: *Alloc): void {
     fdv := fd.*;
-    chunk := mem_alloc(alloc, _OS_EXEC_READ_CHUNK, 1);
-    r := posix_read(fdv, chunk, _OS_EXEC_READ_CHUNK.cast(u64));
+    chunk := mem_alloc(alloc, _POSIX_EXEC_READ_BUF, 1);
+    r := #posix_retry(#ast posix_read(fdv, chunk, _POSIX_EXEC_READ_BUF.cast(u64)));
     if (r <= 0) {
+        mem_free(alloc, chunk);
         posix_close(fdv);
         fd.* = POSIX_NO_FD;
         return;
     }
-    push(sb, slice(chunk, r));
+    push(sb, slice(mem_realloc(alloc, chunk, r, 1), r));
+}
+
+// child side: a close-on-exec copy of fd above 2, so routing onto 0/1/2 can not overwrite an fd that is still needed. -1 stays -1.
+fn _posix_child_lift_fd(fd: i32): i32 {
+    if (fd < 0) { return POSIX_NO_FD; }
+    hi := posix_fcntl(fd, POSIX_F_DUPFD_CLOEXEC, 3);
+    if (hi < 0) { posix_exit_now(126); }
+    return hi;
+}
+
+// waits up to timeout_ms for the process to end: 0 = only check, -1 = no limit. exit_code is 128+signal when it was killed by a signal.
+// .exited reaps it, so a second call gives .failed; so does a process reaped elsewhere (for example SIGCHLD is ignored).
+fn os_wait_process_exit(proc: OsProcess, timeout_ms: i64): OsWaitResult {
+    res: OsWaitResult = 0;
+    pid := proc.cast(i32);
+    flags: i32 = 0;
+    if (timeout_ms >= 0) { flags = POSIX_WNOHANG; } // waitpid has no timeout: check, sleep, check again
+    deadline := #wrap_add(os_monotonic_ms(), max(timeout_ms, 0)); // wraps for huge timeouts, #wrap_sub below gets the time left back
+    st: i32 = 0;
+    while (true) {
+        r := #posix_retry(#ast posix_waitpid(pid, st.^, flags)).cast(i32);
+        if (r == pid) {
+            res.status = .exited;
+            res.exit_code = _posix_status_to_exit_code(st);
+            return res;
+        }
+        if (r < 0) {
+            res.status = .failed;
+            return res;
+        }
+        left := #wrap_sub(deadline, os_monotonic_ms());
+        if (left <= 0) {
+            res.status = .running;
+            return res;
+        }
+        _posix_sleep_ms(min(left, 10).cast(i32));
+    }
+    return res;
 }
 
 fn _posix_status_to_exit_code(status: i32): i32 {
@@ -681,12 +1019,17 @@ fn _posix_status_to_exit_code(status: i32): i32 {
 }
 
 // runs cmd through the platform shell (/bin/sh -c here, cmd.exe /C on win) with options
-// Captured output lives on arena.
-fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): ExecResult {
-    res: ExecResult = 0;
-    res.exit_code = -1;
+// Captured output lives on alloc.
+// with a timeout the child leads its own process group, so the kill also reaches every process it started
+fn _posix_exec_kill(pid: i32): void {
+    if (posix_kill(-pid, POSIX_SIGKILL) == 0) { return; }
+    posix_kill(pid, POSIX_SIGKILL);
+}
 
-    scratch := scratch_begin(arena);
+fn os_exec_ex(cmd: []u8, opts: ExecOptions, alloc: *Alloc = get_context_temp_arena_as_alloc()): ExecResult {
+    res: ExecResult = 0;
+
+    scratch := scratch_begin(alloc);
     defer scratch_end(scratch);
 
     cmd_z := arena_push_str_copy_c(scratch.arena, cmd).ptr;
@@ -699,28 +1042,28 @@ fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): Exec
 
     ok := _posix_exec_child_fd(opts.stdin_mode, opts.stdin_file, true, in_child.^, in_ours.^, in_owned.^);
     if (ok) { ok = _posix_exec_child_fd(opts.stdout_mode, opts.stdout_file, false, out_child.^, out_ours.^, out_owned.^); }
-    if (ok) {
-        if (opts.stderr_mode == .merge) {
-            err_child = out_child; // same fd, closed once through out_owned
-        } else {
-            ok = _posix_exec_child_fd(opts.stderr_mode, opts.stderr_file, false, err_child.^, err_ours.^, err_owned.^);
-        }
-    }
+    if (ok) { ok = _posix_exec_child_fd(opts.stderr_mode, opts.stderr_file, false, err_child.^, err_ours.^, err_owned.^); } // .merge: no fd, the child copies 1 onto 2
 
     pid: i32 = -1;
     if (ok) { pid = posix_fork(); }
 
     if (pid == 0) {
-        // child: route 0/1/2, drop every other fd we created, move to cwd, exec the shell
-        if (in_child >= 0)  { posix_dup2(in_child, 0); }
-        if (out_child >= 0) { posix_dup2(out_child, 1); }
-        if (err_child >= 0) { posix_dup2(err_child, 2); }
-        _posix_close_extra(in_child);
-        _posix_close_extra(out_child);
-        _posix_close_extra(err_child);
-        _posix_close_if(in_ours);
-        _posix_close_if(out_ours);
-        _posix_close_if(err_ours);
+        // child: route 0/1/2 (dup2 clears close-on-exec on them), drop the rest, move to cwd, exec the shell.
+        // Our pipe ends and the lifted copies are close-on-exec, exec drops them.
+        if (opts.timeout_ms > 0) { posix_setpgid(0, 0); }
+        in_hi := _posix_child_lift_fd(in_child);
+        out_hi := _posix_child_lift_fd(out_child);
+        err_hi := _posix_child_lift_fd(err_child);
+        if (in_hi >= 0)  { posix_dup2(in_hi, 0); }
+        if (out_hi >= 0) { posix_dup2(out_hi, 1); }
+        if (err_hi >= 0) { posix_dup2(err_hi, 2); }
+        if (opts.stderr_mode == .merge) { posix_dup2(1, 2); } // like 2>&1: whatever fd 1 is now, also when stdout is inherited
+        if (!opts.inherit_handles) {
+            _posix_close_extra(in_child);
+            _posix_close_extra(out_child);
+            _posix_close_extra(err_child);
+            _posix_child_close_from_3();
+        }
         if (cwd_z != 0) {
             if (posix_chdir(cwd_z) != 0) { posix_exit_now(126); }
         }
@@ -742,6 +1085,8 @@ fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): Exec
         return res;
     }
     res.started = true;
+    // also done here, so a kill right after fork cannot miss a child that has not called it yet
+    if (opts.timeout_ms > 0) { posix_setpgid(pid, pid); }
 
     // nothing to feed: the child sees EOF right away
     if ((in_ours >= 0) && (opts.stdin_data.len == 0)) {
@@ -762,19 +1107,19 @@ fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): Exec
     init(err_sb.^, scratch.alloc);
 
     deadline: i64 = 0;
-    if (opts.timeout_ms > 0) { deadline = os_monotonic_ms() + opts.timeout_ms; }
+    if (opts.timeout_ms > 0) { deadline = #wrap_add(os_monotonic_ms(), opts.timeout_ms); } // wraps for huge timeouts, #wrap_sub below gets the time left back
     in_off: i64 = 0;
 
     while ((in_ours >= 0) || (out_ours >= 0) || (err_ours >= 0)) {
         wait_ms: i32 = -1;
         if (deadline != 0) {
-            left := deadline - os_monotonic_ms();
+            left := #wrap_sub(deadline, os_monotonic_ms());
             if (left <= 0) {
-                posix_kill(pid, POSIX_SIGKILL);
+                _posix_exec_kill(pid);
                 res.timed_out = true;
                 break;
             }
-            wait_ms = left.cast(i32);
+            wait_ms = min(left, 2147483647).cast(i32); // a negative poll timeout would mean no limit
         }
 
         pfds: [3]PosixPollFd = 0;
@@ -797,8 +1142,8 @@ fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): Exec
                     in_ours = POSIX_NO_FD;
                     continue;
                 }
-                chunk := min(opts.stdin_data.len - in_off, _OS_EXEC_READ_CHUNK);
-                w := posix_write(in_ours, opts.stdin_data.ptr |> byte_offset(in_off), chunk.cast(u64));
+                chunk := min(opts.stdin_data.len - in_off, _POSIX_EXEC_WRITE_CHUNK);
+                w := #posix_retry(#ast posix_write(in_ours, opts.stdin_data.ptr |> byte_offset(in_off), chunk.cast(u64)));
                 if (w > 0) { in_off += w; }
                 if ((w <= 0) || (in_off >= opts.stdin_data.len)) {
                     posix_close(in_ours); // all fed (or write failed): EOF for the child
@@ -817,26 +1162,20 @@ fn os_exec_ex(cmd: []u8, opts: ExecOptions, arena: *Arena = #temp_arena()): Exec
     if (sigpipe_ignored) { posix_signal(POSIX_SIGPIPE, prev_sigpipe); }
 
     // the child may outlive its pipes (closed stdout early); wait for it with whatever time is left
-    st: i32 = 0;
-    if ((deadline != 0) && (!res.timed_out)) {
-        while (posix_waitpid(pid, st.^, POSIX_WNOHANG) == 0) {
-            if (os_monotonic_ms() >= deadline) {
-                posix_kill(pid, POSIX_SIGKILL);
-                res.timed_out = true;
-                posix_waitpid(pid, st.^, 0);
-                break;
-            }
-            _posix_sleep_ms(10);
-        }
-    } else {
-        posix_waitpid(pid, st.^, 0);
+    remaining: i64 = -1;
+    if ((deadline != 0) && (!res.timed_out)) { remaining = max(#wrap_sub(deadline, os_monotonic_ms()), 0); }
+    wr := os_wait_process_exit(pid.cast(u64), remaining);
+    if (wr.status == .running) {
+        _posix_exec_kill(pid);
+        res.timed_out = true;
+        wr = os_wait_process_exit(pid.cast(u64), -1);
     }
-    res.exit_code = _posix_status_to_exit_code(st);
+    res.exited = wr.status == .exited;
+    res.exit_code = wr.exit_code;
 
-    out_alloc := arena_as_allocator(arena);
-    if (opts.stdout_mode == .buffer) { res.stdout = finalize(out_sb.^, out_alloc, false); }
-    if (opts.stderr_mode == .buffer) { res.stderr = finalize(err_sb.^, out_alloc, false); }
-    res.ok = res.exit_code == 0 && res.started;
+    if (opts.stdout_mode == .buffer) { res.stdout = finalize(out_sb.^, alloc, false); }
+    if (opts.stderr_mode == .buffer) { res.stderr = finalize(err_sb.^, alloc, false); }
+    res.ok = res.started && res.exited && (res.exit_code == 0);
     return res;
 }
 
@@ -845,21 +1184,21 @@ fn _posix_sleep_ms(ms: i32): void {
     posix_poll(nullptr(PosixPollFd), 0, ms);
 }
 
-// runs cmd through the platform shell, waits, returns everything it wrote to stdout (on arena).
+// runs cmd through the platform shell, waits, returns everything it wrote to stdout (on alloc).
 // Empty when the command could not start (or printed nothing). stdin and stderr stay inherited; append "2>&1" to capture stderr too.
-fn os_exec_output(cmd: []u8, arena: *Arena = #temp_arena()): []u8 {
+fn os_exec_output(cmd: []u8, alloc: *Alloc = get_context_temp_arena_as_alloc()): []u8 {
     opts: ExecOptions = 0;
     opts.stdout_mode = .buffer;
-    return os_exec_ex(cmd, opts, arena).stdout;
+    return os_exec_ex(cmd, opts, alloc).stdout;
 }
 
 fn os_stdout_write(buf: []u8): void { os_stdout_write(buf.ptr, buf.len); }
+fn os_stderr_write(buf: []u8): void { os_stderr_write(buf.ptr, buf.len); }
 fn os_file_read(h: OsFile, buf: []u8): i64 { return os_file_read(h, buf.ptr, buf.len); }
 fn os_file_write(h: OsFile, buf: []u8): i64 { return os_file_write(h, buf.ptr, buf.len); }
 fn os_cwd(buf: []u8): i64 { return os_cwd(buf.ptr, buf.len); }
 fn os_temp_dir(buf: []u8): i64 { return os_temp_dir(buf.ptr, buf.len); }
-fn os_clipboard_set(text: []u8): void { os_clipboard_set(text.ptr, 0 .cast(u32), text.len.cast(u32)); }
-fn os_clipboard_get(buf: []u8): u32 { return os_clipboard_get(buf.ptr, buf.len.cast(u32)); }
+fn os_path_abs(buf: []u8, path: []u8): i64 { return os_path_abs(buf.ptr, buf.len, path); }
 
 fn os_get_env(name: []u8, alloc: *Alloc = get_context_temp_arena_as_alloc()): []u8 {
     name_c := #temp_c_string(name, alloc);

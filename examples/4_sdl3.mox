@@ -3,7 +3,7 @@
 import "std.mox";
 import "vendor/sdl3.mox";
 
-// mox ./tests/2_sdl3.mox
+// mox ./examples/4_sdl3.mox
 // sdl3 dlls will be copied to output directory
 
 fn #fail($fmt: []u8, values: $T) {

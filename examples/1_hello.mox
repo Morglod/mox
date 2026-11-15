@@ -1,4 +1,4 @@
-// run: ./mox ./1_hello.mox
+// run: ./mox ./examples/1_hello.mox
 
 import "std.mox";
 

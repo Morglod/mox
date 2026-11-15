@@ -17,8 +17,8 @@
 //   each emits quads through your MuAtlasQuadFn: dst rect on screen,
 //    src rect in the atlas (texels), color. MU_COMMAND_CLIP is a scissor rect.
 
-import "internal.mox";
-import "assert.mox";
+import "../internal.mox";
+import "../std/assert.mox";
 import "./microui.mox";
 
 const MU_ATLAS_WIDTH  : i64 = 128;
