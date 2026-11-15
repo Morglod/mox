@@ -1,0 +1,176 @@
+import "internal.mox";
+
+struct PRng {
+    s: [4]u64;
+};
+
+fn prng_seed(seed: u64): PRng {
+    rng : PRng = 0;
+    sm : u64 = seed;
+    #for (i : it_range(4u32)) {
+        // splitmix64 step
+        sm = #wrap_add(sm, 11400714819323198485u64);
+        z : u64 = sm;
+        z = #wrap_mul(z ^ #shr(z, 30), 13787848793156543929u64);
+        z = #wrap_mul(z ^ #shr(z, 27), 10723151780598845931u64);
+        rng.s[i] = z ^ #shr(z, 31);
+    }
+    return rng;
+}
+
+_prng_default: PRng = 0; #thread_local
+
+fn prng_reset_default(seed: u64) {
+    _prng_default = prng_seed(seed);
+}
+
+fn prng_default(): *PRng {
+    if (_prng_default.s[0] == 0 && _prng_default.s[1] == 0 && _prng_default.s[2] == 0 && _prng_default.s[3] == 0) {
+        prng_reset_default(0);
+    }
+    return _prng_default.^;
+}
+
+fn next_u64(rng: *PRng): u64 {
+    x : u64 = #wrap_mul(rng.s[1], 5u64);
+    x = #shl(x, 7) | #shr(x, 57);
+    result : u64 = #wrap_mul(x, 9u64);
+
+    t : u64 = #shl(rng.s[1], 17);
+    rng.s[2] = rng.s[2] ^ rng.s[0];
+    rng.s[3] = rng.s[3] ^ rng.s[1];
+    rng.s[1] = rng.s[1] ^ rng.s[2];
+    rng.s[0] = rng.s[0] ^ rng.s[3];
+    rng.s[2] = rng.s[2] ^ t;
+    rng.s[3] = #shl(rng.s[3], 45) | #shr(rng.s[3], 19);
+    return result;
+}
+
+// Uniform in [0, m), m > 0, no bias
+fn next_below(rng: *PRng, m: u64): u64 {
+    mask : u128 = 18446744073709551615u128;
+    p : u128 = next_u64(rng).cast(u128) * m.cast(u128);
+    low : u64 = (p & mask).cast(u64);
+
+    if (low < m) {
+        threshold : u64 = #wrap_sub(0u64, m) % m;
+        while (low < threshold) {
+            p = next_u64(rng).cast(u128) * m.cast(u128);
+            low = (p & mask).cast(u64);
+        }
+    }
+
+    return #shr(p, 64).cast(u64);
+}
+
+// Uniform in [0, span], inclusive
+fn next_upto_u64(rng: *PRng, span: u64): u64 {
+    if (span == 18446744073709551615u64) { return next_u64(rng); }
+    return next_below(rng, span + 1);
+}
+
+fn next_u128(rng: *PRng): u128 {
+    hi : u128 = next_u64(rng).cast(u128);
+    lo : u128 = next_u64(rng).cast(u128);
+    return #shl(hi, 64) | lo;
+}
+
+// Uniform in [0, span], inclusive
+fn next_upto_u128(rng: *PRng, span: u128): u128 {
+    if (span <= 18446744073709551615u128) {
+        return next_upto_u64(rng, span.cast(u64)).cast(u128);
+    }
+    if (span == 340282366920938463463374607431768211455u128) { return next_u128(rng); }
+
+    m : u128 = span + 1;
+    threshold : u128 = #wrap_sub(0u128, m) % m;
+    r : u128 = 0;
+    while (true) {
+        r = next_u128(rng);
+        if (r >= threshold) { break; }
+    }
+    return r % m;
+}
+
+// [0, 1)
+fn random_f64(rng: *PRng = prng_default()): f64 {
+    return #shr(next_u64(rng), 11).cast(f64) / 9007199254740992.0;
+}
+
+// [0, 1)
+fn random_f32(rng: *PRng = prng_default()): f32 {
+    return #shr(next_u64(rng), 40).cast(f32) / 16777216.0f;
+}
+
+// all below are inclusive
+
+fn random_in_range(min: f64, max: f64, rng: *PRng = prng_default()): f64 {
+    return random_f64(rng) * (max - min) + min;
+}
+
+fn random_in_range(min: f32, max: f32, rng: *PRng = prng_default()): f32 {
+    return random_f32(rng) * (max - min) + min;
+}
+
+fn random_in_range(min: u8, max: u8, rng: *PRng = prng_default()): u8 {
+    if (max <= min) { return min; }
+    return min + next_upto_u64(rng, (max - min).cast(u64)).cast(u8);
+}
+
+fn random_in_range(min: u16, max: u16, rng: *PRng = prng_default()): u16 {
+    if (max <= min) { return min; }
+    return min + next_upto_u64(rng, (max - min).cast(u64)).cast(u16);
+}
+
+fn random_in_range(min: u32, max: u32, rng: *PRng = prng_default()): u32 {
+    if (max <= min) { return min; }
+    return min + next_upto_u64(rng, (max - min).cast(u64)).cast(u32);
+}
+
+fn random_in_range(min: u64, max: u64, rng: *PRng = prng_default()): u64 {
+    if (max <= min) { return min; }
+    return min + next_upto_u64(rng, max - min);
+}
+
+fn random_in_range(min: u128, max: u128, rng: *PRng = prng_default()): u128 {
+    if (max <= min) { return min; }
+    return min + next_upto_u128(rng, max - min);
+}
+
+fn random_in_range(min: i8, max: i8, rng: *PRng = prng_default()): i8 {
+    if (max <= min) { return min; }
+    span : u64 = (max.cast(i64) - min.cast(i64)).cast(u64);
+    return (min.cast(i64) + next_upto_u64(rng, span).cast(i64)).cast(i8);
+}
+
+fn random_in_range(min: i16, max: i16, rng: *PRng = prng_default()): i16 {
+    if (max <= min) { return min; }
+    span : u64 = (max.cast(i64) - min.cast(i64)).cast(u64);
+    return (min.cast(i64) + next_upto_u64(rng, span).cast(i64)).cast(i16);
+}
+
+fn random_in_range(min: i32, max: i32, rng: *PRng = prng_default()): i32 {
+    if (max <= min) { return min; }
+    span : u64 = (max.cast(i64) - min.cast(i64)).cast(u64);
+    return (min.cast(i64) + next_upto_u64(rng, span).cast(i64)).cast(i32);
+}
+
+fn random_in_range(min: i64, max: i64, rng: *PRng = prng_default()): i64 {
+    if (max <= min) { return min; }
+    span : u64 = #wrap_sub(max.cast(u64), min.cast(u64));
+    return #wrap_add(min.cast(u64), next_upto_u64(rng, span)).cast(i64);
+}
+
+fn random_in_range(min: i128, max: i128, rng: *PRng = prng_default()): i128 {
+    if (max <= min) { return min; }
+    span : u128 = #wrap_sub(max.cast(u128), min.cast(u128));
+    return #wrap_add(min.cast(u128), next_upto_u128(rng, span)).cast(i128);
+}
+
+fn random_in_range(min: [$N]$T, max: [$N]$T, rng: *PRng = prng_default()): [$N]$T {
+    out: [$N]$T = 0;
+    #for (i : it_range($N)) {
+        out[i] = random_in_range(min[i], max[i], rng);
+    }
+    return out;
+}
