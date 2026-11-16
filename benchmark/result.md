@@ -5,11 +5,11 @@ Intel Ultra 9 185H, laptop
 
 |                  | emit exe  | vs mox | emit obj  | vs mox |
 |------------------|-----------|--------|-----------|--------|
-| mox 0.1.0 jit    | 0.499 sec |   1.0x | 0.436 sec |   1.0x |
-| mox 0.1.0 llvm   | 8.8 sec   |  17.6x | 8.57 sec  |  19.7x |
-| rustc 1.96.1     | 33.9 sec  |  67.9x | 36.9 sec  |  84.6x |
-| clang 19.1.3     | 13.3 sec  |  26.7x | 13.1 sec  |  30.0x |
-| odin dev-2026-08 | 13.8 sec  |  27.7x | 19.8 sec  |  45.4x |
+| mox 0.3.0 jit    | 0.5 sec   |   1.0x | 0.4 sec   |   1.0x |
+| mox 0.3.0 llvm   | 9 sec     |  18.0x | 8.5 sec   |  21.3x |
+| rustc 1.100.0    | 33 sec    |  66.0x | 33.1 sec  |  82.8x |
+| clang 19.1.3     | 13.3 sec  |  26.6x | 13.1 sec  |  32.8x |
+| odin dev-2026-11 | 7.69 sec  |  15.4x | 7.3 sec   |  18.3x |
 
 ```bash
 node ./generate.js
@@ -35,11 +35,11 @@ time odin build ./200k.odin -file -opt:0 -build-mode:obj
 
 |                  | emit exe  | vs mox |
 |------------------|-----------|--------|
-| mox 0.1.6 jit    | 1.24 sec  |   1.0x |
-| mox 0.1.6 llvm   | 15.48 sec |  12.5x |
-| rustc 1.96.1     | 43.56 sec |  35.1x |
-| clang++ 19.1.3   | 39.64 sec |  32.0x |
-| odin dev-2026-08 | 59.09 sec |  47.7x |
+| mox 0.3.0 jit    | 1.27 sec  |   1.0x |
+| mox 0.3.0 llvm   | 14.5 sec  |  11.4x |
+| rustc 1.100.0    | 38.3 sec  |  30.2x |
+| clang++ 19.1.3   | 36.2 sec  |  28.5x |
+| odin dev-2026-11 | 9.4 sec   |   7.4x |
 
 ```bash
 node ./generate_generics.js
