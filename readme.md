@@ -29,7 +29,7 @@ To know language better, you can read [tutorials](https://mox-lang.dev/tutorials
 
 Zip archive already contains both versions of compiler and base modules.  
 
-* [0.3.0 (x86_64 Windows/Linux)](https://github.com/Morglod/mox/releases/download/0.3.0/mox_030.zip)
+* [0.3.1 (x86_64 Windows/Linux)](https://github.com/Morglod/mox/releases/download/0.3.1/mox_031.zip)
 
 *For highlighting you can use C or Go or Rust for now*
 
