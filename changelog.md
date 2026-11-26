@@ -1,6 +1,45 @@
+## 0.3.1
+
+### Compiler
+
+Fixed error with "misaligned pointer read" on circular declarations which appeared in 0.3.0
+
+Now works without this wrong error:
+
+```rust
+struct Node { next: *Holder; v: u64; };
+struct Holder { tag: u8; n: Node; tail: u8; };
+```
+
+#### LLVM backend
+
+`llvm_verify` is now off by default since it is used only to debug llvm backend
+
+LLVM compilation speed improved:
+  - allocations now go through mimalloc
+  - value names are not kept unless the output is text IR
+  - default function attributes are built once and shared
+  - emitting at `llvm_opt_level=0` is about 40% faster on a large module now
+
+`llvm_splitter` behaviour optimized which now gives 3x compilation speed
+
+`llvm_splitter` worker threads bug fixed. Now it can be used on any optimization level (off by default for O1-O3, because it could potentially make code less optimized)
+
+### Modules
+
+std/random.mox added for pseudo random values:
+
+```rust
+x := random_in_range(0.0f, 10.0f);
+y := random_in_range(COLOR_RED, COLOR_GREEN);
+
+prng := prng_seed(123);
+z := random_in_range(0u32, 10u32, prng.^);
+```
+
 ## 0.3.0
 
-## Compiler
+### Compiler
 
 `#thread_local` global variables now supported:
 
@@ -59,7 +98,7 @@ A string literal passed to a `[]$T` parameter at comptime now works (`#run start
 
 A panic or failed assert in comptime code is now a compile error at the panic's line (with its message and a note at the `#run` that ran the code), followed by "Compilation failed". Before, the panic's exit ended the compiler process with exit code 3 and no compiler diagnostic
 
-## Modules
+### Modules
 
 Core/std modules moved to modules/std
 
@@ -155,19 +194,19 @@ build_copy_to_output overwrites the file in the output dir
 
 A lot of things were fixed, tested and stabilized, so minor version is up.
 
-## Compiler
+### Compiler
 
 non nullable pointers now could also be initialized and compared with `0`.
 
 bool type also could be initialized with `0` now (same as false).
 
-## Modules
+### Modules
 
 `ty_offset` renamed to `type_offset`
 
 ## 0.1.10
 
-## Compiler
+### Compiler
 
 `fn __compiler_alignof_type(TYPE): u32`
 
@@ -195,7 +234,7 @@ Fix runtime continue/break inside #emit, inside comptime for loops, which should
 
 Fix enum auto increment and type inferring for variants without specified value.
 
-## Modules
+### Modules
 
 `fn alignof_type(TYPE): u32`
 
